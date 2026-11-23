@@ -1,4 +1,5 @@
 <p align="center"><img src="assets/banner.svg" alt="JobAgent: search for jobs, tailor your resume and apply from a Telegram chat" width="100%"></p>
+
 # JobAgent
 
 **Your own job-application assistant, controlled from Telegram.** It finds jobs that fit you, tailors your resume for each one, fills in the application, and shows you everything before anything is sent.
@@ -33,9 +34,11 @@ Prefer to be guided? Open a terminal in the folder, run `claude`, and say **"set
 
 ## Start it (next time)
 
-- **Windows:** `scripts\start.ps1` · **Mac / Linux:** `scripts/start.sh`
+- **Windows:** `scripts\start.ps1`
+- **Mac / Linux:** `scripts/start.sh`
 
-Keep that window open (minimizing is fine). Closing it turns JobAgent off. Add `-Practice` (Windows) or `--practice` (Mac/Linux) to lock practice mode on.
+Keep that window open (minimizing is fine). Closing it turns JobAgent off. 
+Add `-Practice` (Windows) or `--practice` (Mac/Linux) to lock practice mode on.
 
 ## Using it
 
@@ -50,9 +53,11 @@ Keep that window open (minimizing is fine). Closing it turns JobAgent off. Add `
 | Track how it's going | **📋 Jobs**: mark Interview, Offer, Rejected or No reply, or export everything to a spreadsheet. |
 | Pause or stop | **⏸ Pause** on Home finishes the current step, then waits. **✋ Stop** on a card stops that job. `/stop` stops everything. |
 
-**Practice mode** (on by default): JobAgent does every step except pressing Submit, so you can see exactly what it would send. Turn it off in **Settings → Practice mode** when you're ready; you still approve each application.
+**Practice mode** (on by default): JobAgent does every step except pressing Submit, so you can see exactly what it would send.  
+Turn it off in **Settings → Practice mode** when you're ready; you still approve each application.
 
-**Auto-apply** (off by default, Settings → How I apply): only very strong matches are sent on their own, after a countdown with a Cancel button. Unusual forms and private questions always come to you.
+**Auto-apply** (off by default, Settings → How I apply): only very strong matches are sent on their own, after a countdown with a Cancel button.  
+Unusual forms and private questions always come to you.
 
 ### What works today
 
