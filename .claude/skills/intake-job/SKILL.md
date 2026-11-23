@@ -15,6 +15,7 @@ Every status change you make with `job set-status ... --detail "..."` is shown t
 2. `tg_progress(job_id, stage: "read", url: "<url>")`.
 3. Run the `job-analyst` subagent with the `job_id`. It fetches, inspects and writes `data/jobs/<job_id>/analysis.json`.
    - It reports `closed`: the status is already CLOSED. Stop.
+   - It reports `needs_login`: the status is already FAILED with a plain-words detail (LinkedIn or Indeed wants a login). `tg_send` one short line with the `L:show` button saying they can log in there, then tap Try again. Stop.
    - It reports `fetch_failed` or `empty`: `jobagent job set-status <job_id> FAILED --detail "I couldn't download the posting. The site may be down; try again later."` and stop.
 4. `Read data/jobs/<job_id>/analysis.json`. `jobagent job set-status <job_id> SCORED`. `tg_progress(job_id, stage: "score", title: "<company> · <role>", detail: "<score>/100")`.
 5. **Skip** when any of these hold (`settings_get` for the settings): `match.dealbreakers` is not empty; `match.score` is below `apply.min_match_score`; the company is in `filters.company_blocklist` (case-insensitive). Then `jobagent job set-status <job_id> SKIPPED --detail "<the main reason, plain words>"` and stop. Examples: "Match 48/100: they want 8+ years of Java", "Contract role; you asked for full time".
@@ -27,7 +28,7 @@ Every status change you make with `job set-status ... --detail "..."` is shown t
 `jobagent job get <job_id>` first. If the status is `SKIPPED` or `CLOSED` (and the mode is not `apply_anyway`), or `APPROVED` or later, stop.
 
 - **`continue`**: the user answered the questions. The app already wrote `data/jobs/<job_id>/answers.json` (fid → value) and saved reusable answers to the profile. Answers to questions without a fid are in the task data (`answers`). If the status is `NEEDS_ANSWERS`, set it to `READY`. Then `tailor-documents` (skip it if `resume.pdf` exists and is newer than `analysis.json`), then `prepare-review`.
-- **`retry`**: pick up from the first missing piece. No `analysis.json`: step 3 above (set the status to `NEW` first if it is `FAILED`). Status `NEEDS_ANSWERS`: re-ask only the questions that have no answer in `answers.json` (step 7, batch_id `<job_id>-r<n>`). Status `NEEDS_HUMAN` or `FAILED` with an analysis: set `READY`, then `tailor-documents` if `resume.pdf` is missing, then `prepare-review`. Otherwise `prepare-review`.
+- **`retry`**: pick up from the first missing piece. No `analysis.json`: step 3 above (set the status to `NEW` first if it is `FAILED`, for example after a `needs_login`). Status `NEEDS_ANSWERS`: re-ask only the questions that have no answer in `answers.json` (step 7, batch_id `<job_id>-r<n>`). Status `NEEDS_HUMAN` or `FAILED` with an analysis: set `READY`, then `tailor-documents` if `resume.pdf` is missing, then `prepare-review`. Otherwise `prepare-review`.
 - **`apply_anyway`**: the user overrode the filters (the status is already `SCORED`). Do steps 6 to 8 above, ignoring step 5.
 
 ## Never

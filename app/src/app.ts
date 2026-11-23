@@ -537,6 +537,8 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
     return P.profilePage(loadSettings(), contact, list, resume)
   }
   const boards = async (): Promise<string[]> => { const r = await run(['boards', 'list']); return r.ok ? (r.boards?.greenhouse ?? []) : [] }
+  let loginOpen = false // one login window at a time: they share JobAgent's browser profile
+  const loginsNow = async (note?: string) => { const r = loginOpen ? null : await run(['login', 'status']); return ST.loginsPage(r?.ok ? r.sites : null, note) }
 
   // ---- Callback router: returns the page to show in place, a short toast, or nothing ----
   async function route(ctx: Context, data: string, toast: { text?: string }): Promise<Page | string | undefined> {
@@ -660,6 +662,29 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
     if (data === 'C:list') return ST.companiesPage(await boards())
     if (data === 'C:a') { pending = { kind: 'company', chat, msg, at: Date.now() }; return ST.addCompanyPrompt() }
     if ((m = /^C:r:([a-z0-9_-]{1,60})$/.exec(data))) { await run(['boards', 'remove', 'greenhouse', m[1]]); toast.text = `Removed ${m[1]}`; return ST.companiesPage(await boards()) }
+
+    // Job site logins: windows open on the computer and can take minutes, so they run in the background and edit this page when done.
+    if (data === 'L:show') return loginsNow()
+    if ((m = /^L:(in|pw|rm):(linkedin|indeed)$/.exec(data))) {
+      const [op, site] = [m[1], m[2]], name = ST.JOB_SITES[site]
+      if (op === 'rm') { await run(['credentials', 'delete', site]); toast.text = `Forgot your ${name} password`; return loginsNow() }
+      if (loginOpen) return 'A login window is already open on your computer. Finish or close it first.'
+      loginOpen = true
+      void (async () => {
+        let note = ''
+        if (op === 'pw') {
+          const r = await run(['credentials', 'set', site])
+          if (!r.ok) note = r.code === 'cancelled' ? 'Nothing was saved.' : `⚠️ I couldn't save it (${esc(String(r.error))}).`
+        }
+        if (!note) {
+          const r = await run(['login', site])
+          note = r.ok ? `✅ Logged in to ${name}.` : r.code === 'busy' ? '⚠️ Another JobAgent browser window is open. Close it and try again.' : `⚪ The ${name} login wasn't finished. Tap "Log in to ${name}" to try again.`
+        }
+        loginOpen = false
+        await editAt(chat, msg, await loginsNow(note))
+      })()
+      return ST.loginWaitPage(site, op === 'pw')
+    }
 
     // Profile & saved answers
     if (data === 'p:edit') return P.contactEditPage(await contactFields(), OB.PROFILE_FIELDS)
@@ -862,7 +887,7 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
     const data = ctx.callbackQuery.data
     if (!ctx.callbackQuery.message) return void ctx.answerCallbackQuery().catch(() => {})
     log(`tap ${data.split(':').slice(0, 2).join(':')}`)
-    const slow = /^(m:prof|m:settings|a:|p:|C:|J:csv|fix:(ok|no)|j:(?!v)|r:(ok|sk|nv|ss)|o:(ok|resume|go:profile|f:|cancel)|f:\w+:c$)/.test(data)
+    const slow = /^(m:prof|m:settings|a:|p:|C:|L:|J:csv|fix:(ok|no)|j:(?!v)|r:(ok|sk|nv|ss)|o:(ok|resume|go:profile|f:|cancel)|f:\w+:c$)/.test(data)
     if (slow) void ctx.answerCallbackQuery().catch(() => {}) // stop the spinner now; the page edit follows
     const toast: { text?: string } = {}
     let res: Page | string | undefined

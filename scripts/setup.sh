@@ -9,6 +9,15 @@ ok() { printf '  \033[32mOK\033[0m  %s\n' "$1"; }
 warn() { printf '  \033[33m!\033[0m   %s\n' "$1"; }
 fail() { printf '  \033[31mX\033[0m   %s\n\nFix that, then run this setup again.\n' "$1"; exit 1; }
 yes_no() { read -r -p "  $1 [Y/n] " a; [ -z "$a" ] || [[ "$a" =~ ^[Yy] ]]; }
+mac() { [ "$(uname)" = Darwin ]; }
+# Opens a Telegram chat: in the Telegram app on macOS when it is installed, else in the browser (not for pairing links).
+open_tg() {
+  if mac && open "tg://resolve?domain=$1${2:+&start=$2}" 2>/dev/null; then return 0; fi
+  [ -n "${2:-}" ] && return 1
+  if mac; then open "https://t.me/$1"; elif command -v xdg-open >/dev/null; then xdg-open "https://t.me/$1" >/dev/null 2>&1; fi || true
+}
+clip() { pbpaste 2>/dev/null || wl-paste 2>/dev/null || xclip -o -selection clipboard 2>/dev/null || true; }
+find_token() { grep -oE '[0-9]{5,}:[A-Za-z0-9_-]{30,}' | head -1 || true; }
 json() { uv run --quiet --no-project python -c "import json,sys; d=json.load(sys.stdin); print(eval(sys.argv[1]))" "$1"; }
 
 printf '\n  JobAgent setup\n  Finds jobs, tailors your resume and prepares applications. Nothing is sent without you.\n'
@@ -50,13 +59,17 @@ if [ -f data/.env ]; then
   token="$(sed -n 's/^TELEGRAM_BOT_TOKEN=//p' data/.env | tr -d '[:space:]')"
   if bot="$(getme "$token")"; then ok "Bot @$bot"; else warn 'The saved bot token no longer works. Let'"'"'s set a new one.'; rm -f data/.env; bot=''; fi
 fi
+opened=''
 while [ -z "$bot" ]; do
+  [ -n "$opened" ] || { opened=1; open_tg BotFather; }
   printf '\n  JobAgent talks to you through your own private Telegram bot. To make one (1 minute):\n'
-  printf '    1. In Telegram, open a chat with @BotFather  (https://t.me/BotFather)\n'
+  printf '    1. In Telegram, open a chat with @BotFather  (https://t.me/BotFather, I just opened it) and tap START\n'
   printf '    2. Send  /newbot , pick any name, then a username ending in "bot"\n'
-  printf '    3. BotFather replies with a token like  123456789:AAH...  Copy it.\n\n'
-  read -r -p '  Paste the token here: ' token; token="$(echo "$token" | tr -d '[:space:]')"
-  [ -n "$token" ] || continue
+  printf '    3. BotFather replies with a token like  123456789:AAH...  Click it to copy it.\n\n'
+  read -r -p '  Paste the token here, or just press Enter once you copied it: ' typed
+  [ -n "$typed" ] || typed="$(clip)"
+  token="$(printf '%s' "$typed" | find_token)"
+  [ -n "$token" ] || { warn "I could not find a bot token there. It looks like 123456789:AAH... (copy it from BotFather's message)."; continue; }
   if bot="$(getme "$token")"; then printf 'TELEGRAM_BOT_TOKEN=%s\n' "$token" > data/.env; chmod 600 data/.env; ok "Bot @$bot saved"
   else bot=''; warn 'Telegram did not accept that token. Copy the whole line BotFather sent, and try again.'; fi
 done
@@ -73,6 +86,7 @@ if [ "$(echo "$pair" | json 'd["ok"]')" = "True" ]; then
   echo "$pair" | json 'd["qr"]'
   echo "  $(echo "$pair" | json 'd["link"]')"
   echo "  (works once, for 15 minutes)"
+  open_tg "$bot" "$(echo "$pair" | json 'd["pairing_code"]')" && echo '  I also opened it in Telegram on this computer: tap START there.' || true
 elif echo "$pair" | grep -q already_paired; then ok 'Already connected to your Telegram'
 else fail "Could not make a pairing link: $pair"; fi
 

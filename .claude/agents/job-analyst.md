@@ -14,7 +14,7 @@ You analyse one job posting for the user. Input: a `job_id`. Run commands as `uv
 
 ## Steps
 
-1. `jobagent fetch <id>`. `ok:false` with `code: closed`, `fetch_failed` or `empty`: stop and report the code.
+1. `jobagent fetch <id>`. `ok:false` with `code: closed`, `needs_login`, `fetch_failed` or `empty`: stop and report the code.
 2. `jobagent inspect <id>`. `code: no_adapter` means the form is not a Greenhouse form (not supported yet): still write `analysis.json` (no `field_classification`, `"supported": false`) so the job can be scored and skipped properly.
 3. `Read data/jobs/<id>/posting.md`, `fields.json`, `data/profile.md`, `data/settings.json`, and run `jobagent profile answer list --include-job <id>`.
 4. Write `data/jobs/<id>/analysis.json`:

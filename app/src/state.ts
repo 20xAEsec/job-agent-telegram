@@ -39,6 +39,10 @@ export function writeJson(file: string, obj: unknown): void {
   renameSync(tmp, file)
 }
 
+// Where auto-search looks: the watched Greenhouse boards, and job sites searched through python-jobspy.
+export const SOURCES = { companies: 'Companies I watch', linkedin: 'LinkedIn', indeed: 'Indeed', glassdoor: 'Glassdoor', zip_recruiter: 'ZipRecruiter' }
+type Source = keyof typeof SOURCES
+
 export const DEFAULT_SETTINGS = {
   version: 2,
   paired_user_id: null as number | null,
@@ -50,13 +54,13 @@ export const DEFAULT_SETTINGS = {
     titles: [] as string[], title_match: 'close', experience_level: 'mid', years_experience: null as number | null,
     locations: [] as string[], remote: 'remote_or_hybrid',
     min_salary: null as number | null, currency: 'USD', allow_unknown_salary: true,
-    job_types: ['full_time'], exclude_keywords: [] as string[], posted_within_days: 14, company_blocklist: [] as string[],
+    job_types: ['full_time'], exclude_keywords: [] as string[], posted_within_hours: 336, company_blocklist: [] as string[],
   },
   apply: {
     mode: 'review', min_match_score: 60, auto_min_score: 85, auto_grace_seconds: 120,
     company_cooldown_hours: 3, cover_letter: 'if_field', draft_free_text: true, tailoring: 'moderate',
   },
-  discovery: { enabled: false, interval_hours: 6, web_search: true },
+  discovery: { enabled: false, interval_hours: 6, web_search: true, sources: ['companies', 'linkedin', 'indeed'] as Source[] }, // sources: keep in step with DEFAULT_SOURCES (agent/jobagent/discover/ats_api.py)
   quiet_hours: { enabled: true, from: '23:00', to: '07:00' },
 }
 export type Settings = typeof DEFAULT_SETTINGS
@@ -73,6 +77,8 @@ export function deepMerge<T>(base: T, patch: unknown): T {
 // Always re-read from disk: `jobagent pair --reset` edits this file while we run.
 export function loadSettings(): Settings {
   const raw = readJson<Record<string, unknown>>(SETTINGS_FILE, {})
+  const f = raw.filters as Record<string, unknown> | undefined
+  if (isObj(f) && typeof f.posted_within_days === 'number') { f.posted_within_hours ??= f.posted_within_days * 24; delete f.posted_within_days } // older files counted days
   return deepMerge(DEFAULT_SETTINGS, raw)
 }
 
@@ -97,7 +103,7 @@ export const SettingsSchema = z.object({
     allow_unknown_salary: z.boolean(),
     job_types: z.array(z.enum(['full_time', 'part_time', 'contract', 'internship'])).min(1).max(4),
     exclude_keywords: z.array(str()).max(50),
-    posted_within_days: z.number().int().min(1).max(365),
+    posted_within_hours: z.number().int().min(1).max(8760),
     company_blocklist: z.array(str()).max(200),
   }).strict(),
   apply: z.object({
@@ -110,7 +116,10 @@ export const SettingsSchema = z.object({
     draft_free_text: z.boolean(),
     tailoring: z.enum(['light', 'moderate']),
   }).strict(),
-  discovery: z.object({ enabled: z.boolean(), interval_hours: z.number().int().min(1).max(168), web_search: z.boolean() }).strict(),
+  discovery: z.object({
+    enabled: z.boolean(), interval_hours: z.number().int().min(1).max(168), web_search: z.boolean(),
+    sources: z.array(z.enum(Object.keys(SOURCES) as [Source, ...Source[]])).min(1).max(5),
+  }).strict(),
   quiet_hours: z.object({ enabled: z.boolean(), from: hhmm, to: hhmm }).strict(),
 }).strict()
 

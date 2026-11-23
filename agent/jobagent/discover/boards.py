@@ -57,6 +57,7 @@ def seen(d: Path) -> dict:
     return _load(d / "seen.json", {})
 
 
-def mark_seen(d: Path, ids: list[str]) -> None:
-    if ids:
-        atomic_write_json(d / "seen.json", {**seen(d), **{i: store.now() for i in ids}})
+def mark_seen(d: Path, ids: list[str], aliases: dict | None = None) -> None:
+    """`aliases` maps a `dup-` company+title key to the job id that owns it, so a job listed on several sites is offered once."""
+    if ids or aliases:
+        atomic_write_json(d / "seen.json", {**seen(d), **{i: store.now() for i in ids}, **(aliases or {})})

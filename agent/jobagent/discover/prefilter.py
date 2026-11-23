@@ -76,6 +76,11 @@ def location_ok(c: dict, f: dict) -> bool:
     return True
 
 
+def window_hours(f: dict) -> int:
+    """settings.filters.posted_within_hours; settings files written before it existed still say posted_within_days."""
+    return int(f.get("posted_within_hours") or f.get("posted_within_days", 14) * 24)
+
+
 def drop_reason(c: dict, f: dict, now: datetime | None = None) -> str | None:
     if not title_matches(c.get("title", ""), f.get("titles", []), f.get("title_match", "close")):
         return "title"
@@ -92,7 +97,7 @@ def drop_reason(c: dict, f: dict, now: datetime | None = None) -> str | None:
             when = datetime.fromisoformat(str(c["posted"]).replace("Z", "+00:00"))
             if when.tzinfo is None:
                 when = when.replace(tzinfo=timezone.utc)
-            if (now or datetime.now(timezone.utc)) - when > timedelta(days=f.get("posted_within_days", 14)):
+            if (now or datetime.now(timezone.utc)) - when > timedelta(hours=window_hours(f)):
                 return "too_old"
         except ValueError:
             pass  # unparseable date: let it through

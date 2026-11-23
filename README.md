@@ -1,4 +1,5 @@
 <p align="center"><img src="assets/banner.svg" alt="JobAgent: search for jobs, tailor your resume and apply from a Telegram chat" width="100%"></p>
+
 # JobAgent
 
 **Your own job-application assistant, controlled from Telegram.** It finds jobs that fit you, tailors your resume for each one, fills in the application, and shows you everything before anything is sent.
@@ -29,20 +30,22 @@ Everything else (Claude Code, uv, Bun and the form-filling browser) the setup in
 4. **Scan the QR code** it shows with your phone camera (or open the link), and tap **Start** in Telegram. That connects the bot to you, and only you.
 5. **Answer the setup questions in Telegram.** Send your resume, pick the roles you want, location and pay, and a few eligibility questions. About 3 minutes; every answer can be changed later.
 
-Prefer to be guided? Open a terminal in the folder, run `claude`, and say **"set this up"**.
+Prefer to be guided? Open a terminal in the folder, run `claude`, and say **"set this up"**. Claude installs what is missing (including Telegram Desktop), opens BotFather and the setup window for you, and tells you when your phone is connected.
 
 ## Start it (next time)
 
-- **Windows:** `scripts\start.ps1` · **Mac / Linux:** `scripts/start.sh`
+- **Windows:** `scripts\start.ps1`
+- **Mac / Linux:** `scripts/start.sh`
 
-Keep that window open (minimizing is fine). Closing it turns JobAgent off. Add `-Practice` (Windows) or `--practice` (Mac/Linux) to lock practice mode on.
+Keep that window open (minimizing is fine). Closing it turns JobAgent off. 
+Add `-Practice` (Windows) or `--practice` (Mac/Linux) to lock practice mode on.
 
 ## Using it
 
 | You want to… | Do this |
 |---|---|
 | Apply to a job you found | Send the link in the chat. A live card shows each step: reading, scoring, tailoring, filling in, review. |
-| Let it find jobs | Home → **🔭 Turn on Auto-search**. It checks companies on a schedule and can find new ones hiring for your titles. |
+| Let it find jobs | Home → **🔭 Turn on Auto-search**. It checks companies you watch and searches LinkedIn and Indeed on a schedule, and can find new companies hiring for your titles. Set **Posted within** to 1 hour (and **How often** to every hour) to see only the newest jobs. |
 | See what needs you | Home → **📥 Needs you**: reviews to approve, questions only you can answer, and stuck jobs. |
 | Approve an application | On the review card: **✅ Approve**, **✏️ Change something** (just say what), **⏭ Skip**, or **🚫 Never this company**. |
 | Change what it looks for | **⚙️ Settings**. Every setting explains what it does. You can also just tell it: *"raise my minimum salary to 120k"*. |
@@ -50,14 +53,17 @@ Keep that window open (minimizing is fine). Closing it turns JobAgent off. Add `
 | Track how it's going | **📋 Jobs**: mark Interview, Offer, Rejected or No reply, or export everything to a spreadsheet. |
 | Pause or stop | **⏸ Pause** on Home finishes the current step, then waits. **✋ Stop** on a card stops that job. `/stop` stops everything. |
 
-**Practice mode** (on by default): JobAgent does every step except pressing Submit, so you can see exactly what it would send. Turn it off in **Settings → Practice mode** when you're ready; you still approve each application.
+**Practice mode** (on by default): JobAgent does every step except pressing Submit, so you can see exactly what it would send.  
+Turn it off in **Settings → Practice mode** when you're ready; you still approve each application.
 
-**Auto-apply** (off by default, Settings → How I apply): only very strong matches are sent on their own, after a countdown with a Cancel button. Unusual forms and private questions always come to you.
+**Auto-apply** (off by default, Settings → How I apply): only very strong matches are sent on their own, after a countdown with a Cancel button.  
+Unusual forms and private questions always come to you.
 
 ### What works today
 
 - Filling in **Greenhouse** application forms (used by thousands of companies). Links to other sites are still read and scored, and you get the link to apply yourself.
-- Auto-search over Greenhouse job boards.
+- Auto-search over Greenhouse job boards, LinkedIn and Indeed (Glassdoor and ZipRecruiter can be turned on in ⚙️ Settings → Auto-search → Where I look), via [python-jobspy](https://github.com/speedyapply/JobSpy). These sites have no public API, so searches are kept small; LinkedIn may still limit them for a while if you search very often.
+- LinkedIn and Indeed links (sent by you or found by Auto-search) are read in JobAgent's own browser window, where you log in once: ⚙️ Settings → **🔑 Job site logins**. It can't reuse your everyday browser's login (Chrome encrypts its cookies for Chrome alone). **Save password** keeps your login in the computer's password vault (Windows Credential Manager / macOS Keychain) so JobAgent can log back in by itself; it never goes through Telegram. Applying is still done by you on those sites. From a terminal: `uv run --project agent jobagent login linkedin|indeed|status` and `jobagent credentials set|delete linkedin|indeed`.
 - Resume tailoring for **PDF** and **Word (.docx)** resumes. For .docx you need Microsoft Word or LibreOffice installed (setup tells you).
 
 ## Privacy and safety

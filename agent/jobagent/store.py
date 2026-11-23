@@ -65,7 +65,18 @@ def canonical_url(url: str) -> str:
     if g["ats"] == "greenhouse":
         return f"https://job-boards.greenhouse.io/{g['board']}/jobs/{g['posting_id']}"
     u = urlsplit(url.strip())
-    q = f"?gh_jid={parse_qs(u.query)['gh_jid'][0]}" if parse_qs(u.query).get("gh_jid") else ""
+    qs = parse_qs(u.query)
+    host = (u.hostname or "").lower()
+    if host == "linkedin.com" or host.endswith(".linkedin.com"):  # search/collection pages name the job in ?currentJobId=
+        m = re.search(r"/jobs/view/(?:[^/]*-)?(\d+)", u.path)  # /jobs/view/123 or /jobs/view/data-analyst-at-acme-123
+        li = qs.get("currentJobId", [m[1] if m else ""])[0]
+        if li.isdigit():
+            return f"https://www.linkedin.com/jobs/view/{li}"
+    if (host == "indeed.com" or host.endswith(".indeed.com")) and qs.get("vjk") and not qs.get("jk"):  # search page with a job open
+        return f"https://{host}/viewjob?jk={qs['vjk'][0]}"
+    # the query param that names the posting: company page (gh_jid), Indeed (jk), Glassdoor (jl), ZipRecruiter (jid)
+    k = next((k for k in ("gh_jid", "jk", "jl", "jid") if qs.get(k)), None)
+    q = f"?{k}={qs[k][0]}" if k else ""
     return f"{u.scheme.lower()}://{(u.netloc or '').lower()}{u.path.rstrip('/')}{q}"
 
 

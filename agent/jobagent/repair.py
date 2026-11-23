@@ -20,7 +20,7 @@ UPSTREAM_URL = f"https://github.com/{UPSTREAM}.git"
 PROTECTED = (
     ".claude/", "CLAUDE.md", "scripts/", ".github/", ".gitattributes", ".gitignore",
     "app/src/review.ts", "app/src/tools.ts", "app/src/repair.ts",
-    "agent/jobagent/submit.py", "agent/jobagent/safety.py", "agent/jobagent/pair.py", "agent/jobagent/repair.py",
+    "agent/jobagent/submit.py", "agent/jobagent/safety.py", "agent/jobagent/pair.py", "agent/jobagent/accounts.py", "agent/jobagent/repair.py",
     "app/package.json", "app/bun.lock", "agent/pyproject.toml", "agent/uv.lock",
 )
 MAX_FILES, MAX_LINES = 10, 400
