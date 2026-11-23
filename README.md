@@ -1,3 +1,4 @@
+<p align="center"><img src="assets/banner.svg" alt="JobAgent: search for jobs, tailor your resume and apply from a Telegram chat" width="100%"></p>
 # JobAgent
 
 **Your own job-application assistant, controlled from Telegram.** It finds jobs that fit you, tailors your resume for each one, fills in the application, and shows you everything before anything is sent.
