@@ -1,0 +1,9 @@
+data/
+agent/fonts/
+agent/.venv/
+app/node_modules/
+**/__pycache__/
+.pytest_cache/
+*.log
+.env
+.claude/settings.local.json

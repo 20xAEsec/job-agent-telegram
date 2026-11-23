@@ -1,0 +1,47 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Job Application for Data Analyst at Acme</title>
+<style>.select__menu{border:1px solid #888;width:300px}.select__menu div{padding:4px}</style></head>
+<body>
+<!-- Saved structure of a Greenhouse job-boards form: ids = API field names, react-select style comboboxes, onsubmit spy. -->
+<h1>Data Analyst</h1>
+<form id="application-form" novalidate onsubmit="window.__submitted=(window.__submitted||0)+1; fetch('/__spy?k=submit'); return false">
+  <label for="first_name">First Name*</label><input id="first_name" type="text" aria-label="First Name">
+  <label for="last_name">Last Name*</label><input id="last_name" type="text" aria-label="Last Name">
+  <label for="email">Email*</label><input id="email" type="text" aria-label="Email">
+  <label for="country">Country</label><input id="country" role="combobox" type="text">
+  <label for="phone">Phone</label><input id="phone" type="tel">
+  <div><button type="button">Attach</button><input id="resume" type="file" class="visually-hidden"></div>
+  <div><button type="button">Attach</button><input id="cover_letter" type="file" class="visually-hidden"></div>
+  <label for="question_100">LinkedIn Profile</label><input id="question_100" type="text">
+  <div class="select__control"><div class="select__value-container"><span class="select__single-value"></span>
+    <input class="select__input" id="question_101" role="combobox" type="text" data-options='["Yes","No"]'></div></div>
+  <input type="text" required class="requiredInput" style="opacity:0;width:1px">
+  <div class="select__control"><div class="select__value-container"><span class="select__single-value"></span>
+    <input class="select__input" id="question_102" role="combobox" type="text" data-options='["Yes","No"]'></div></div>
+  <input type="text" required class="requiredInput" style="opacity:0;width:1px">
+  <textarea id="question_103"></textarea>
+  <select id="question_104"><option value="">Select...</option><option>she/her</option><option>he/him</option><option>they/them</option></select>
+  <div class="select__control"><div class="select__value-container"><span class="select__single-value"></span>
+    <input class="select__input" id="gender" role="combobox" type="text" data-options='["Decline To Self Identify","Male"]'></div></div>
+  <div class="grecaptcha-logo"><iframe title="reCAPTCHA" width="256" height="60" src="about:blank#recaptcha-badge"></iframe></div>
+  <button type="submit">Submit application</button>
+</form>
+<script>
+  document.addEventListener('keydown', e => { if (e.key === 'Enter') { window.__enter = (window.__enter || 0) + 1; fetch('/__spy?k=enter') } })
+  document.querySelectorAll('.select__input').forEach(inp => {
+    const opts = JSON.parse(inp.dataset.options), ctl = inp.closest('.select__control')
+    let menu = null
+    const render = () => {
+      menu && menu.remove()
+      menu = document.createElement('div'); menu.className = 'select__menu'
+      opts.filter(o => o.toLowerCase().includes(inp.value.toLowerCase())).forEach(o => {
+        const d = document.createElement('div'); d.setAttribute('role', 'option'); d.textContent = o
+        d.addEventListener('click', () => { ctl.querySelector('.select__single-value').textContent = o; inp.value = ''; menu.remove(); menu = null })
+        menu.appendChild(d)
+      })
+      ctl.after(menu)
+    }
+    inp.addEventListener('click', render); inp.addEventListener('input', render)
+  })
+</script>
+</body></html>

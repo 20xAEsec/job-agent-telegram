@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv run --project agent jobagent:*)",
+      "Read(./data/**)",
+      "Read(./.claude/**)",
+      "Write(./data/jobs/**)", "Edit(./data/jobs/**)",
+      "Write(./data/tmp/**)", "Edit(./data/tmp/**)",
+      "mcp__jobbot__tg_send", "mcp__jobbot__tg_progress", "mcp__jobbot__tg_ask", "mcp__jobbot__tg_review",
+      "mcp__jobbot__settings_get", "mcp__jobbot__settings_update", "mcp__jobbot__profile_ready",
+      "WebSearch"
+    ],
+    "deny": [
+      "Bash(uv run --project agent jobagent submit:*)",
+      "Bash(uv run --project agent jobagent pair:*)",
+      "Bash(uv run --project agent jobagent credentials:*)",
+      "Bash(uv run --project agent jobagent login:*)",
+      "Write(./data/jobs/*/approval.json)", "Edit(./data/jobs/*/approval.json)",
+      "Write(./data/jobs/*/review.json)", "Edit(./data/jobs/*/review.json)",
+      "Write(./data/jobs/*/status.json)", "Edit(./data/jobs/*/status.json)",
+      "Write(./data/jobs/*/result.json)", "Edit(./data/jobs/*/result.json)",
+      "Write(./data/settings.json)", "Edit(./data/settings.json)",
+      "Read(./data/.env)", "WebFetch",
+      "Bash(curl:*)", "Bash(wget:*)", "Bash(Invoke-WebRequest:*)"
+    ]
+  }
+}
