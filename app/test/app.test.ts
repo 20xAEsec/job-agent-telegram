@@ -1,13 +1,16 @@
 // The wired app with Telegram intercepted (no network) and a fake `claude` / `jobagent`.
 import { describe, expect, test } from 'bun:test'
 import { createHash } from 'crypto'
-import { rmSync } from 'fs'
+import { existsSync, readFileSync, rmSync } from 'fs'
 import { join } from 'path'
 import { createApp, extractUrls, isAllowed, tryPair } from '../src/app'
 import * as OB from '../src/onboarding'
-import { DATA, DEFAULT_SETTINGS, PAIR_FILE, loadSettings, readJson, writeJson } from '../src/state'
+import { DATA, DEFAULT_SETTINGS, PAIR_FILE, loadSettings, logError, readJson, writeJson } from '../src/state'
 
 const wait = (ms = 30) => new Promise(r => setTimeout(r, ms))
+const LOG = join(DATA, 'logs', 'app.log')
+const logSize = () => existsSync(LOG) ? readFileSync(LOG, 'utf8').length : 0
+const logSince = (n: number) => readFileSync(LOG, 'utf8').slice(n) // the log is shared by every test in the run
 
 describe('gate and pairing', () => {
   test('only the paired user, only in a private chat', () => {
@@ -125,7 +128,35 @@ describe('setup wizard', () => {
   })
 })
 
+describe('logging', () => {
+  test('logError records where it failed and still hides the bot token', () => {
+    const n = logSize()
+    logError('thing failed', new Error('bad call to https://api.telegram.org/bot123456:ABC-def/getMe'))
+    const text = logSince(n)
+    expect(text).toContain('thing failed: Error: bad call')
+    expect(text).toMatch(/\n\s+at /)
+    expect(text).toContain('bot<token>')
+    expect(text).not.toContain('ABC-def')
+  })
+})
+
 describe('polling', () => {
+  test('the log says why each retry failed and names the bot once, not on every retry', async () => {
+    const n = logSize()
+    const app = createApp({ token: '123:fake', exec: () => ({ pid: undefined, done: new Promise(() => {}) }), run: async () => ({ ok: true }) })
+    app.bot.api.config.use(async (_prev, method) => {
+      if (method === 'getUpdates') return { ok: false, error_code: 409, description: 'Conflict: terminated by other getUpdates request' } as any
+      if (method === 'getMe') return { ok: true, result: { id: 1, is_bot: true, first_name: 'B', username: 'testbot' } } as any
+      return { ok: true, result: true } as any
+    })
+    await app.start(1)
+    const text = logSince(n)
+    expect(text.match(/polling as @testbot/g)?.length).toBe(1)
+    expect(text).toContain('Telegram connection failed (attempt 1)')
+    expect(text).toContain('(attempt 3)')
+    expect(text).not.toContain('(attempt 4)')
+    await app.stop().catch(() => {})
+  })
   test('another poller on the same bot (409) gives up with a plain reason instead of looping forever', async () => {
     const app = createApp({ token: '123:fake', exec: () => ({ pid: undefined, done: new Promise(() => {}) }), run: async () => ({ ok: true }) })
     let polls = 0

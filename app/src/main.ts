@@ -3,7 +3,7 @@
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { dirname, join } from 'path'
 import { createApp } from './app'
-import { DATA, loadSettings, log, practiceForced } from './state'
+import { DATA, loadSettings, log, logError, practiceForced } from './state'
 
 const LOCK = join(DATA, 'run', 'app.lock') // not *.pid: /stop kills every PID listed in run/*.pid
 const alive = (pid: number) => { try { process.kill(pid, 0); return true } catch (e) { return (e as NodeJS.ErrnoException).code === 'EPERM' } }
@@ -37,6 +37,8 @@ if (import.meta.main) {
   const refused = acquire()
   if (refused) { console.error(refused); process.exit(1) }
   process.on('exit', release)
+  // Bun already exits on these; now the reason also reaches the log file (the window may be gone by then).
+  for (const ev of ['uncaughtException', 'unhandledRejection'] as const) process.on(ev, e => { logError(`fatal ${ev}`, e); process.exit(1) })
   console.log('\n  Starting JobAgent…')
   // The banner waits until Telegram accepted the token, so "running" is never shown for a bot that is not.
   const onReady = (bot: string) => {

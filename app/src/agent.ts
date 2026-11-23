@@ -8,7 +8,7 @@ import { rmSync } from 'fs'
 import { join } from 'path'
 import { describe } from './activity'
 import { killHelpers, killTree } from './runner'
-import { DATA, ROOT, loadSettings, log, readJson, writeJson } from './state'
+import { DATA, ROOT, loadSettings, log, logError, readJson, writeJson } from './state'
 
 export type Kind = 'chat' | 'resume' | 'job' | 'revise' | 'discover'
 export type Lane = 'work' | 'chat'
@@ -191,10 +191,12 @@ export function createAgent(d: AgentDeps) {
       queue.unshift({ ...t, tries: t.tries + 1, not_before: now() + 60_000, interrupted: L.steps > 0 }) // a hiccup: one retry
       o = { kind: 'retrying', text: 'Claude stopped unexpectedly. Trying again in a minute.', denials }
     } else o = { kind: 'error', text: String(result?.result ?? stderr ?? '').trim().slice(-300) || `exit code ${code}`, denials }
-    log(`task ${t.id} ${t.kind} -> ${o.kind} (${L.steps} steps, ${Math.round((now() - L.started) / 1000)}s)`)
+    // Say why a task went wrong (exit code and the end of stderr): the outcome alone cannot be debugged.
+    const why = ['error', 'retrying', 'timeout', 'auth'].includes(o.kind) ? ` [exit ${code}: ${stderr.replace(/\s+/g, ' ').trim().slice(-200)}]` : ''
+    log(`task ${t.id} ${t.kind} -> ${o.kind} (${L.steps} steps, ${Math.round((now() - L.started) / 1000)}s)${why}`)
     persist()
     d.onLive(lane, null)
-    try { await d.onFinish(t, o) } catch (e) { log(`onFinish failed: ${e}`) }
+    try { await d.onFinish(t, o) } catch (e) { logError('onFinish failed', e) }
     pump()
   }
 
