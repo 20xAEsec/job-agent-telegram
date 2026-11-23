@@ -4,7 +4,7 @@ import type { Live, Usage } from './agent'
 import type { Form } from './forms'
 import { code, inProgress, jobTitle, lastDetail, needsYou, statusOf, type Job } from './jobs'
 import { ago, bar, elapsed, esc, heading, kv, label, money, nav, note, pairs, plural, quote, short, until, type Btn, type Page } from './kit'
-import { practiceForced, practiceOn, type Settings } from './state'
+import { practiceForced, practiceOn, SOURCES, type Settings } from './state'
 
 export type HomeCtx = {
   s: Settings; work?: Live; workTitle?: string; queued: number; jobs: Job[]; forms: Form[]; usage?: Usage; nextSearch?: number | null; limitedUntil?: number; companies?: number
@@ -39,6 +39,14 @@ function workLines(c: HomeCtx, now: number): string[] {
   ]
 }
 
+// " · 12 companies · LinkedIn · Indeed": where auto-search looks; warns only when it has nowhere to look.
+function searchWhere(c: HomeCtx): string {
+  const src = c.s.discovery.sources, sites = src.filter(x => x !== 'companies').map(x => SOURCES[x])
+  const co = !src.includes('companies') || c.companies == null ? null
+    : c.companies ? plural(c.companies, 'company', 'companies') : c.s.discovery.web_search ? 'finding companies' : sites.length ? null : '⚠️ no companies to watch yet'
+  return [co, ...sites].filter(Boolean).map(x => ` · ${x}`).join('')
+}
+
 export function home(c: HomeCtx, now = Date.now()): Page {
   const { s } = c
   const n = needsCount(c)
@@ -54,7 +62,7 @@ export function home(c: HomeCtx, now = Date.now()): Page {
       ? `📥 <b>Needs you:</b> ${[n.reviews && plural(n.reviews, 'review'), n.forms && plural(n.forms, 'question form'), n.other && plural(n.other, 'problem')].filter(Boolean).join(' · ')}`
       : `✨ ${note('Nothing needs you right now.')}`,
     s.discovery.enabled
-      ? `🔭 <b>Auto-search:</b> ${c.nextSearch ? `next ${until(c.nextSearch, now)}` : 'running soon'}${c.companies != null ? ` · ${c.companies ? plural(c.companies, 'company', 'companies') : s.discovery.web_search ? 'finding companies' : '⚠️ no companies to watch yet'}` : ''}`
+      ? `🔭 <b>Auto-search:</b> ${c.nextSearch ? `next ${until(c.nextSearch, now)}` : 'running soon'}${searchWhere(c)}`
       : `🔭 <b>Auto-search:</b> off ${note('(I only work on links you send)')}`,
     `📊 <b>This week:</b> ${w.found} found · ${w.ready} prepared · ${practiceOn(s) && !w.sent ? `${w.practice} practice runs` : `${w.sent} sent`}`,
     ...(c.usage?.five_hour != null ? [`⚡ <b>Claude usage:</b> ${bar(c.usage.five_hour, 1)} ${Math.round(c.usage.five_hour * 100)}% ${note('of your 5-hour limit')}`] : []),
@@ -281,11 +289,11 @@ const HELP: Record<string, [string, string]> = {
     '', 'Each job has a live card in the chat, so you can always see which step I am on.',
   ].join('\n')],
   practice: ['🧪 Practice mode', 'Practice mode is <b>on</b> until you turn it off. I do every step except pressing Submit, so you can see exactly what would be sent.\n\nTurn it off in Settings → Practice mode when you are ready. You still approve each application.'],
-  auto: ['🔭 Auto-search', 'With Auto-search on, I check the companies you watch for new jobs on a schedule, using only your search settings. I can also find new companies hiring for your titles.\n\nGood matches get prepared and sent to you for review. Quiet hours pause it overnight.'],
+  auto: ['🔭 Auto-search', 'With Auto-search on, I check the companies you watch and search LinkedIn and Indeed (Glassdoor and ZipRecruiter too, if you turn them on) for new jobs on a schedule, using only your search settings. Set "Posted within" to 1 hour and "How often" to every hour to see only the newest postings. I can also find new companies hiring for your titles.\n\nGood matches get prepared and sent to you for review. Quiet hours pause it overnight.'],
   approve: ['✅ Approving & auto-apply', 'By default <b>you approve every application</b>. An approval is tied to the exact answers and files you saw: if anything changes, I ask again.\n\n<b>Auto-apply</b> (Settings → How I apply) sends only very strong matches on its own, after a countdown with a Cancel button. Unusual forms and private questions always come to you.'],
   privacy: ['🔒 Your data', 'Everything (your profile, answers and resume) stays in the <code>data</code> folder on your computer. The thinking runs on your own Claude account.\n\nTelegram bot chats are not end-to-end encrypted, so private answers are hidden behind a tap. Job postings are treated as untrusted text and can never give me instructions.'],
   stop: ['⏸ Pausing & stopping', '<b>⏸ Pause</b> (Home) finishes nothing new: links you send wait in line until you resume.\n<b>✋ Stop</b> on a job card stops that job right away.\n/stop pauses and stops everything that is running.\n\nClosing the JobAgent window on your computer turns me off completely.'],
-  trouble: ['🛠 Troubleshooting', '<b>I don\'t answer:</b> is the JobAgent window still open on your computer, and is the computer awake?\n<b>"Usage limit reached":</b> your Claude plan\'s limit. I wait and continue by myself.\n<b>A job is "stuck":</b> it hit a login, CAPTCHA or an unusual page. Open it in Jobs and tap Try again, or apply by hand.\n<b>Only Greenhouse</b> application forms can be filled for now. Other links are scored, then you get the link to apply yourself.'],
+  trouble: ['🛠 Troubleshooting', '<b>I don\'t answer:</b> is the JobAgent window still open on your computer, and is the computer awake?\n<b>"Usage limit reached":</b> your Claude plan\'s limit. I wait and continue by myself.\n<b>A job is "stuck":</b> it hit a login, CAPTCHA or an unusual page. Open it in Jobs and tap Try again, or apply by hand.\n<b>LinkedIn or Indeed wants a login:</b> ⚙️ Settings → 🔑 Job site logins. Log in once in the window that opens on your computer, then tap Try again.\n<b>Only Greenhouse</b> application forms can be filled for now. Other links are scored, then you get the link to apply yourself.'],
 }
 export function helpPage(topic?: string): Page {
   const t = topic && HELP[topic]

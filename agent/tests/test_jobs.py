@@ -74,6 +74,14 @@ def test_job_ids_and_duplicates(tmp_path):
         assert store.job_id_for(store.canonical_url(u)) == JID
     assert store.job_id_for(store.canonical_url("https://x.com/careers/a?gh_jid=9&utm=1")).startswith("web-")
     assert store.canonical_url("https://X.com/careers/a/?gh_jid=9&utm=1") == "https://x.com/careers/a?gh_jid=9"
+    assert store.canonical_url("https://www.indeed.com/viewjob?jk=2d0b&from=serp") == "https://www.indeed.com/viewjob?jk=2d0b"  # each Indeed job is its own
+    assert store.canonical_url("https://www.glassdoor.com/job-listing/j?jl=101") != store.canonical_url("https://www.glassdoor.com/job-listing/j?jl=102")
+    li = "https://www.linkedin.com/jobs/view/4012345678"  # every way LinkedIn links one job is the same job
+    for u in ("https://www.linkedin.com/jobs/collections/recommended/?currentJobId=4012345678&eBP=x", "https://linkedin.com/jobs/view/data-analyst-at-acme-4012345678/?trk=x",
+              "https://www.linkedin.com/jobs/search/?currentJobId=4012345678&keywords=analyst", li):
+        assert store.canonical_url(u) == li
+    assert store.canonical_url("https://www.linkedin.com/jobs/collections/recommended/") != li  # no job named: left alone
+    assert store.canonical_url("https://www.indeed.com/jobs?q=analyst&l=Austin&vjk=2d0b") == "https://www.indeed.com/viewjob?jk=2d0b"
     assert store.new_job(tmp_path, URL)["duplicate"] is False
     again = store.new_job(tmp_path, URL)
     assert again["duplicate"] is True and again["status"] == "NEW"

@@ -9,9 +9,13 @@ function Ok($text) { Write-Host "  OK  $text" -ForegroundColor Green }
 function Warn($text) { Write-Host "  !   $text" -ForegroundColor Yellow }
 function Fail($text) { Write-Host "  X   $text" -ForegroundColor Red; Write-Host ''; Write-Host 'Fix that, then run this setup again.'; exit 1 }
 function Refresh-Path {
-    $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User') + ";$HOME\.bun\bin;$HOME\.local\bin"
+    # WindowsApps holds winget; it is not always in the saved user Path.
+    $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User') + ";$HOME\.bun\bin;$HOME\.local\bin;$env:LOCALAPPDATA\Microsoft\WindowsApps"
 }
 function Has($cmd) { [bool](Get-Command $cmd -ErrorAction SilentlyContinue) }
+# Telegram Desktop registers tg:// links; with it, links open straight in the app on this computer.
+function Has-TelegramApp { Test-Path 'Registry::HKEY_CLASSES_ROOT\tg' }
+function Find-Token($text) { [regex]::Match([string]$text, '\d{5,}:[A-Za-z0-9_-]{30,}').Value }
 function Ask-YesNo($q) { $a = Read-Host "  $q [Y/n]"; return ($a -eq '' -or $a -match '^[Yy]') }
 
 Write-Host ''
@@ -61,15 +65,22 @@ if (Test-Path $envFile) {
     $token = ((Get-Content $envFile -Raw) -replace '(?s).*TELEGRAM_BOT_TOKEN=([^\r\n]+).*', '$1').Trim()
     try { $bot = (Invoke-RestMethod "https://api.telegram.org/bot$token/getMe").result.username; Ok "Bot @$bot" } catch { Warn 'The saved bot token no longer works. Let''s set a new one.'; Remove-Item $envFile }
 }
+$opened = $false
 while (-not $bot) {
+    if (-not $opened) {
+        $opened = $true
+        if (Has-TelegramApp) { Start-Process 'tg://resolve?domain=BotFather' } else { Start-Process 'https://t.me/BotFather' }
+    }
     Write-Host ''
     Write-Host '  JobAgent talks to you through your own private Telegram bot. To make one (1 minute):'
-    Write-Host '    1. In Telegram, open a chat with @BotFather  (https://t.me/BotFather)'
+    Write-Host '    1. In Telegram, open a chat with @BotFather  (https://t.me/BotFather, I just opened it) and tap START'
     Write-Host '    2. Send  /newbot , pick any name, then a username ending in "bot"'
-    Write-Host '    3. BotFather replies with a token like  123456789:AAH...  Copy it.'
+    Write-Host '    3. BotFather replies with a token like  123456789:AAH...  Click it to copy it.'
     Write-Host ''
-    $token = (Read-Host '  Paste the token here').Trim()
-    if (-not $token) { continue }
+    $typed = Read-Host '  Paste the token here, or just press Enter once you copied it'
+    if (-not $typed) { $typed = Get-Clipboard -Raw -ErrorAction SilentlyContinue }
+    $token = Find-Token $typed
+    if (-not $token) { Warn 'I could not find a bot token there. It looks like 123456789:AAH... (copy it from BotFather''s message).'; continue }
     try {
         $bot = (Invoke-RestMethod "https://api.telegram.org/bot$token/getMe").result.username
         # No BOM: the app matches ^TELEGRAM_BOT_TOKEN= at the start of a line.
@@ -96,6 +107,10 @@ if ($p.ok) {
     Write-Host $p.qr
     Write-Host "  $($p.link)" -ForegroundColor White
     Write-Host "  (works once, for $($p.valid_minutes) minutes)"
+    if (Has-TelegramApp) {
+        Start-Process "tg://resolve?domain=$bot&start=$($p.pairing_code)"
+        Write-Host '  I also opened it in Telegram on this computer: tap START there.' -ForegroundColor White
+    }
 } elseif ($p.code -eq 'already_paired') { Ok 'Already connected to your Telegram' }
 else { Fail "Could not make a pairing link: $($p.error)" }
 

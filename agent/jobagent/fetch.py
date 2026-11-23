@@ -1,13 +1,16 @@
 """`fetch <id>` (posting.md, untrusted-wrapped) and `inspect <id>` (fields.json)."""
 import html
+import json
 import re
 import time
 from html.parser import HTMLParser
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 import httpx
+from playwright.sync_api import Error as PlaywrightError
 
-from . import safety, store
+from . import accounts, safety, store
 from .ats import detect
 from .ats.base import Closed
 from .paths import atomic_write_json, atomic_write_text
@@ -61,6 +64,29 @@ def _get(url: str) -> httpx.Response:
     raise err
 
 
+INDEED_JOB = 'query { jobData(input: {jobKeys: [%s]}) { results { job { title sourceEmployerName location { formatted { long } } description { text } } } } }'
+
+
+def _indeed(url: str) -> str | None:
+    """An Indeed posting through Indeed's app API (the one auto-search uses): its web pages stop automated browsers with a bot check."""
+    from jobspy.indeed.constant import headers
+
+    u = urlsplit(url)
+    jk = parse_qs(u.query).get("jk", [""])[0]
+    if not re.fullmatch(r"[0-9a-f]{16}", jk):
+        return None
+    sub = (u.hostname or "").split(".")[0]
+    co = {"www": "US", "uk": "GB"}.get(sub, sub.upper())
+    try:
+        r = httpx.post("https://apis.indeed.com/graphql", json={"query": INDEED_JOB % json.dumps(jk)}, timeout=20,
+                       headers=headers | {"indeed-co": co, "indeed-locale": f"en-{co}"})
+        j = r.json()["data"]["jobData"]["results"][0]["job"]
+    except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError):
+        return None  # the logged-in browser tries next
+    loc = ((j.get("location") or {}).get("formatted") or {}).get("long", "")
+    return f"# {j.get('title', '')}\nCompany: {j.get('sourceEmployerName', '')}\nLocation: {loc}\n\n{(j.get('description') or {}).get('text', '')}"
+
+
 def _closed(d: Path, job_id: str) -> dict:
     store.set_status(d, job_id, "CLOSED", "posting gone")
     return {"ok": False, "code": "closed", "error": "the posting is gone (404)"}
@@ -69,8 +95,13 @@ def _closed(d: Path, job_id: str) -> dict:
 def fetch(d: Path, job_id: str) -> dict:
     m = store.meta(d, job_id)
     body = None
+    listing = d / "listings" / f"{job_id}.md"  # text auto-search saved from a job site that blocks direct downloads
     try:
-        if m.get("ats") == "generic":
+        if m.get("ats") == "generic" and listing.exists():
+            body = listing.read_text("utf-8")
+        elif m.get("ats") == "generic" and accounts.site_for(m["url"]):
+            body = (accounts.site_for(m["url"]) == "indeed" and _indeed(m["canonical_url"])) or accounts.page_text(d, m["canonical_url"])  # else the logged-in JobAgent browser
+        elif m.get("ats") == "generic":
             r = _get(m["url"])
             if r.status_code in (404, 410):
                 return _closed(d, job_id)
@@ -90,6 +121,13 @@ def fetch(d: Path, job_id: str) -> dict:
             body = f"# {j.get('title', '')}\nCompany: {j.get('company_name', '')}\nLocation: {loc}\n\n{html_to_text(html.unescape(j.get('content', '')))}"
     except Closed:
         return _closed(d, job_id)
+    except accounts.NeedsLogin as e:
+        name = accounts.SITES[e.site]["name"]
+        store.set_status(d, job_id, "FAILED", f"{name} only shows this posting to people who are logged in. Log in under Settings, Job site logins, then tap Try again.")
+        return {"ok": False, "code": "needs_login", "error": f"{name} asked for a login; the user must log in (Settings > Job site logins) and retry"}
+    except PlaywrightError as e:
+        store.set_status(d, job_id, "FAILED", f"fetch failed: {type(e).__name__}")
+        return {"ok": False, "code": "fetch_failed", "error": f"could not open the posting ({type(e).__name__}); retry later"}
     except httpx.HTTPError as e:
         store.set_status(d, job_id, "FAILED", f"fetch failed: {type(e).__name__}")
         return {"ok": False, "code": "fetch_failed", "error": f"could not download the posting ({type(e).__name__}); retry later"}

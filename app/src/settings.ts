@@ -1,7 +1,7 @@
 // Settings screens, table-driven. Every setting says in plain words what it does, shows its current value,
 // and opens an editor that fits its type (choices, chips, toggle, list or typed value). Callback codes stay short.
 import { esc, heading, label, money, nav, note, pairs, short, type Btn, type Page } from './kit'
-import { getPath, practiceForced, practiceOn, type Settings } from './state'
+import { getPath, practiceForced, practiceOn, SOURCES, type Settings } from './state'
 
 type Opt = [value: string, label: string, desc?: string]
 export type Spec = {
@@ -42,7 +42,7 @@ export const CATS: Record<string, { emoji: string; title: string; blurb: string;
           ['broad', 'Broad', 'Loosely related titles too: more jobs, more noise'],
         ],
       }),
-      S('pw', '🗓', 'Posted within', 'filters.posted_within_days', 'int', 'Ignore postings older than this. Older postings are more often filled already.', { presets: [3, 7, 14, 30, 60], unit: 'days' }),
+      S('pw', '🗓', 'Posted within', 'filters.posted_within_hours', 'int', 'Ignore postings older than this. Older postings are more often filled already; the first applicants get the most attention.', { presets: [1, 12, 24, 72, 168, 336, 720], unit: 'hours', show: v => (v === 1 ? '1 hour' : v % 24 ? `${v} hours` : v === 24 ? '1 day' : `${v / 24} days`) }),
       S('ex', '🚫', 'Words to avoid', 'filters.exclude_keywords', 'list', 'Jobs whose title contains any of these are skipped.', { example: 'Intern, Sales, Clearance' }),
       S('bl', '⛔', 'Companies to avoid', 'filters.company_blocklist', 'list', 'I never apply to these companies. "Never this company" on a review adds to this list.'),
     ],
@@ -81,8 +81,11 @@ export const CATS: Record<string, { emoji: string; title: string; blurb: string;
   auto: {
     emoji: '🔭', title: 'Auto-search', blurb: 'Let me look for new jobs on a schedule instead of waiting for your links.',
     items: [
-      S('ae', '🔭', 'Auto-search', 'discovery.enabled', 'bool', 'ON: I check the companies you watch for new jobs that fit your settings, and prepare the good ones. Nothing is sent without you (unless you turn on auto-apply).'),
-      S('ai', '🔁', 'How often', 'discovery.interval_hours', 'int', 'Time between searches. Searches pause during quiet hours.', { presets: [2, 4, 6, 12, 24], show: v => `every ${v} h`, unit: 'hours' }),
+      S('ae', '🔭', 'Auto-search', 'discovery.enabled', 'bool', 'ON: I check the companies you watch and the job sites you picked for new jobs that fit your settings, and prepare the good ones. Nothing is sent without you (unless you turn on auto-apply).'),
+      S('as', '🌍', 'Where I look', 'discovery.sources', 'multi', 'The places auto-search checks. Job sites are searched with your titles and locations only, for jobs posted within your "Posted within" window. Jobs I can fill for you are the ones that use Greenhouse; for the rest I score them and you apply yourself.', {
+        opts: Object.entries(SOURCES) as Opt[], show: v => v.map((x: keyof typeof SOURCES) => SOURCES[x]).join(', '),
+      }),
+      S('ai', '🔁', 'How often', 'discovery.interval_hours', 'int', 'Time between searches. Searches pause during quiet hours.', { presets: [1, 2, 4, 6, 12, 24], show: v => `every ${v} h`, unit: 'hours' }),
       S('aw', '🌐', 'Find new companies', 'discovery.web_search', 'bool', 'ON: once a day I also search the web for companies hiring for your titles, and start watching them. Only your titles and locations are used in the search, never personal details.'),
     ],
   },
@@ -125,6 +128,7 @@ export function settingsRoot(s: Settings, companies: number): Page {
       [{ text: '🎯 What I look for', data: 'S:search' }, { text: '📨 How I apply', data: 'S:apply' }],
       [{ text: '🔭 Auto-search', data: 'S:auto' }, { text: '🌙 Quiet hours', data: 'S:quiet' }],
       [{ text: practiceOn(s) ? '🧪 Practice mode: On' : '🚀 Practice mode: Off', data: 'P:show' }],
+      [{ text: '🔑 Job site logins', data: 'L:show' }],
       nav(),
     ],
   }
@@ -245,3 +249,41 @@ export function boardSlug(text: string): string | null {
   if (m) return m[1].toLowerCase()
   return /^[a-z0-9][a-z0-9_-]{0,60}$/i.test(t) ? t.toLowerCase() : null
 }
+
+// "🔑 Job site logins": the LinkedIn / Indeed logins kept in JobAgent's own browser on the computer (agent/jobagent/accounts.py).
+export const JOB_SITES: Record<string, string> = { linkedin: 'LinkedIn', indeed: 'Indeed' }
+export type SiteLogin = { logged_in: boolean | null; saved: boolean }
+
+export function loginsPage(sites: Record<string, SiteLogin> | null, msg?: string): Page {
+  const state = (x?: SiteLogin) => !x || x.logged_in === null ? '❔ can\'t check right now' : x.logged_in ? '✅ logged in' : '⚪ not logged in'
+  const lines = [
+    heading('🔑', 'Job site logins'),
+    'LinkedIn hides many postings from people who are not logged in. Log in once in my browser window on your computer and I stay logged in. Indeed links work without logging in; your Indeed login is a backup.', '',
+    ...Object.entries(JOB_SITES).map(([k, n]) => `<b>${n}</b>: ${state(sites?.[k])}${sites?.[k]?.saved ? ' · password saved' : ''}`),
+    '', note('A saved password lets me log back in by myself when a login runs out. It stays on your computer, in its password vault, never in this chat. In my window, log in with email and password: "Sign in with Google" does not work there.'),
+    ...(sites ? [] : ['', note('Is a JobAgent browser window still open on your computer? Close it, then tap 🔄.')]),
+    ...(msg ? ['', msg] : []),
+  ]
+  return {
+    text: lines.join('\n'),
+    rows: [
+      ...Object.entries(JOB_SITES).map(([k, n]) => [
+        { text: `🌐 Log in to ${n}`, data: `L:in:${k}` },
+        sites?.[k]?.saved ? { text: '🗑 Forget password', data: `L:rm:${k}` } : { text: '🔐 Save password', data: `L:pw:${k}` },
+      ]),
+      [{ text: '🔄 Check again', data: 'L:show' }],
+      nav('m:settings'),
+    ],
+  }
+}
+
+export const loginWaitPage = (site: string, saving: boolean): Page => ({
+  text: [
+    heading(saving ? '🔐' : '🌐', saving ? `Save your ${JOB_SITES[site]} password` : `Log in to ${JOB_SITES[site]}`), '',
+    saving
+      ? `A small box opened on your computer. Type your ${JOB_SITES[site]} email and password there. Then I open ${JOB_SITES[site]} and log in with them.`
+      : `A browser window opened on your computer at the ${JOB_SITES[site]} login page. Log in there (finish any code or check it asks for).`,
+    '', note('I tell you here when it worked. I wait up to 5 minutes.'),
+  ].join('\n'),
+  rows: [nav('L:show')],
+})

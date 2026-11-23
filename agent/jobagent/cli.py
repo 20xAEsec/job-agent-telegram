@@ -3,7 +3,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import check, errlog, fetch, fill, log, pair, profile, resume, review, safety, store, submit, tailor
+from . import accounts, check, errlog, fetch, fill, log, pair, profile, resume, review, safety, store, submit, tailor
 from .discover import ats_api, boards
 from .docs.plan import DocError
 from .paths import default_data_dir
@@ -36,6 +36,11 @@ def _parser() -> argparse.ArgumentParser:
     fl.add_argument("job_id")
     fl.add_argument("--dry-run", action="store_true")
     sub.add_parser("submit").add_argument("job_id")  # channel server only: denied to Claude
+    # job-site logins: the user only (denied to Claude). `login status` reads, `login <site>` opens a window on the screen.
+    sub.add_parser("login").add_argument("site", choices=[*accounts.SITES, "status"])
+    cr = sub.add_parser("credentials")
+    cr.add_argument("op", choices=["set", "delete"])
+    cr.add_argument("site", choices=list(accounts.SITES))
     jb = sub.add_parser("job").add_subparsers(dest="sub", required=True)
     jn = jb.add_parser("new")
     jn.add_argument("url")
@@ -112,6 +117,10 @@ def _dispatch(a) -> dict:
         return fill.fill_job(d, a.job_id, a.dry_run)
     if a.cmd == "submit":
         return submit.run(d, a.job_id)
+    if a.cmd == "login":
+        return {"ok": True, "sites": accounts.status(d)} if a.site == "status" else accounts.login(d, a.site)
+    if a.cmd == "credentials":
+        return accounts.credentials_set(a.site) if a.op == "set" else accounts.credentials_delete(a.site)
     if a.cmd == "job":
         if a.sub == "new":
             return store.new_job(d, a.url, a.source)

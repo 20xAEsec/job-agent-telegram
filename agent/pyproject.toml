@@ -9,6 +9,8 @@ dependencies = [
     "docx2pdf>=0.1.8",
     "playwright>=1.65.2",
     "httpx>=0.28.1",
+    "python-jobspy>=1.5.0",
+    "keyring>=25.7.0",
 ]
 
 [project.scripts]
