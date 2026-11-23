@@ -291,7 +291,7 @@ export function helpPage(topic?: string): Page {
   const t = topic && HELP[topic]
   if (t) return { text: `${heading('', t[0]).replace('<b> ', '<b>')}\n\n${t[1]}`, rows: [nav('m:help')] }
   return {
-    text: [heading('❔', 'Help'), '', 'Pick a topic.', '', note('Commands: /menu home · /jobs · /settings · /pause · /resume · /stop')].join('\n'),
+    text: [heading('❔', 'Help'), '', 'Pick a topic.', '', note('Commands: /menu home · /jobs · /settings · /pause · /resume · /stop · /fix')].join('\n'),
     rows: [...pairs(Object.entries(HELP).map(([k, [title]]) => ({ text: title, data: `h:${k}` }))), nav()],
   }
 }

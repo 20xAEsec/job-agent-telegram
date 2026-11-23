@@ -79,6 +79,14 @@ Keep that window open (minimizing is fine). Closing it turns JobAgent off. Add `
 
 Logs are in `data/logs/app.log` (the app) and `data/logs/agent.log` (why a `jobagent` command failed). They record what happened and where, not your answers or posting text.
 
+### Let Claude fix a problem (optional)
+
+When something fails, the card shows **🔧 Let Claude look into this** (or send `/fix`). Your own Claude reads the logs, finds the bug, fixes it in a separate copy of the code, runs the tests, and shows you the fix in Telegram. **Only if you tap ✅ Open the pull request** is it shared: it opens a pull request on this repo from your GitHub account. Your own copy is never changed; you get the fix when it is merged and you `git pull`.
+
+You need: JobAgent installed with `git clone` (not the ZIP), the [GitHub CLI](https://cli.github.com) installed, and `gh auth login` done once. If one is missing, it tells you.
+
+What is kept out: the log copy Claude reads has emails, tokens and your profile details removed, and a fix is refused if it still contains any. A fix can't change the safety rules, the approve-and-submit gate, pairing, setup scripts or dependency lists, and it is limited to 10 files and 400 lines. A fix that does not pass the tests is never offered.
+
 ---
 
 ## For developers

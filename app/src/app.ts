@@ -13,6 +13,7 @@ import { clock, esc, heading, kb, nav, note, parseList, parseNumber, quote, shor
 import * as OB from './onboarding'
 import * as P from './pages'
 import { createReview, type JobPending } from './review'
+import { approve as approveFix, discardedPage, failedPage, FIX_BUTTON, FIX_ID, proposalPage, readProposal, sharedPage } from './repair'
 import { killHelpers, runJobagent, type Run } from './runner'
 import * as ST from './settings'
 import {
@@ -136,6 +137,7 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
   // ---- Tasks and their cards ----
   function newCard(t: Task, reply_to?: number): Card {
     if (t.kind === 'discover') return { key: t.id, mode: 'multi', icon: '🔭', title: 'Auto-search', state: 'queued', jobs: [] }
+    if (t.kind === 'repair') return { key: t.id, mode: 'plain', icon: '🔧', title: t.title, state: 'queued', jobs: [] }
     const prev = t.job_id ? cards.forJob(t.job_id)?.jobs.find(j => j.job_id === t.job_id) : undefined
     const line: JobLine = { job_id: t.job_id ?? '', title: prev?.title || t.title, url: prev?.url ?? (t.payload.url as string | undefined), details: { ...(prev?.details ?? {}) }, stage: t.kind === 'job' && t.payload.mode === 'continue' ? 'tailor' : prev?.stage && t.kind !== 'job' ? prev.stage : undefined }
     if (t.kind === 'revise') line.stage = 'tailor'
@@ -160,6 +162,34 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
   const continueJob = (id: string, mode: 'continue' | 'retry' | 'apply_anyway', extra: Record<string, unknown> = {}) => {
     const j = readJob(id)
     return startTask({ kind: 'job', job_id: id, title: j ? jobTitle(j) : id, payload: { mode, ...extra } })
+  }
+  // Self-repair: the user's Claude reads the logs and prepares a fix; the user approves before anything is shared.
+  function startFix(trigger: 'button' | 'command') {
+    const busy = agent.live('work')?.task.kind === 'repair' || agent.queued('work').some(t => t.kind === 'repair')
+    return busy ? { existing: true } : startTask({ kind: 'repair', title: 'Looking into a problem', payload: { trigger } })
+  }
+  const sharing = new Set<string>()
+  async function fixDecision(what: string, id: string): Promise<Page | string> {
+    const p = readProposal(id)
+    if (!p) return 'That fix is no longer available.'
+    if (what === 'no') { await run(['repair', 'discard', id]); return discardedPage() }
+    if (sharing.has(id)) return 'Already on it…'
+    sharing.add(id)
+    try {
+      approveFix(id, p) // the hash of exactly what the user saw; publish refuses if the fix changed since
+      const r = await run(['repair', 'publish', id])
+      return r.ok ? sharedPage(String(r.url)) : failedPage(id, String(r.error ?? 'Something went wrong.'))
+    } finally { sharing.delete(id) }
+  }
+  async function finishRepair(t: Task, out: Outcome) {
+    const p = out.kind === 'done' ? readProposal(t.id) : null
+    const final: Final = p ? { emoji: '🔧', text: 'A fix is ready for you to look at.' }
+      : out.kind === 'done' ? { emoji: '🔍', text: "I couldn't prepare a fix to share." }
+      : out.kind === 'cancelled' ? { emoji: '✋', text: 'Stopped.' }
+      : { emoji: '⚠️', text: out.kind === 'timeout' ? 'This took too long, so I stopped it.' : 'Something went wrong on my side.' }
+    cards.update(t.id, c => { c.final = final; c.state = 'ended'; c.ended = Date.now(); c.doing = null })
+    if (p) { const pg = proposalPage(t.id, p); await sendTo(pg.text, pg.rows) } else void run(['repair', 'discard', t.id])
+    refresh()
   }
   function startDiscover(reason: 'timer' | 'manual') {
     const s = loadSettings(), d = discState(), now = Date.now()
@@ -205,6 +235,7 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
     }
     spoke.delete(t.id)
     if (out.kind === 'retrying') { cards.update(t.id, c => { c.state = 'queued'; c.note = out.text }); syncQueued(); return refresh() }
+    if (t.kind === 'repair') return finishRepair(t, out)
     if (t.kind === 'resume') return finishResume(out)
     const failText = out.kind === 'timeout' ? 'This took too long, so I stopped it.' : out.kind === 'auth' ? 'Claude is not logged in on your computer.' : out.kind === 'error' ? 'Something went wrong on my side.' : ''
     cards.update(t.id, c => {
@@ -219,6 +250,8 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
       else if (!c.jobs.some(l => l.job_id)) c.final = failText ? { emoji: '⚠️', text: failText, ...(t.payload.url ? { buttons: [{ text: '🔄 Try again', data: `u:again:${t.id}` }] } : {}) } : c.mode === 'multi' ? { emoji: '✅', text: c.note ? 'Done.' : 'Done. Nothing new this time.' } : { emoji: 'ℹ️', text: 'Done. See my message below.' }
       c.state = 'ended'; c.ended = Date.now(); c.doing = null
       if (c.jobs.length === 1 && c.mode === 'job' && c.jobs[0].final) c.final = c.jobs[0].final
+      // Anything that went wrong can be handed to Claude to investigate (the same Final object may sit in both places).
+      for (const f of [c.final, ...c.jobs.map(l => l.final)]) if (f?.emoji === '⚠️' && !f.buttons?.some(b => b.data === FIX_BUTTON.data)) f.buttons = [...(f.buttons ?? []), FIX_BUTTON]
     })
     if (t.payload.url) lastUrls.set(t.id, String(t.payload.url))
     refresh()
@@ -569,6 +602,8 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
         return detail()
       }
     }
+    if (data === 'fix:go') return startFix('button').existing ? 'Already looking into it' : '🔧 On it'
+    if ((m = FIX_ID.exec(data))) return fixDecision(m[1], m[2])
     if ((m = /^u:again:(\w+)$/.exec(data))) { const u = lastUrls.get(m[1]); if (!u) return 'Send me the link again.'; startJobUrl(u); return '🔄 Trying again' }
     if ((m = /^x:(\w+)$/.exec(data))) { const hit = stopTasks(t => t.id === m![1]); return hit ? '✋ Stopping…' : 'That is already finished.' }
 
@@ -813,6 +848,7 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
   bot.command('jobs', ctx => show(ctx, P.jobsPage(allJobs(), 'a', 0, readOutcomes())))
   bot.command('settings', async ctx => show(ctx, ST.settingsRoot(loadSettings(), (await boards()).length)))
   bot.command('help', ctx => show(ctx, P.helpPage()))
+  bot.command('fix', async ctx => { if (startFix('command').existing) await ctx.reply('🔧 I am already looking into it.') })
   bot.command('pause', async ctx => { setAgent(false); await ctx.reply(`${heading('⏸', 'Paused')}\n${note('I will finish the current step, then wait. Links you send wait in line.')}`, OPTS) })
   bot.command('resume', async ctx => { setAgent(true); await ctx.reply(`${heading('▶️', 'Running again')}`, OPTS) })
   bot.command('stop', async ctx => {
@@ -826,7 +862,7 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
     const data = ctx.callbackQuery.data
     if (!ctx.callbackQuery.message) return void ctx.answerCallbackQuery().catch(() => {})
     log(`tap ${data.split(':').slice(0, 2).join(':')}`)
-    const slow = /^(m:prof|m:settings|a:|p:|C:|J:csv|j:(?!v)|r:(ok|sk|nv|ss)|o:(ok|resume|go:profile|f:|cancel)|f:\w+:c$)/.test(data)
+    const slow = /^(m:prof|m:settings|a:|p:|C:|J:csv|fix:(ok|no)|j:(?!v)|r:(ok|sk|nv|ss)|o:(ok|resume|go:profile|f:|cancel)|f:\w+:c$)/.test(data)
     if (slow) void ctx.answerCallbackQuery().catch(() => {}) // stop the spinner now; the page edit follows
     const toast: { text?: string } = {}
     let res: Page | string | undefined
@@ -933,6 +969,7 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
               { command: 'pause', description: '⏸ Pause after the current step' },
               { command: 'resume', description: '▶️ Continue' },
               { command: 'stop', description: '🛑 Stop everything now' },
+              { command: 'fix', description: '🔧 Let Claude look into a problem' },
               { command: 'help', description: '❔ How JobAgent works' },
             ]).catch(() => {})
             void api.setChatMenuButton({ menu_button: { type: 'commands' } }).catch(() => {})

@@ -10,7 +10,7 @@ import { describe } from './activity'
 import { killHelpers, killTree } from './runner'
 import { DATA, ROOT, loadSettings, log, logError, readJson, writeJson } from './state'
 
-export type Kind = 'chat' | 'resume' | 'job' | 'revise' | 'discover'
+export type Kind = 'chat' | 'resume' | 'job' | 'revise' | 'discover' | 'repair'
 export type Lane = 'work' | 'chat'
 export type Task = {
   id: string; kind: Kind; title: string; payload: Record<string, unknown>
@@ -45,6 +45,7 @@ export function promptFor(t: Task): string {
     resume: 'The user uploaded their resume (already imported). Run the read-resume skill.',
     revise: `The user wants a change to the prepared application for job ${t.job_id}. Run the revise-application skill.`,
     discover: 'Time to look for new jobs. Run the discover-jobs skill.',
+    repair: `The user asked you to look into a problem with JobAgent itself (${p.trigger}). Run the repair-app skill.`,
     chat: 'A message from the user in Telegram. Answer it (see CLAUDE.md, Chat).',
   }
   return [

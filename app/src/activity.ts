@@ -2,6 +2,9 @@
 // Returns null for calls not worth showing (the jobbot tools draw their own UI).
 
 const CLI: [RegExp, string | null][] = [
+  [/\brepair start\b/, 'Setting up a place to work on the fix'],
+  [/\brepair test\b/, 'Running the tests on the fix'],
+  [/\brepair prepare\b/, 'Getting the fix ready for your review'],
   [/\bjob new\b/, 'Saving the job'],
   [/\bfetch\b/, 'Downloading the posting'],
   [/\binspect\b/, 'Reading the application form'],
@@ -26,6 +29,9 @@ const CLI: [RegExp, string | null][] = [
 ]
 
 const FILES: [RegExp, string | null][] = [
+  [/repair\/[^/]+\/work\//, 'Changing the code'],
+  [/repair\/[^/]+\/logs\.txt$/, 'Reading the logs'],
+  [/repair\/[^/]+\/report\.json$/, 'Writing up the fix'],
   [/tailor_plan\.json$/, 'Rewording resume lines to match the job'],
   [/cover_letter\.md$/, 'Writing your cover letter'],
   [/plan\.json$/, 'Deciding what goes in each form field'],
@@ -48,6 +54,7 @@ const SKILLS: Record<string, string> = {
   'revise-application': 'Making the change you asked for',
   'discover-jobs': 'Looking for new jobs',
   'read-resume': 'Reading your resume',
+  'repair-app': 'Looking into the problem',
 }
 
 const clip = (s: string, n = 60) => (s.length > n ? s.slice(0, n - 1) + '…' : s)

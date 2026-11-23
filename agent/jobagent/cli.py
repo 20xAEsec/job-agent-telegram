@@ -3,7 +3,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import check, errlog, fetch, fill, log, pair, profile, resume, review, safety, store, submit, tailor
+from . import check, errlog, fetch, fill, log, pair, profile, repair, resume, review, safety, store, submit, tailor
 from .discover import ats_api, boards
 from .docs.plan import DocError
 from .paths import default_data_dir
@@ -36,6 +36,9 @@ def _parser() -> argparse.ArgumentParser:
     fl.add_argument("job_id")
     fl.add_argument("--dry-run", action="store_true")
     sub.add_parser("submit").add_argument("job_id")  # channel server only: denied to Claude
+    rp = sub.add_parser("repair")  # start/test/prepare: Claude. publish/discard: the app only (publish is denied to Claude)
+    rp.add_argument("op", choices=["start", "test", "prepare", "publish", "discard"])
+    rp.add_argument("repair_id")
     jb = sub.add_parser("job").add_subparsers(dest="sub", required=True)
     jn = jb.add_parser("new")
     jn.add_argument("url")
@@ -112,6 +115,8 @@ def _dispatch(a) -> dict:
         return fill.fill_job(d, a.job_id, a.dry_run)
     if a.cmd == "submit":
         return submit.run(d, a.job_id)
+    if a.cmd == "repair":
+        return repair.run(d, a.op, a.repair_id)
     if a.cmd == "job":
         if a.sub == "new":
             return store.new_job(d, a.url, a.source)
@@ -152,7 +157,7 @@ def main(argv=None) -> int:
     exc = None
     try:
         res = _dispatch(a)
-    except (profile.ProfileError, resume.ResumeError, DocError, store.JobError, safety.SafetyError) as e:
+    except (profile.ProfileError, resume.ResumeError, DocError, store.JobError, safety.SafetyError, repair.RepairError) as e:
         exc, res = e, {"ok": False, "code": e.code, "error": str(e)}
     except Exception as e:  # noqa: BLE001 - contract: always one JSON object on stdout
         exc, res = e, {"ok": False, "code": "internal", "error": type(e).__name__}
