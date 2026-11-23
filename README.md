@@ -82,7 +82,7 @@ Unusual forms and private questions always come to you.
 - **"JobAgent is already running":** only one copy can use your bot. Close the other window.
 - **Connect a different Telegram account:** run `uv run --project agent jobagent pair --reset`, then the setup again.
 
-Logs are in `data/logs/app.log` (no personal data is logged).
+Logs are in `data/logs/app.log` (the app) and `data/logs/agent.log` (why a `jobagent` command failed). They record what happened and where, not your answers or posting text.
 
 ---
 

@@ -3,7 +3,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import check, fetch, fill, log, pair, profile, resume, review, safety, store, submit, tailor
+from . import check, errlog, fetch, fill, log, pair, profile, resume, review, safety, store, submit, tailor
 from .discover import ats_api, boards
 from .docs.plan import DocError
 from .paths import default_data_dir
@@ -149,12 +149,15 @@ def _dispatch(a) -> dict:
 
 def main(argv=None) -> int:
     a = _parser().parse_args(argv)
+    exc = None
     try:
         res = _dispatch(a)
     except (profile.ProfileError, resume.ResumeError, DocError, store.JobError, safety.SafetyError) as e:
-        res = {"ok": False, "code": e.code, "error": str(e)}
+        exc, res = e, {"ok": False, "code": e.code, "error": str(e)}
     except Exception as e:  # noqa: BLE001 - contract: always one JSON object on stdout
-        res = {"ok": False, "code": "internal", "error": type(e).__name__}
+        exc, res = e, {"ok": False, "code": "internal", "error": type(e).__name__}
+    if not res.get("ok"):
+        errlog.record(a.data_dir, a.cmd, str(res.get("code", "?")), exc)
     print(json.dumps(res))
     return 0 if res.get("ok") else 1
 

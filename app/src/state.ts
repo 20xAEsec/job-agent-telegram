@@ -20,6 +20,13 @@ export function log(m: string) {
   } catch { /* logging must never break the app */ }
 }
 
+// An error with where it came from: name, message and the top stack frames. Never values from data/.
+export function logError(ctx: string, e: unknown) {
+  const err = e instanceof Error ? e : new Error(String(e))
+  const frames = (err.stack ?? '').split('\n').filter(l => /^\s+at /.test(l)).slice(0, 4).join('\n')
+  log(`${ctx}: ${err.name}: ${err.message}${frames ? '\n' + frames : ''}`)
+}
+
 export function readJson<T>(file: string, fallback: T): T {
   try { return JSON.parse(readFileSync(file, 'utf8')) as T } catch { return fallback }
 }

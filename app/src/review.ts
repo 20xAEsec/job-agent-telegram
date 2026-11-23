@@ -6,7 +6,7 @@ import { basename, join } from 'path'
 import { code, findJob, jobDir, jobIds, JOB_RE } from './jobs'
 import { clock, esc, heading, kb, note, quote, short, type Btn, type Page } from './kit'
 import { runJobagent, type Run } from './runner'
-import { log, loadSettings, practiceOn, readJson, trySettingsUpdate, writeJson, type Settings } from './state'
+import { log, logError, loadSettings, practiceOn, readJson, trySettingsUpdate, writeJson, type Settings } from './state'
 
 export type Answer = { fid: string; label: string; value: string; source: string; sensitive: boolean; required: boolean }
 export type Review = {
@@ -142,7 +142,7 @@ export function createReview(d: Deps) {
   async function pump() {
     if (running) return
     running = true
-    try { while (queue.length) await submitOne(queue.shift()!).catch(e => log(`submit failed: ${e}`)) } finally { running = false }
+    try { while (queue.length) await submitOne(queue.shift()!).catch(e => logError('submit failed', e)) } finally { running = false }
   }
   const enqueue = (id: string) => { if (!queue.includes(id)) queue.push(id); void pump() }
   function schedule(id: string, at: number, now = Date.now()) {

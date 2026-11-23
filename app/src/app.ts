@@ -16,7 +16,7 @@ import { createReview, type JobPending } from './review'
 import { killHelpers, runJobagent, type Run } from './runner'
 import * as ST from './settings'
 import {
-  DATA, PAIR_FILE, getPath, isQuiet, loadSettings, log, patchFor, practiceForced, readJson, trySettingsUpdate, writeJson,
+  DATA, PAIR_FILE, getPath, isQuiet, loadSettings, log, logError, patchFor, practiceForced, readJson, trySettingsUpdate, writeJson,
 } from './state'
 import { AGENT_BUTTONS, TONES, TOOLS } from './tools'
 
@@ -830,7 +830,7 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
     if (slow) void ctx.answerCallbackQuery().catch(() => {}) // stop the spinner now; the page edit follows
     const toast: { text?: string } = {}
     let res: Page | string | undefined
-    try { res = await route(ctx, data, toast) } catch (e) { log(`tap failed: ${e}`); res = "⚠️ That didn't work. Please try again." }
+    try { res = await route(ctx, data, toast) } catch (e) { logError('tap failed', e); res = "⚠️ That didn't work. Please try again." }
     const msg = ctx.callbackQuery.message
     if (typeof res === 'string') {
       if (slow) await ctx.reply(esc(res), OPTS).catch(() => {})
@@ -889,7 +889,7 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
 
   // Pinning the status bar posts a service message: remove it.
   bot.on('message:pinned_message', ctx => void ctx.deleteMessage().catch(() => {}))
-  bot.catch(err => log(`handler error (polling continues): ${err.error}`))
+  bot.catch(err => logError('handler error (polling continues)', err.error))
 
   // ---- Timers ----
   function discoveryCheck() {
@@ -920,7 +920,7 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
           drop_pending_updates: false,
           onStart: info => {
             polledAt = Date.now()
-            log(`polling as @${info.username}`)
+            if (first) log(`polling as @${info.username}`) // onStart also fires on every reconnect attempt
             if (!first) return
             first = false
             o.onReady?.(info.username ?? 'your bot')
@@ -951,7 +951,7 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
         if (err instanceof GrammyError && err.error_code === 401) return 'Telegram rejected the bot token. Run the setup again.'
         const is409 = err instanceof GrammyError && err.error_code === 409
         if (is409 && attempt >= 8) return 'Another program is using this Telegram bot (often an older JobAgent still running). Close it and start JobAgent again.'
-        if (attempt === 1) log(`Telegram connection failed, retrying: ${err instanceof Error ? err.message : err}`)
+        if (attempt <= 3 || attempt % 20 === 0) log(`Telegram connection failed (attempt ${attempt}), retrying: ${err instanceof Error ? err.message : err}`) // not every time: a long outage would flood the log
         await new Promise(r => setTimeout(r, Math.min(retryMs * attempt, 15 * retryMs)))
       }
     }

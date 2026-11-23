@@ -1,7 +1,7 @@
 // Local-only HTTP endpoint (127.0.0.1, random port, per-run secret) that the MCP shim (mcp.ts) forwards tool calls to.
 // It lets each headless Claude task talk to the running app without a second Telegram poller.
 import { randomBytes, timingSafeEqual } from 'crypto'
-import { log } from './state'
+import { logError } from './state'
 
 export type ToolDef = { name: string; description: string; inputSchema: Record<string, unknown> }
 export type ToolResult = { text: string; isError?: boolean }
@@ -26,7 +26,7 @@ export function startBridge(tools: () => ToolDef[], handle: Handler) {
         try {
           return Response.json(await handle(String(body.task ?? ''), String(body.name ?? ''), body.args ?? {}))
         } catch (e) {
-          log(`tool ${body.name} failed: ${e instanceof Error ? e.message : e}`)
+          logError(`tool ${body.name} failed`, e)
           return Response.json({ text: `error: ${e instanceof Error ? e.message : e}`, isError: true })
         }
       }
