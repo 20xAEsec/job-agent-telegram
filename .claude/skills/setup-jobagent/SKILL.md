@@ -41,6 +41,7 @@ Say in one line what you're installing and why, then run it. Windows may show a 
 | uv (runs the Python helper) | `astral-sh.uv` | `brew install uv` | `curl -LsSf https://astral.sh/uv/install.sh \| sh` · https://docs.astral.sh/uv/getting-started/installation/ |
 | Bun (runs the app) | `Oven-sh.Bun` | `brew install oven-sh/bun/bun` | `curl -fsSL https://bun.sh/install \| bash` · https://bun.sh |
 | Telegram Desktop (recommended: links then open right on this computer) | `Telegram.TelegramDesktop` | `brew install --cask telegram` | https://desktop.telegram.org (Linux: `flatpak install flathub org.telegram.desktop`) |
+| cloudflared (only if they want the dashboard on their phone, step 8) | `Cloudflare.cloudflared` | `brew install cloudflared` | https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/ |
 
 - **No winget** (older Windows): send them to https://apps.microsoft.com/detail/9nblggh4nns1 ("App Installer"), or to the download links above.
 - **Telegram Desktop is optional.** If they'd rather use only their phone, skip it: setup shows a QR code they can scan instead.
@@ -93,6 +94,24 @@ Reading `data/settings.json` is fine. Never edit it.
 - **PAIRED:** check the last lines of `data/logs/app.log` for `polling as @…` and any error. Tell them they're connected. The bot now walks them through a 3-minute setup on their phone: their resume (send a PDF or Word file), the roles, location and pay they want, work eligibility, and a few optional questions. Practice mode is on, so nothing is submitted until they turn it off in ⚙️ Settings.
 - **TIMEOUT** (20 minutes): ask where they got stuck, and use the table below.
 
+## 8. Show them the dashboard (optional)
+
+Once they're connected, tell them in two lines that JobAgent also has a dashboard. It shows their whole pipeline on one screen with Approve and Skip, and it opens from Telegram: Home → 🖥 Dashboard gives a private link to open in the browser on this computer. Find the port in `data/logs/app.log` (the last `dashboard on http://127.0.0.1:<port>` line; it's 4777 unless that was taken).
+
+Then ask whether they'd also like it on their phone. If they say no, you're done.
+
+If they say yes:
+1. Install cloudflared (table in step 3).
+2. Tell them to open a **new** terminal window and run `cloudflared tunnel --url http://127.0.0.1:<port>`, and to keep that window open. Don't start it in this session, because it would stop when this session ends.
+3. Tell them to send the `https://….trycloudflare.com` address it prints to JobAgent in Telegram: Home → 🖥 Dashboard → 📱 Set up phone access. Then **📱 Open dashboard** opens it inside Telegram.
+4. Say in one line what to expect:
+   - Only their Telegram account can sign in.
+   - Private answers are never shown.
+   - A quick tunnel gets a new address each time it starts, so they send the new one.
+   - They can turn it off with 🚫 Turn off phone access.
+
+   [docs/dashboard.md](../../../docs/dashboard.md) has the details if they ask.
+
 ## If something goes wrong
 
 | What they see | What to do |
@@ -104,6 +123,8 @@ Reading `data/settings.json` is fine. Never edit it.
 | "Another program is using this Telegram bot" | Something else is polling the same bot, often an older JobAgent (v1, or one started by another Claude session). Find it (`bun`/`node` processes) and ask them before stopping it. |
 | The pairing link expired (15 minutes) | Run setup again (step 6). It makes a fresh link and skips everything already done. |
 | The bot does not answer | The JobAgent window must be open and the computer awake. Check `data/logs/app.log`. |
+| The phone dashboard says "Open the dashboard from your JobAgent chat" | It must be opened with the 📱 Open dashboard button, not a browser. Check that the tunnel window is still open and that the address they sent is the current one. |
+| "That link is old" on the computer | They should open the newest link from Home → 🖥 Dashboard. |
 | A different Telegram account should own it | They run `uv run --project agent jobagent pair --reset` themselves in their own terminal, then setup again. |
 | "docx->pdf converter (optional)" warning | Only matters for Word resumes. Install Microsoft Word or LibreOffice (https://www.libreoffice.org/download/), or upload a PDF resume. |
 
@@ -111,5 +132,6 @@ Reading `data/settings.json` is fine. Never edit it.
 
 - Run `jobagent pair`, `credentials`, `login` or `submit` yourself, or `fill` without `--dry-run`.
 - Read, print or ask for the bot token or anything in `data/.env`; edit `data/settings.json` or any `approval.json`.
+- Read or print `data/dashboard.json` (it holds the dashboard's secret), or set the phone address yourself. The owner sends it in Telegram.
 - Run the setup or start scripts inside this session.
 - Turn practice mode off, or tell them how to skip the approval step.
