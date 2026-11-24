@@ -6,7 +6,7 @@ import { STAGES } from './cards'
 export const AGENT_BUTTONS: Record<string, string> = {
   'm:home': '🏠 Home', 'N:0': '📥 Needs you', 'J:a:0': '📋 Jobs', 'm:settings': '⚙️ Settings', 'S:search': '🎯 What I look for',
   'S:auto': '🔭 Auto-search', 'C:list': '🏢 Companies I watch', 'm:prof': '👤 Profile', 'a:l:0': '💾 Saved answers', 'm:help': '❔ Help',
-  'L:show': '🔑 Job site logins',
+  'L:show': '🔑 Job site logins', 'Q:0': '🔔 Review queue', 'm:health': '🩺 Health', 'I:0': '📊 Insights',
 }
 export const TONES: Record<string, string> = { info: 'ℹ️', success: '✅', warn: '⚠️', error: '❌' }
 

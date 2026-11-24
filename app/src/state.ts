@@ -15,7 +15,12 @@ export function log(m: string) {
   process.stderr.write(line)
   try {
     mkdirSync(dirname(LOG_FILE), { recursive: true })
-    try { if (statSync(LOG_FILE).size > 2_000_000) renameSync(LOG_FILE, LOG_FILE + '.1') } catch { /* no file yet */ }
+    try {
+      if (statSync(LOG_FILE).size > 2_000_000) { // keep 5 generations: app.log.1 is the newest old one
+        for (let i = 4; i >= 1; i--) { try { renameSync(`${LOG_FILE}.${i}`, `${LOG_FILE}.${i + 1}`) } catch { /* gap */ } }
+        renameSync(LOG_FILE, LOG_FILE + '.1')
+      }
+    } catch { /* no file yet */ }
     appendFileSync(LOG_FILE, line)
   } catch { /* logging must never break the app */ }
 }
@@ -52,6 +57,7 @@ export const DEFAULT_SETTINGS = {
   agent_model: 'sonnet',
   filters: {
     titles: [] as string[], title_match: 'close', experience_level: 'mid', years_experience: null as number | null,
+    country: '', // where job sites search; '' = guess from the locations, then the currency
     locations: [] as string[], remote: 'remote_or_hybrid',
     min_salary: null as number | null, currency: 'USD', allow_unknown_salary: true,
     job_types: ['full_time'], exclude_keywords: [] as string[], posted_within_hours: 336, company_blocklist: [] as string[],
@@ -59,10 +65,15 @@ export const DEFAULT_SETTINGS = {
   apply: {
     mode: 'review', min_match_score: 60, auto_min_score: 85, auto_grace_seconds: 120,
     company_cooldown_hours: 3, cover_letter: 'if_field', draft_free_text: true, tailoring: 'moderate',
+    followup_days: 7, // ask about an application with no news after this many days (0 = never)
   },
-  discovery: { enabled: false, interval_hours: 6, web_search: true, sources: ['companies', 'linkedin', 'indeed'] as Source[] }, // sources: keep in step with DEFAULT_SOURCES (agent/jobagent/discover/ats_api.py)
+  discovery: { enabled: false, interval_hours: 6, web_search: true, sources: ['companies', 'linkedin', 'indeed'] as Source[], reserve_pct: 20 }, // sources: keep in step with DEFAULT_SOURCES (agent/jobagent/discover/ats_api.py)
   quiet_hours: { enabled: true, from: '23:00', to: '07:00' },
+  // Per kind of message: 'loud' rings, 'silent' arrives without a sound, 'off' is not sent (weekly only).
+  notify: { reviews: 'loud', search: 'loud', followups: 'loud', health: 'loud', weekly: 'silent' } as Record<NotifyKind, Loudness>,
 }
+export type NotifyKind = 'reviews' | 'search' | 'followups' | 'health' | 'weekly'
+export type Loudness = 'loud' | 'silent' | 'off'
 export type Settings = typeof DEFAULT_SETTINGS
 
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
@@ -97,6 +108,7 @@ export const SettingsSchema = z.object({
     experience_level: z.enum(['intern', 'entry', 'mid', 'senior', 'staff', 'lead', 'manager', 'director']),
     years_experience: z.number().int().min(0).max(60).nullable(),
     locations: z.array(str()).max(30),
+    country: z.string().trim().max(60),
     remote: z.enum(['remote_only', 'remote_or_hybrid', 'any', 'onsite_only']),
     min_salary: z.number().int().min(0).max(100_000_000).nullable(),
     currency: z.string().regex(/^[A-Z]{3}$/),
@@ -115,12 +127,18 @@ export const SettingsSchema = z.object({
     cover_letter: z.enum(['always', 'if_field', 'if_required', 'never']),
     draft_free_text: z.boolean(),
     tailoring: z.enum(['light', 'moderate']),
+    followup_days: z.number().int().min(0).max(60),
   }).strict(),
   discovery: z.object({
     enabled: z.boolean(), interval_hours: z.number().int().min(1).max(168), web_search: z.boolean(),
     sources: z.array(z.enum(Object.keys(SOURCES) as [Source, ...Source[]])).min(1).max(5),
+    reserve_pct: z.number().int().min(0).max(80),
   }).strict(),
   quiet_hours: z.object({ enabled: z.boolean(), from: hhmm, to: hhmm }).strict(),
+  notify: z.object({
+    reviews: z.enum(['loud', 'silent']), search: z.enum(['loud', 'silent']), followups: z.enum(['loud', 'silent']),
+    health: z.enum(['loud', 'silent']), weekly: z.enum(['loud', 'silent', 'off']),
+  }).strict(),
 }).strict()
 
 export type UpdateResult = { ok: true; settings: Settings } | { ok: false; error: string }

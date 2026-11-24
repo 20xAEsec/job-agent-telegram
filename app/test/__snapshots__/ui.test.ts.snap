@@ -1,0 +1,71 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`upgrade: screens wording is reviewed on purpose (snapshots): Needs you 1`] = `
+"<b>📥 Needs you</b>
+
+🔔 <b>1 application to review</b>
+<i>Approve, change or skip.</i>
+🧰 <b>1 job to apply for yourself</b>
+<i>Forms I can't fill: your resume and answers are ready.</i>"
+`;
+
+exports[`upgrade: screens wording is reviewed on purpose (snapshots): Application kit 1`] = `
+"<b>🧰 Apply yourself · Globex · BI Analyst</b>
+📊 Match 78/100  ·  📍 Remote (US)  ·  💵 $110-140k
+<i>I can't fill this kind of application form, so I prepared everything for you.</i>
+
+1️⃣ Open the posting (button below).
+2️⃣ Upload the resume I sent just above.
+3️⃣ Copy my drafted answers (tap one to copy it).
+4️⃣ Come back and tap <b>I applied</b>, so I can track it.
+
+<b>Why are you interested in this role?</b>
+<code>I have spent four years building SQL reporting for sales teams.</code>
+
+<i>Private answers (work authorization, salary…) are not drafted: answer those on the site.</i>"
+`;
+
+exports[`upgrade: screens wording is reviewed on purpose (snapshots): Jobs 1`] = `
+"<b>📋 Jobs</b>
+
+🔔 <b>Acme · Data Analyst</b> · 86
+     <i>Ready for your review · 12 min ago</i>
+🧰 <b>Globex · BI Analyst</b> · 78
+     <i>Ready for you to apply · 50 min ago</i>"
+`;
+
+exports[`upgrade: screens wording is reviewed on purpose (snapshots): Job: skipped 1`] = `
+"<b>🏢 Initech · Senior Java Engineer</b>
+📍 Remote (US)  ·  💵 $110-140k  ·  📊 Match 48/100
+
+<b>Status:</b> ⏭ Skipped
+<blockquote>Match 48/100: they want 8+ years of Java</blockquote>
+
+<i>Title ▰▰▰▰▰  Level ▰▰▰▰▱  Skills ▰▰▱▱▱</i>
+<i>Place ▰▰▰▰▰  Pay ▰▰▰▰▱</i>
+<b>They require</b> ✅ SQL · 🟡 dbt · ❌ Tableau
+
+<b>Why it fits</b>
+• 4 years of SQL; they ask for 3+
+• Remote, as you asked
+
+<b>History</b>
+⏭ Skipped: Match 48/100: they want 8+ years of Java <i>· 5 h ago</i>
+🆕 Just added <i>· 5 h ago</i>"
+`;
+
+exports[`upgrade: screens wording is reviewed on purpose (snapshots): Settings 1`] = `
+"<b>⚙️ Settings</b>
+<i>Tap a group to see and change what is in it.</i>
+
+🎯 <b>What I look for</b>
+<i>No job titles yet</i>
+📨 <b>How I apply</b>
+<i>You approve every application · skip below 60</i>
+🔭 <b>Auto-search</b>
+<i>On, every 6 h · 12 companies watched</i>
+🔔 <b>Notifications</b>
+<i>4 kinds ring · quiet hours 23:00–07:00</i>
+🧪 <b>Practice mode</b>
+<i>On: applications are prepared but never sent</i>"
+`;

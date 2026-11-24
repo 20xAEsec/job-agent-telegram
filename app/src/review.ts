@@ -3,8 +3,10 @@
 import { InputFile, type Api } from 'grammy'
 import { existsSync, rmSync } from 'fs'
 import { basename, join } from 'path'
-import { code, findJob, jobDir, jobIds, JOB_RE } from './jobs'
-import { clock, esc, heading, kb, note, quote, short, type Btn, type Page } from './kit'
+import { allJobs, code, findJob, jobDir, jobIds, JOB_RE, logDecision } from './jobs'
+import { readSection } from './profile'
+import { breakdownLines, clock, esc, heading, kb, mustHaveLine, note, pairs, quote, short, splitMsg, type Btn, type Page } from './kit'
+import type { Breakdown, MustHave } from './jobs'
 import { runJobagent, type Run } from './runner'
 import { log, logError, loadSettings, practiceOn, readJson, trySettingsUpdate, writeJson, type Settings } from './state'
 
@@ -12,7 +14,23 @@ export type Answer = { fid: string; label: string; value: string; source: string
 export type Review = {
   job_id: string; plan_hash: string; ats: string; company: string; role: string; location: string; salary: string; score: number | null
   reasons: string[]; dealbreakers: string[]; answers: Answer[]; unusual: string[]; generated_sensitive: string[]; files: string[]
+  breakdown?: Breakdown; must_haves?: MustHave[]; coverage?: { before?: number; after?: number; missing?: string[] }
   resume: { edits: number; reorders: number; fallback: boolean; verified: boolean }; screenshots: string[]; url: string
+  changes?: { old: string; new: string; reason: string }[]; cover_letter?: string; previews?: string[]
+}
+export type Change = NonNullable<Review['changes']>[number]
+
+// "<s>old</s> → <b>new</b>" lines for the resume edits; fits `max` characters, the rest stays behind a button.
+export function changeLines(changes: Change[], max: number): { text: string; shown: number } {
+  const out: string[] = []
+  let used = 0
+  for (const c of changes) {
+    const line = `<s>${esc(cut(c.old, 140))}</s>\n→ <b>${esc(cut(c.new, 140))}</b>${c.reason ? `\n${note(esc(cut(c.reason, 100)))}` : ''}`
+    if (used + line.length > max) break
+    out.push(line)
+    used += line.length + 2
+  }
+  return { text: out.join('\n\n'), shown: out.length }
 }
 
 // ---- Card ----
@@ -25,7 +43,10 @@ export function reviewText(rv: Review, practice: boolean, extra?: string): strin
   const head = [
     heading('📋', `${esc(rv.company || 'Unknown company')} · ${esc(rv.role || 'Unknown role')}`),
     [rv.score != null && `Match ${scorePill(rv.score)}`, rv.location && `📍 ${esc(rv.location)}`, rv.salary && `💵 ${esc(rv.salary)}`].filter(Boolean).join('  ·  '),
+    ...breakdownLines(rv.breakdown ?? {}).map(l => note(l)),
     '',
+    ...(rv.must_haves?.length ? [`<b>They require</b> ${mustHaveLine(rv.must_haves)}`] : []),
+    ...(rv.coverage?.after != null ? [`🔑 Keywords on your resume: ${rv.coverage.before}% → <b>${rv.coverage.after}%</b>${rv.coverage.missing?.length ? note(` · missing: ${esc(rv.coverage.missing.join(', '))}`) : ''}`] : []),
     ...(rv.reasons.length ? [`<b>Why it fits</b>`, ...rv.reasons.map(r => `• ${esc(r)}`)] : []),
     ...(rv.dealbreakers.length ? [`⚠️ <b>Heads up:</b> ${esc(rv.dealbreakers.join('; '))}`] : []),
     ...(rv.unusual.length ? [`⚠️ <b>Unusual fields</b> (left blank, never filled automatically): ${esc(rv.unusual.join(', '))}`] : []),
@@ -40,7 +61,12 @@ export function reviewText(rv: Review, practice: boolean, extra?: string): strin
     extra ?? '',
   ].filter((x, i, a) => x !== '' || (i > 0 && a[i - 1] !== ''))
   const legend = note('👤 from your profile · 💬 you told me · ✍️ drafted by me · 📎 file · 🔒 private')
-  let budget = 3800 - [...head, ...tail, legend].join('\n').length
+  const ch = changeLines(rv.changes ?? [], 1100)
+  const extras = [
+    ...(ch.shown ? ['', `<b>📝 What I changed on your resume</b>${ch.shown < (rv.changes ?? []).length ? note(` (${ch.shown} of ${rv.changes!.length})`) : ''}`, quote(ch.text, true)] : []),
+    ...(rv.cover_letter ? ['', '<b>✉️ Cover letter</b>', quote(esc(cut(rv.cover_letter, 800)), true)] : []),
+  ]
+  let budget = 3800 - [...head, ...tail, ...extras, legend].join('\n').length
   const rows: string[] = []
   for (const [i, a] of rv.answers.entries()) {
     const v = cut(a.value, 80)
@@ -49,20 +75,49 @@ export function reviewText(rv: Review, practice: boolean, extra?: string): strin
     budget -= line.length + 1
     rows.push(line)
   }
-  return [...head, '', `<b>📝 What I filled in (${rv.answers.length})</b>`, legend, quote(rows.join('\n') || '—', true), '', ...tail].join('\n')
+  return [...head, '', `<b>🧾 What I filled in (${rv.answers.length})</b>`, legend, quote(rows.join('\n') || '—', true), ...extras, '', ...tail].join('\n')
 }
+
+export const editable = (rv: Review) => rv.answers.filter(a => a.source !== 'document')
 
 export function reviewPage(rv: Review, practice: boolean, extra?: string): Page {
   const c = code(rv.job_id)
+  const more = changeLines(rv.changes ?? [], 1100).shown < (rv.changes ?? []).length
   return {
     text: reviewText(rv, practice, extra),
     rows: [
       [{ text: practice ? '✅ Approve (practice)' : '✅ Approve & send', data: `r:ok:${c}`, style: 'success' }],
-      [{ text: '✏️ Change something', data: `r:ch:${c}` }, { text: '🖼 Form screenshot', data: `r:ss:${c}` }],
+      [...(editable(rv).length ? [{ text: '✏️ Edit an answer', data: `r:ea:${c}` }] : []), { text: '💬 Ask for a change', data: `r:ch:${c}` }],
+      [...(rv.resume.fallback ? [] : [{ text: '📄 Original resume', data: `r:or:${c}` }]), { text: '📎 Files', data: `r:fl:${c}` }, ...(more ? [{ text: '📝 All changes', data: `r:df:${c}` }] : [])],
+      ...(rv.coverage?.missing?.length ? [[{ text: '✋ I have one of the missing ones', data: `r:hv:${c}` }]] : []),
       [{ text: '⏭ Skip', data: `r:sk:${c}` }, { text: '🚫 Never this company', data: `r:nv:${c}`, style: 'danger' }],
       ...(rv.url ? [[{ text: '🔗 Open posting', url: rv.url }]] : []),
     ],
   }
+}
+
+// Pick which answer to edit (quick edits never start a Claude task).
+export function editListPage(rv: Review): Page {
+  const c = code(rv.job_id), list = editable(rv).slice(0, 24)
+  return {
+    text: [heading('✏️', 'Which answer should I change?'), `${esc(rv.company)} · ${esc(rv.role)}`, '',
+      ...list.map((a, i) => `<b>${i + 1}.</b> ${esc(cut(a.label, 60))}\n      ${a.sensitive ? note('🔒 private') : note(esc(cut(a.value, 60)))}`),
+      '', note('I update the form and show you a fresh review in a moment. For anything else (like the cover letter), tap Ask for a change.')].join('\n'),
+    rows: [...pairs(list.map((_, i) => ({ text: String(i + 1), data: `r:ea:${c}:${i}` })), 6), [{ text: '✖ Cancel', data: `r:rv:${c}` }]],
+  }
+}
+
+// A typed answer for one plan row: checkboxes take yes/no, selects must name one of the field's options (any case). Pure.
+export function editValue(row: { action: string; value: unknown }, options: string[], text: string): unknown | { error: string } {
+  const v = text.trim()
+  if (row.action === 'check') return /^(yes|y|true)$/i.test(v) ? true : /^(no|n|false)$/i.test(v) ? false : { error: 'Please answer yes or no.' }
+  if (row.action === 'select' && options.length) {
+    const pick = (x: string) => options.find(o => o.toLowerCase() === x.trim().toLowerCase())
+    const parts = (Array.isArray(row.value) ? v.split(',') : [v]).map(pick)
+    if (parts.some(x => !x)) return { error: `Please send one of: ${options.slice(0, 12).join(' · ')}${options.length > 12 ? ' …' : ''}` }
+    return Array.isArray(row.value) ? parts : parts[0]
+  }
+  return v ? v.slice(0, 2000) : { error: 'Send the new answer as a message.' }
 }
 
 // ---- Auto-apply gates (every one checked in code) ----
@@ -95,7 +150,7 @@ export function planRecovery(jobs: RecoverJob[], now: number): RecoverAction[] {
 
 // ---- Wiring ----
 
-export type JobPending = { job: string; chat: number; msg: number; at: number } & ({ kind: 'change' } | { kind: 'code' })
+export type JobPending = { job: string; chat: number; msg: number; at: number } & ({ kind: 'change' } | { kind: 'code' } | { kind: 'edit'; fid: string })
 export type Deps = {
   api: Api
   to: () => number | null
@@ -124,8 +179,10 @@ export function createReview(d: Deps) {
   const name = (id: string) => { const r = readReview(id); return r ? `${esc(r.company)} · ${esc(r.role)}` : esc(id) }
 
   // ---- submit queue: one `jobagent submit` at a time ----
+  let submitting: string | null = null // the one job `jobagent submit` is running for (it may ask for an emailed code)
   async function submitOne(id: string) {
-    const r = await run(['submit', id])
+    submitting = id
+    const r = await run(['submit', id]).finally(() => { submitting = null })
     if (r.code === 'company_cooldown') {
       schedule(id, Date.parse(r.next_allowed_at))
       say(`${heading('⏳', 'Approved, sending later')}\n${name(id)}\n${note(`You applied to this company recently, so I'll send it at ${clock(Date.parse(r.next_allowed_at))} to space things out.`)}`)
@@ -134,7 +191,11 @@ export function createReview(d: Deps) {
     const st = r.ok ? r.status : r.code === 'needs_human' || r.code === 'not_confirmed' ? 'NEEDS_HUMAN' : 'FAILED'
     const detail = String(r.error ?? '')
     if (st === 'DRY_RUN_DONE') say(`${heading('🧪', 'Practice run done')}\n${name(id)}\n${note('Everything worked up to the Submit button. Nothing was sent.')}`)
-    else if (st === 'SUBMITTED') say(`${heading('🎉', 'Application sent')}\n${name(id)}\n${note('Look out for a confirmation email from the company. Mark how it goes under Jobs → Applied.')}`, true)
+    else if (st === 'SUBMITTED') {
+      say(`${heading('🎉', 'Application sent')}\n${name(id)}\n${note('Look out for a confirmation email from the company. Your receipt is under Jobs → Applied.')}`, true, [[{ text: '🧾 Receipt', data: `j:rc:${code(id)}` }]])
+      const shot = join(jobDir(id), 'screenshots', 'submitted.png'), to = d.to()
+      if (to != null && existsSync(shot)) void d.api.sendPhoto(to, new InputFile(shot), { caption: '🧾 The confirmation page', disable_notification: true }).catch(e => log(`receipt shot failed: ${e}`))
+    }
     else say(`${heading('🙋', 'This one needs you')}\n${name(id)}\n${esc(short(detail || 'The application could not be sent.', 300))}`, true, [[{ text: '📥 Open in Jobs', data: `j:v:${code(id)}` }]])
     d.onResult(id, st, detail)
     d.refresh()
@@ -205,6 +266,15 @@ export function createReview(d: Deps) {
     return !!g
   }
 
+  // Silent pictures before the card (resume page 1, the filled form), so the user can judge without opening a file.
+  async function sendPreviews(id: string, rv: Review) {
+    const to = d.to()!
+    const pics = (rv.previews ?? []).map(f => join(jobDir(id), f)).filter(existsSync)
+    if (!pics.length) return sendFiles(id, rv) // an older review: the files themselves
+    const cap = (p: string) => (p.endsWith('resume.png') ? '📄 Your resume for this job (page 1)' : '🖼 The filled-in form')
+    if (pics.length > 1) await d.api.sendMediaGroup(to, pics.map(p => ({ type: 'photo' as const, media: new InputFile(p), caption: cap(p) })), { disable_notification: true }).catch(e => log(`previews failed: ${e}`))
+    else await d.api.sendPhoto(to, new InputFile(pics[0]), { caption: cap(pics[0]), disable_notification: true }).catch(e => log(`preview failed: ${e}`))
+  }
   async function sendFiles(id: string, rv: Review) {
     const to = d.to()!
     const docs = rv.files.map(f => join(jobDir(id), basename(f))).filter(existsSync)
@@ -213,7 +283,9 @@ export function createReview(d: Deps) {
   }
 
   // tg_review: show the review card (or the auto-apply countdown) for a job with a fresh review.json.
-  async function send(id: string): Promise<string> {
+  // `digest`: a job auto-search prepared. Its review waits in the queue and the search's digest announces it,
+  // instead of one loud message per job. (The auto-apply countdown still runs on its own.)
+  async function send(id: string, digest = false): Promise<string> {
     const to = d.to()
     if (to == null) throw new Error('not paired yet')
     if (!JOB_RE.test(id)) throw new Error('bad job_id')
@@ -226,29 +298,31 @@ export function createReview(d: Deps) {
     if (g.status === 'FILLED_DRY') { const s = await run(['job', 'set-status', id, 'AWAITING_APPROVAL']); if (!s.ok) throw new Error(String(s.error)) }
     const s = loadSettings(), practice = practiceOn(s)
     const why = s.apply.mode === 'auto' ? autoGate(rv, s) : null
-    await sendFiles(id, rv)
+    if (digest && !(s.apply.mode === 'auto' && why === null)) { d.refresh(); return 'review ready: it goes into the review queue and the search digest. Stop now.' }
+    await sendPreviews(id, rv)
     if (s.apply.mode === 'auto' && why === null) {
-      const m = await d.api.sendMessage(to, autoText(rv, Date.now() + s.apply.auto_grace_seconds * 1000, practice), { ...OPTS, disable_notification: d.silent() })
+      const m = await d.api.sendMessage(to, autoText(rv, Date.now() + s.apply.auto_grace_seconds * 1000, practice), { ...OPTS, disable_notification: d.silent() || s.notify.reviews !== 'loud' })
       const { at, rows } = startAuto(id, rv, m.message_id)
       await d.api.editMessageText(to, m.message_id, autoText(rv, at, practice), { ...OPTS, reply_markup: kb(rows) }).catch(() => {})
       d.refresh()
       return 'auto-apply countdown started'
     }
     const p = reviewPage(rv, practice, why && s.apply.mode === 'auto' ? note(`Not auto-applied: ${esc(why)}.`) : undefined)
-    await d.api.sendMessage(to, p.text, { ...OPTS, reply_markup: kb(p), disable_notification: d.silent() })
+    await d.api.sendMessage(to, p.text, { ...OPTS, reply_markup: kb(p), disable_notification: d.silent() || loadSettings().notify.reviews !== 'loud' })
     d.refresh()
     return 'review sent'
   }
 
   // Buttons r:<action>:<code8>. Returns the new card, or a toast.
-  async function press(act: string, c: string, chat: number, msg: number): Promise<Page | string | undefined> {
+  async function press(act: string, c: string, chat: number, msg: number, arg?: string): Promise<Page | string | undefined> {
     const id = findJob(c)
     const rv = id ? readReview(id) : null
     if (!id || !rv) return 'That review no longer exists.'
     const practice = practiceOn(loadSettings())
+    const more = allJobs().some(j => j.status === 'AWAITING_APPROVAL' && j.id !== id)
     const done = (emoji: string, title: string, line: string): Page => ({
       text: `${heading(emoji, title)}\n${esc(rv.company)} · ${esc(rv.role)}\n${line}`,
-      rows: [[{ text: '📥 Jobs', data: 'J:a:0' }, { text: '🏠 Home', data: 'm:home' }]],
+      rows: [...(more ? [[{ text: '▶ Next review', data: 'Q:0', style: 'success' as const }]] : []), [{ text: '📥 Jobs', data: 'J:a:0' }, { text: '🏠 Home', data: 'm:home' }]],
     })
     if (act === 'rv') { cancelAuto(id); return reviewPage(rv, practice) }
     if (act === 'ss') {
@@ -257,6 +331,49 @@ export function createReview(d: Deps) {
       await d.api.sendDocument(chat, new InputFile(p, 'form.png'), { caption: `The filled-in form for ${rv.company} · ${rv.role}`, disable_notification: true }).catch(e => log(`screenshot failed: ${e}`))
       return '🖼 Sent below'
     }
+    if (act === 'fl') { await sendFiles(id, rv); return '📎 Sent below' }
+    if (act === 'df') {
+      const all = changeLines(rv.changes ?? [], 1e9).text
+      for (const part of splitMsg(`${heading('📝', 'Every change to your resume')}\n${esc(rv.company)} · ${esc(rv.role)}\n\n${all}`, 3900)) await d.api.sendMessage(chat, part, { ...OPTS, disable_notification: true }).catch(e => log(`send failed: ${e}`))
+      return '📝 Sent below'
+    }
+    if (act === 'ea') {
+      if (arg === undefined) return editListPage(rv)
+      const a = editable(rv)[parseInt(arg, 10)]
+      if (!a) return 'That answer is no longer on the form.'
+      d.setPending({ kind: 'edit', job: id, fid: a.fid, chat, msg, at: Date.now() })
+      return {
+        text: `${heading('✏️', esc(cut(a.label, 80)))}\n\nNow: ${a.sensitive ? `<tg-spoiler>${esc(a.value)}</tg-spoiler>` : `<b>${esc(a.value)}</b>`}\n\nSend the new answer as a message.`,
+        rows: [[{ text: '✖ Cancel', data: `r:ea:${c}` }]],
+      }
+    }
+    if (act === 'hv') {
+      const miss = rv.coverage?.missing ?? []
+      if (arg == null) return {
+        text: `${heading('✋', 'Which of these do you really have?')}\n${esc(rv.company)} · ${esc(rv.role)}\n\n${miss.map((x, i) => `<b>${i + 1}.</b> ${esc(x)}`).join('\n')}\n\n${note('I add it to your profile as a confirmed skill and rework the resume to mention it. Only pick what is true.')}`,
+        rows: [...pairs(miss.map((_, i) => ({ text: String(i + 1), data: `r:hv:${c}:${i}` })), 6), [{ text: '✖ Cancel', data: `r:rv:${c}` }]],
+      }
+      const skill = miss[parseInt(arg, 10)]
+      if (!skill) return 'That one is gone. Open the review again.'
+      if (busy.has(id)) return 'Already updating it…'
+      const have = (readSection('Confirmed skills').confirmed ?? '').split(',').map(x => x.trim()).filter(Boolean)
+      const list = [...new Set([...have, skill.replace(/[,\n]/g, ' ').trim()])].join(', ')
+      if (list.length > 300) return 'Your confirmed skills list is full. Edit it in your profile first.'
+      const r = await run(['profile', 'set-field', 'Confirmed skills', 'confirmed', list])
+      if (!r.ok) return `Could not save it: ${r.error}`
+      cancelAuto(id)
+      d.revise(id, `SYSTEM: the user confirmed a skill from the review's missing keywords; it is the last item of "confirmed" under "## Confirmed skills" in profile.md. Re-tailor the resume so it truthfully mentions it where it fits, re-run the dry fill, rebuild the review and send it again.`)
+      return done('✋', 'Got it', note('Saved to your profile. I am reworking the resume; a fresh review follows.'))
+    }
+    if (act === 'or') {
+      if (busy.has(id)) return 'Already updating it…'
+      cancelAuto(id)
+      void rebuild(id, chat, msg, 'the resume to your original one', async () => {
+        const r = await run(['tailor', id, '--fallback'])
+        return r.ok ? null : 'I could not switch to your original resume.'
+      })
+      return updatingPage(rv, 'Switching to your original resume')
+    }
     if (act === 'cx') {
       cancelAuto(id)
       return { ...done('✋', 'Auto-apply cancelled', note('Nothing was sent. It is waiting for you in Jobs.')), rows: [[{ text: '👀 Review it', data: `r:rv:${c}` }, { text: '🏠 Home', data: 'm:home' }]] }
@@ -264,6 +381,7 @@ export function createReview(d: Deps) {
     if (act === 'ok') {
       cancelAuto(id)
       const err = await approve(id, 'manual')
+      if (!err) logDecision(id, 'approve')
       return err ?? done('✅', practice ? 'Approved (practice)' : 'Approved', note(practice ? 'Running it as practice: nothing is sent.' : 'Sending it now. I will tell you when it is in.'))
     }
     if (act === 'ch') {
@@ -280,15 +398,64 @@ export function createReview(d: Deps) {
         if (!have.some(x => x.toLowerCase() === rv.company.toLowerCase())) trySettingsUpdate({ filters: { company_blocklist: [...have, rv.company] } })
       }
       const s = await run(['job', 'set-status', id, 'SKIPPED', '--detail', act === 'nv' ? 'never this company' : 'you skipped it'])
+      if (s.ok) logDecision(id, act === 'nv' ? 'never' : 'skip')
       d.refresh()
       return s.ok ? done(act === 'nv' ? '🚫' : '⏭', act === 'nv' ? 'Never this company' : 'Skipped', note(act === 'nv' ? `I won't apply to ${esc(rv.company)} again. Undo under Settings → What I look for → Companies to avoid.` : 'Skipped.')) : `Could not skip: ${s.error}`
     }
     return undefined
   }
 
+  // ---- Quick edits: the app changes plan.json itself and replays the dry fill; no Claude task ----
+  const busy = new Set<string>()
+  const updatingPage = (rv: Review, what: string): Page => ({ text: `${heading('⏳', `${what}…`)}\n${esc(rv.company)} · ${esc(rv.role)}\n${note('Filling in the form again. A fresh review arrives in a moment.')}`, rows: [] })
+  // `change` runs first (edit plan.json, switch the resume); then READY -> dry fill -> review build -> a fresh card.
+  // Anything unexpected goes to Claude (revise) with the reason, so the user is never left stuck.
+  async function rebuild(id: string, chat: number, msg: number, what: string, change: () => Promise<string | null>) {
+    busy.add(id)
+    try {
+      const g = await run(['job', 'get', id])
+      if (!g.ok || g.status !== 'AWAITING_APPROVAL') return void d.api.editMessageText(chat, msg, note('This application is no longer waiting for review.'), OPTS).catch(() => {})
+      const err = await change()
+      if (err) return void d.api.editMessageText(chat, msg, `${heading('⚠️', 'Nothing changed')}\n${esc(err)}`, { ...OPTS, reply_markup: kb([[{ text: '👀 Back to the review', data: `r:rv:${code(id)}` }]]) }).catch(() => {})
+      const steps: [string[], number?][] = [[['job', 'set-status', id, 'READY', '--detail', `you changed ${what}`]], [['fill', id, '--dry-run'], 5 * 60_000], [['review', 'build', id]]]
+      for (const [args, timeoutMs] of steps) {
+        const r = await run(args, { timeoutMs })
+        if (!r.ok) {
+          log(`quick edit ${id}: ${args[0]} -> ${r.code}`)
+          d.revise(id, `SYSTEM: the user changed ${what} from the review card, and "jobagent ${args.slice(0, 2).join(' ')}" then failed (${r.code}). Fix what is needed, re-run the dry fill, rebuild the review and send it again.`)
+          return void d.api.editMessageText(chat, msg, `${heading('🔧', 'Almost there')}\n${note('The form needs a closer look after that change. I am on it and will send a fresh review.')}`, OPTS).catch(() => {})
+        }
+      }
+      await d.api.editMessageText(chat, msg, `${heading('✅', 'Updated')}\n${note(`I changed ${esc(what)}. The fresh review is below.`)}`, OPTS).catch(() => {})
+      await send(id)
+    } catch (e) { logError('quick edit failed', e) } finally { busy.delete(id) }
+  }
+
+  // Check the typed value fits the field, then rebuild. Returns an error to show, or null once the update started.
+  function quickEdit(id: string, fid: string, text: string, chat: number, msg: number): string | null {
+    if (busy.has(id)) return 'Already updating it…'
+    const rv = readReview(id)
+    const fields = readJson<{ fid: string; label: string; type: string; options?: string[] }[]>(join(jobDir(id), 'fields.json'), [])
+    const f = fields.find(x => x.fid === fid), planFile = join(jobDir(id), 'plan.json')
+    const plan = readJson<{ fields?: { fid: string; action: string; value: unknown; source?: string }[] } | null>(planFile, null)
+    const row = plan?.fields?.find(r => r.fid === fid)
+    if (!rv || !f || !row) return 'That answer is no longer on the form.'
+    const value = editValue(row, f.options ?? [], text)
+    if (typeof value === 'object' && value && 'error' in value) return (value as { error: string }).error
+    cancelAuto(id)
+    void rebuild(id, chat, msg, `"${cut(f.label, 60)}"`, async () => {
+      row.value = value
+      row.source = 'user'
+      writeJson(planFile, plan)
+      return null
+    })
+    void d.api.editMessageText(chat, msg, updatingPage(rv, 'Updating your answer').text, OPTS).catch(() => {})
+    return null
+  }
+
   // Email-code relay: `jobagent submit` writes needs_input.json and waits for input.json.
   function watchInput() {
-    for (const id of jobIds()) {
+    for (const id of submitting ? [submitting] : []) {
       const n = readJson<{ kind?: string; at?: number } | null>(join(jobDir(id), 'needs_input.json'), null)
       const key = `${id}:${n?.at}`
       if (!n || n.kind !== 'email_code' || asked.has(key) || d.to() == null) continue
@@ -322,6 +489,6 @@ export function createReview(d: Deps) {
   }
 
   setInterval(watchInput, 3000).unref()
-  return { send, press, approve, submitCode, recover, cancelAuto, readReview, _grace: grace, _later: later, _fireAuto: fireAuto }
+  return { send, press, approve, submitCode, quickEdit, recover, cancelAuto, readReview, _grace: grace, _later: later, _fireAuto: fireAuto }
 }
 export type ReviewGate = ReturnType<typeof createReview>

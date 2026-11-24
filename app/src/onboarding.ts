@@ -205,6 +205,7 @@ export function obPage(o: Ob, s: Settings, fields: Record<string, string> = {}):
           '3️⃣ You get a review with every answer and file. <b>Nothing is sent until you approve.</b>', '',
           quote(`🎯 ${esc(short(s.filters.titles.join(', '), 80))}\n📍 ${esc(short(s.filters.locations.join(', ') || 'Anywhere', 60))} · ${label(s.filters.remote)}${s.filters.min_salary ? `\n💵 ${money(s.filters.min_salary, s.filters.currency)}+ per year` : ''}`),
           `🧪 ${note('Practice mode is on: approving runs a practice application. Turn it off in Settings when you are ready.')}`,
+          ...(s.filters.titles.length ? ['', `🔎 <b>I'm running your first search now.</b> ${note('The best few matches get prepared for you; watch the card below.')}`] : []),
         ].join('\n'),
         rows: [[{ text: '🔭 Turn on Auto-search', data: 'o:auto', style: 'success' }], [{ text: '🏠 Go to Home', data: 'm:home' }]],
       }

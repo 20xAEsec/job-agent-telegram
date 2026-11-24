@@ -112,7 +112,7 @@ def test_poll_needs_titles(tmp_path):
 
 def test_boards_cli(tmp_path, capsys):
     assert cli.main(["--data-dir", str(tmp_path), "boards", "add", "greenhouse", "Acme", "beta"]) == 0
-    assert json.loads(capsys.readouterr().out)["boards"] == {"greenhouse": ["acme", "beta"]}
+    assert json.loads(capsys.readouterr().out)["boards"] == {"greenhouse": ["acme", "beta"], "lever": [], "ashby": []}
     assert cli.main(["--data-dir", str(tmp_path), "boards", "add", "greenhouse", "../etc"]) == 1
     assert json.loads(capsys.readouterr().out)["code"] == "bad_slug"
     assert cli.main(["--data-dir", str(tmp_path), "boards", "list"]) == 0
@@ -121,7 +121,7 @@ def test_boards_cli(tmp_path, capsys):
 
 def test_boards_remove(tmp_path):
     boards.add(tmp_path, "greenhouse", ["acme", "beta"])
-    assert boards.remove(tmp_path, "greenhouse", ["ACME"])["boards"] == {"greenhouse": ["beta"]}
+    assert boards.remove(tmp_path, "greenhouse", ["ACME"])["boards"]["greenhouse"] == ["beta"]
 
 
 def site(title, company, url, **kw):
@@ -212,3 +212,11 @@ def test_site_budgets_rotation_and_backoff(tmp_path, monkeypatch):
     # a second run within the minimum gap does not touch LinkedIn
     calls.clear()
     assert "less than 50 minutes" in sites.search(tmp_path, f, ["linkedin"], 6, t0 + timedelta(hours=7, minutes=10))[2][0]["reason"] and calls == []
+
+
+def test_country_setting_beats_the_currency_guess():
+    f = {"titles": ["X"], "locations": [], "currency": "EUR", "remote": "remote_only"}
+    assert sites.queries(f)[0] == "usa"  # EUR names no single country: without the setting the old guess stands
+    c, q = sites.queries({**f, "country": "Germany"})
+    assert c == "germany" and q == [("X remote", "Germany", True)]
+    assert sites.queries({**f, "country": "nowhere-land", "currency": "CHF"})[0] == "switzerland"  # unknown name: fall back

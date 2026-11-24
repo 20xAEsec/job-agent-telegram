@@ -63,6 +63,14 @@ def _chromium() -> tuple[bool, str]:
         return False, f"playwright failed to start: {type(e).__name__}"
 
 
+def _disk(data_dir) -> tuple[bool, str]:
+    try:
+        free = shutil.disk_usage(data_dir if data_dir.exists() else data_dir.parent).free
+    except OSError as e:
+        return False, f"could not check: {e.strerror}"
+    return free > 1_000_000_000, f"{free // 1_000_000_000} GB free"
+
+
 def run(data_dir) -> dict:
     from .docs.render import has_converter
 
@@ -77,7 +85,8 @@ def run(data_dir) -> dict:
         ("docx->pdf converter", has_conv, "Word or LibreOffice" if has_conv else "install Microsoft Word or LibreOffice (or use a PDF resume)"),
         ("data dir writable", *_writable(data_dir)),
         ("telegram token", *_token_ok(data_dir)),
+        ("disk space", *_disk(data_dir)),
     ]
-    optional = {"docx->pdf converter"}  # only needed for .docx resumes: a warning, not a blocker
+    optional = {"docx->pdf converter", "disk space"}  # warnings, not blockers (the converter is only needed for .docx resumes)
     items = [{"name": n, "ok": ok, "detail": d, "required": n not in optional} for n, ok, d in checks]
     return {"ok": all(i["ok"] for i in items if i["required"]), "checks": items}

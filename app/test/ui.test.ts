@@ -2,7 +2,7 @@
 import { describe, expect, test } from 'bun:test'
 import { describe as act } from '../src/activity'
 import { finalFor, renderCard, type Card } from '../src/cards'
-import { parseCsv } from '../src/jobs'
+import { code, parseCsv } from '../src/jobs'
 import { ago, parseList, parseNumber, splitMsg, until, type Page } from '../src/kit'
 import * as OB from '../src/onboarding'
 import * as P from '../src/pages'
@@ -70,6 +70,8 @@ describe('settings catalog', () => {
   test('board links and names', () => {
     expect(ST.boardSlug('https://job-boards.greenhouse.io/acme/jobs/123')).toBe('acme')
     expect(ST.boardSlug('https://boards.greenhouse.io/embed/job_board?for=Beta')).toBe('beta')
+    expect(ST.boardSlug('https://jobs.lever.co/Plaid/2f3c9a1e-5b6d-4c7e-8f90-1a2b3c4d5e6f')).toBe('plaid')
+    expect(ST.boardSlug('https://jobs.ashbyhq.com/notion')).toBe('notion')
     expect(ST.boardSlug('stripe')).toBe('stripe')
     expect(ST.boardSlug('not a board!')).toBeNull()
   })
@@ -91,7 +93,7 @@ describe('screens', () => {
   const job = (id: string, status: string): any => ({
     id, status, updated_at: '2026-11-22T10:00:00Z',
     history: [{ status: 'NEW', at: new Date().toISOString(), detail: '' }, { status, at: new Date().toISOString(), detail: 'Pay below your minimum' }],
-    url: 'https://job-boards.greenhouse.io/acme/jobs/1', source: 'manual', company: 'Acme', role: 'Data Analyst', location: 'Remote', salary: '$100k', score: 82, reasons: ['SQL'], dealbreakers: [],
+    url: 'https://job-boards.greenhouse.io/acme/jobs/1', source: 'manual', company: 'Acme', role: 'Data Analyst', location: 'Remote', salary: '$100k', score: 82, reasons: ['SQL'], dealbreakers: [], breakdown: {}, must_haves: [],
   })
   test('home says what is happening and what needs you', () => {
     const s = S()
@@ -140,6 +142,12 @@ describe('cards', () => {
     expect(renderCard(base({ state: 'waiting', wait_until: Date.now() + 3600_000 })).text).toContain('usage limit')
     expect(renderCard(base({ state: 'queued', position: 3 })).text).toContain('#3')
   })
+  test('a job that needs a job-site login offers the log-in button', () => {
+    const fin = finalFor('FAILED', 'LinkedIn only shows this posting to people who are logged in. Log in under Settings, Job site logins, then tap Try again.', 'j1')!
+    expect(fin.buttons?.map(b => b.data)).toEqual(['L:in:linkedin', `j:rt:${code('j1')}`])
+    expect(finalFor('FAILED', 'Indeed only shows this posting to people who are logged in.', 'j1')!.buttons?.[0].data).toBe('L:in:indeed')
+    expect(finalFor('FAILED', "I couldn't download the posting.", 'j1')!.buttons?.map(b => b.data)).toEqual([`j:rt:${code('j1')}`])
+  })
   test('an auto-search card lists each job on one line', () => {
     const p = renderCard({
       key: 'd', mode: 'multi', icon: '🔭', title: 'Auto-search', state: 'running', note: 'Checked 4 companies',
@@ -148,5 +156,215 @@ describe('cards', () => {
     expect(p.text).toContain('Ready for your review')
     expect(p.text).toContain('Reading the posting')
     expect(p.text).toContain('Checked 4 companies')
+  })
+})
+
+describe('upgrade: screens', () => {
+  const { SCREENS, JOBS, REVIEW } = require('../dev/preview') as typeof import('../dev/preview')
+  test('every preview screen fits Telegram', () => { for (const [, p] of SCREENS) fits(p) })
+  test('wording is reviewed on purpose (snapshots)', () => { for (const [name, p] of SCREENS.filter(([n]) => !/Home|card/i.test(n))) expect(p.text).toMatchSnapshot(name) })
+  test('Home leads with the one thing worth doing', () => {
+    const c = (jobs: typeof JOBS, s = { ...S(), onboarded: true }) => ({ s, queued: 0, jobs, forms: [] }) as P.HomeCtx
+    expect(P.nextAction({ ...c(JOBS), s: S() }).data).toBe('o:resume')
+    expect(P.nextAction(c(JOBS)).text).toBe('🔔 Review your application')
+    expect(P.nextAction(c(JOBS.filter(j => j.status === 'KIT_READY'))).data).toMatch(/^j:kit:/)
+    expect(P.nextAction(c([])).data).toBe('s:ae')
+    const home = P.home(c(JOBS))
+    expect(home.rows[0][0].text).toBe('🔔 Review your application')
+    expect(new Set(datas(home)).size).toBe(datas(home).length) // nothing twice
+  })
+  test('the review card shows resume changes and offers quick edits', () => {
+    const { reviewPage, editValue } = require('../src/review') as typeof import('../src/review')
+    const p = reviewPage(REVIEW, true)
+    expect(p.text).toContain('<s>Ran weekly reports for sales</s>')
+    expect(p.text).toContain('Cover letter')
+    expect(datas(p)).toContain(`r:ea:${datas(p)[0].slice(5)}`)
+    expect(editValue({ action: 'check', value: true }, [], 'no')).toBe(false)
+    expect(editValue({ action: 'select', value: 'Yes' }, ['Yes', 'No'], 'no')).toBe('No')
+    expect(editValue({ action: 'select', value: 'Yes' }, ['Yes', 'No'], 'maybe')).toEqual({ error: 'Please send one of: Yes · No' })
+    expect(editValue({ action: 'fill', value: 'x' }, [], '  ')).toEqual({ error: 'Send the new answer as a message.' })
+  })
+  test('a kit answer can carry markup only as text', () => {
+    const { kitPage } = require('../src/applykit') as typeof import('../src/applykit')
+    const p = kitPage(JOBS[1], { answers: [{ question: 'Why <b>us</b>?', answer: 'Because & so' }], files: [] })
+    expect(p.text).toContain('Why &lt;b&gt;us&lt;/b&gt;?')
+    expect(p.text).toContain('<code>Because &amp; so</code>')
+    fits(p)
+  })
+  test('statuses for forms I cannot fill', () => {
+    expect(finalFor('KIT_READY', '', 'x')?.buttons?.[0].data).toMatch(/^j:ap:/)
+    expect(finalFor('APPLIED_SELF', '', 'x')?.text).toBe('You applied.')
+  })
+  test('where auto-search looked, in words', () => {
+    const { whereText } = require('../src/app') as typeof import('../src/app')
+    expect(whereText(12, ['LinkedIn', 'Indeed'])).toBe('12 companies, LinkedIn and Indeed')
+    expect(whereText(0, ['LinkedIn'])).toBe('LinkedIn')
+    expect(whereText(1, [])).toBe('1 company')
+  })
+  test('the country setting accepts every offered country and "not set"', () => {
+    expect(SettingsSchema.safeParse({ ...S(), filters: { ...S().filters, country: 'Germany' } }).success).toBe(true)
+  })
+})
+
+describe('upgrade: time expectations', () => {
+  test('typical time needs 3 samples per stage, then uses medians', () => {
+    const { typicalMs } = require('../src/cards') as typeof import('../src/cards')
+    expect(typicalMs({ read: [1, 2], score: [1, 1, 1], tailor: [1, 1, 1], fill: [1, 1, 1] })).toBeNull()
+    expect(typicalMs({ read: [60_000, 10, 120_000], score: [1000, 1000, 1000], tailor: [60_000, 60_000, 60_000], fill: [0, 0, 0] })).toBe(121_000)
+  })
+  test('a running job card shows a bar and the usual time', () => {
+    const c: Card = { key: 'k', mode: 'job', icon: '🏢', title: 'Acme · Analyst', state: 'running', started: Date.now() - 60_000, typical_ms: 4 * 60_000, jobs: [{ job_id: 'a', title: 'Acme · Analyst', stage: 'tailor', details: {} }] }
+    const t = renderCard(c).text
+    expect(t).toContain('usually about 4 min')
+    expect(t).toContain('▰▰▰▰▱▱▱▱')
+  })
+})
+
+describe('upgrade: digest, receipts and health', () => {
+  const { JOBS } = require('../dev/preview') as typeof import('../dev/preview')
+  test('one digest per search, best match first, nothing when nothing was prepared', () => {
+    const p = P.digestPage(JOBS)!
+    expect(p.text).toContain('Auto-search found 2 good matches')
+    expect(datas(p)).toContain('Q:0')
+    fits(p)
+    expect(P.digestPage(JOBS.filter(j => j.status === 'SKIPPED'))).toBeNull()
+    expect(P.reviewQueue([{ ...JOBS[0], id: 'b', score: 60 }, JOBS[0]]).map(j => j.score)).toEqual([86, 60])
+  })
+  test('receipts never show answers, and say when it was practice', () => {
+    const p = P.receiptPage(JOBS[3], { at: '2026-11-20T10:00:00Z', url: 'https://x', plan_hash: 'abcdef1234567890', practice: true, files: ['resume.pdf'], answers: 9 })
+    expect(p.text).toContain('Practice receipt')
+    expect(p.text).toContain('abcdef123456')
+    fits(p)
+  })
+  test('health problems in plain words; the Word converter matters only for a .docx resume', () => {
+    const checks = [{ name: 'claude login', ok: false, detail: 'x', required: true }, { name: 'docx->pdf converter', ok: false, detail: 'x', required: false }, { name: 'bun', ok: true, detail: '1', required: true }]
+    expect(P.problemsFrom(checks, false)).toHaveLength(1)
+    expect(P.problemsFrom(checks, true)).toHaveLength(2)
+    const home = P.home({ s: { ...S(), onboarded: true }, queued: 0, jobs: [], forms: [], problems: P.problemsFrom(checks, false) })
+    expect(home.text).toContain('Claude is not logged in')
+    expect(datas(home)).toContain('m:health')
+    fits(P.healthPage(checks, Date.now()))
+  })
+})
+
+describe('upgrade: chat shortcuts', () => {
+  test('everyday questions are answered without Claude; the rest goes to Claude', () => {
+    expect(P.intentOf("What's waiting for me?")).toBe('needs')
+    expect(P.intentOf('show my jobs')).toBe('jobs')
+    expect(P.intentOf('Pause')).toBe('pause')
+    expect(P.intentOf('status')).toBe('home')
+    expect(P.intentOf('snooze for an hour')).toBe('snooze')
+    expect(P.intentOf('raise my minimum salary to 120k')).toBeNull()
+    expect(P.intentOf('pause the search for contract jobs and tell me why you skipped Acme')).toBeNull()
+  })
+})
+
+describe('upgrade: follow-ups', () => {
+  test('ask once about sent applications with no news; never about practice runs', () => {
+    const { JOBS } = require('../dev/preview') as typeof import('../dev/preview')
+    const now = Date.now()
+    const sent = { ...JOBS[3], history: [{ status: 'SUBMITTED', at: new Date(now - 9 * 86_400_000).toISOString(), detail: '' }] }
+    const practice = { ...sent, id: 'p', status: 'DRY_RUN_DONE' }
+    expect(P.followUpsDue([sent, practice], {}, {}, 7, now).map(j => j.id)).toEqual([sent.id])
+    expect(P.followUpsDue([sent], { [sent.id]: 'interview' }, {}, 7, now)).toEqual([])
+    expect(P.followUpsDue([sent], {}, { [sent.id]: { asked: 'x' } }, 7, now)).toEqual([])
+    expect(P.followUpsDue([sent], {}, {}, 0, now)).toEqual([])
+    fits(P.followUpPage(sent, 7))
+  })
+  test('Interview and Offer tabs come from outcomes', () => {
+    const { JOBS } = require('../dev/preview') as typeof import('../dev/preview')
+    const p = P.jobsPage(JOBS, 'i', 0, { [JOBS[3].id]: 'interview' })
+    expect(p.text).toContain('Umbrella')
+    fits(p)
+  })
+})
+
+describe('upgrade: insights', () => {
+  test('funnel, and a suggestion only when the data supports it', () => {
+    const I = require('../src/insights') as typeof import('../src/insights')
+    const { JOBS } = require('../dev/preview') as typeof import('../dev/preview')
+    const mk = (i: number, score: number) => ({ ...JOBS[3], id: `j${i}`, score, status: 'SUBMITTED', history: [{ status: 'NEW', at: new Date().toISOString(), detail: '' }, { status: 'SUBMITTED', at: new Date().toISOString(), detail: '' }] })
+    const jobs = [...[0, 1, 2, 3, 4, 5].map(i => mk(i, 65)), ...[6, 7, 8, 9].map(i => mk(i, 85))]
+    const out: Record<string, string> = Object.fromEntries(jobs.map(j => [j.id, j.score! >= 80 && j.id !== 'j9' ? 'interview' : 'rejected']))
+    expect(I.funnel(jobs, out)).toMatchObject({ applied: 10, interview: 3, replied: 10 })
+    expect(I.suggestion(jobs, out, 60)?.btn?.data).toBe('s:ms')
+    expect(I.suggestion(jobs.slice(0, 5), out, 60)).toBeNull() // too little data
+    const p = I.insightsPage(jobs, out, 60)
+    expect(p.text).toContain('💡')
+    fits(p)
+  })
+})
+
+describe('upgrade: score breakdown and learning from decisions', () => {
+  const I = require('../src/insights') as typeof import('../src/insights')
+  const J = require('../src/jobs') as typeof import('../src/jobs')
+  test('breakdown and must-haves are clamped, filtered and shown escaped', () => {
+    expect(J.breakdownOf({ breakdown: { title: 140, skills: 61.6, pay: 'x' } })).toEqual({ title: 100, skills: 62 })
+    expect(J.mustHavesOf({ must_haves: [{ text: '<b>SQL</b>', status: 'met' }, { text: 'x', status: 'maybe' }, 'junk'] })).toEqual([{ text: '<b>SQL</b>', status: 'met' }])
+    const { JOBS, REVIEW } = require('../dev/preview') as typeof import('../dev/preview')
+    const p = P.jobPage({ ...JOBS[0], must_haves: [{ text: '<b>SQL</b>', status: 'met' }] }, { running: false, hasForm: true })
+    expect(p.text).toContain('✅ &lt;b&gt;SQL&lt;/b&gt;')
+    expect(p.text).toContain('Skills ▰')
+    fits(p)
+    expect((require('../src/review') as typeof import('../src/review')).reviewPage(REVIEW, true).text).toContain('❌ Tableau')
+  })
+  test('a minimum-score suggestion needs 15 decisions and a clear split', () => {
+    const d = (decision: string, score: number) => ({ decision, score })
+    const many = [...Array(8)].map((_, i) => d('approve', 72 + i)).concat([...Array(7)].map((_, i) => d('skip', 50 + i)))
+    expect(I.scoreSuggestion(many, 60)).toMatchObject({ min: 70 })
+    expect(I.scoreSuggestion(many.slice(0, 14), 60)).toBeNull()
+    expect(I.scoreSuggestion(many, 70)).toBeNull() // already there
+    expect(I.scoreSuggestion([...many, d('approve', 52)], 50)).toBeNull() // approved a low one: no clear split
+  })
+  test('the Home tip has a one-tap apply and a dismiss', () => {
+    const home = P.home({ s: { ...S(), onboarded: true }, queued: 0, jobs: [], forms: [], tip: { min: 70, text: 'x' } })
+    expect(datas(home)).toContain('sg:ms:70')
+    expect(datas(home)).toContain('sg:no:70')
+  })
+})
+
+describe('upgrade: keyword coverage', () => {
+  test('the review shows before → after and offers "I have this" only when something is missing', () => {
+    const { REVIEW } = require('../dev/preview') as typeof import('../dev/preview')
+    const R = require('../src/review') as typeof import('../src/review')
+    const p = R.reviewPage(REVIEW, true)
+    expect(p.text).toContain('50% → <b>67%</b>')
+    expect(datas(p).some(d => d.startsWith('r:hv:'))).toBe(true)
+    expect(datas(R.reviewPage({ ...REVIEW, coverage: { before: 80, after: 100, missing: [] } }, true)).some(d => d.startsWith('r:hv:'))).toBe(false)
+    fits(p)
+  })
+})
+
+describe('upgrade: achievements', () => {
+  test('list, add until the cap, remove by key, escaped', () => {
+    const p = P.achievementsPage([['a1', 'Cut <b>report</b> time 40%'], ['a3', 'Led a team of 4']])
+    expect(p.text).toContain('Cut &lt;b&gt;report&lt;/b&gt; time 40%')
+    expect(datas(p)).toEqual(expect.arrayContaining(['p:ach:add', 'p:ach:rm:a1', 'p:ach:rm:a3']))
+    expect(datas(P.achievementsPage([...Array(P.ACH_MAX)].map((_, i) => [`a${i + 1}`, 'x'] as [string, string])))).not.toContain('p:ach:add')
+    fits(p)
+    expect(datas(P.profilePage(S(), {}, [], null))).toContain('p:ach')
+  })
+})
+
+describe('upgrade: notification settings', () => {
+  test('each kind is loud or silent; only the weekly summary can be turned off', () => {
+    expect(SettingsSchema.safeParse(S()).success).toBe(true)
+    expect(SettingsSchema.safeParse({ ...S(), notify: { ...S().notify, weekly: 'off' } }).success).toBe(true)
+    expect(SettingsSchema.safeParse({ ...S(), notify: { ...S().notify, reviews: 'off' } }).success).toBe(false)
+    const ids = ST.SPECS.filter(x => x.path[0] === 'notify').map(x => x.path[1])
+    expect(ids.sort()).toEqual(Object.keys(S().notify).sort()) // every kind has a setting
+    fits(ST.categoryPage('quiet', S()))
+  })
+})
+
+describe('upgrade: dashboard page in Telegram', () => {
+  test('phone access adds a Mini App button; off shows setup', () => {
+    const on = P.dashPage('http://127.0.0.1:4777/?k=x', 'https://abc.trycloudflare.com')
+    expect(on.rows.flat().find(b => b.web_app)?.web_app).toBe('https://abc.trycloudflare.com')
+    expect(datas(on)).toContain('m:dash:off')
+    const off = P.dashPage('http://127.0.0.1:4777/?k=x', null)
+    expect(off.rows.flat().some(b => b.web_app)).toBe(false)
+    expect(datas(off)).toContain('m:dash:ph')
+    fits(on); fits(P.phoneSetupPage(4777))
   })
 })

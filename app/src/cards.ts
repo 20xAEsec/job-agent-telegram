@@ -3,7 +3,7 @@
 import type { Api } from 'grammy'
 import { join } from 'path'
 import { code } from './jobs'
-import { clock, elapsed, esc, heading, kb, note, short, type Btn, type Page } from './kit'
+import { bar, clock, elapsed, esc, heading, kb, note, short, type Btn, type Page } from './kit'
 import { DATA, log, readJson, writeJson } from './state'
 
 export const STAGES = ['read', 'score', 'tailor', 'fill', 'review'] as const
@@ -17,12 +17,33 @@ const STAGE_TEXT: Record<Stage, [running: string, done: string, todo: string]> =
 }
 
 export type Final = { emoji: string; text: string; buttons?: Btn[] }
-export type JobLine = { job_id: string; title: string; url?: string; stage?: Stage; details: Partial<Record<Stage, string>>; final?: Final }
+export type JobLine = { job_id: string; title: string; url?: string; stage?: Stage; stage_at?: number; details: Partial<Record<Stage, string>>; final?: Final }
 export type Card = {
   key: string; mode: 'job' | 'multi' | 'plain'; icon: string; title: string; msg?: number; reply_to?: number
   state: 'queued' | 'paused' | 'running' | 'waiting' | 'ended'
   position?: number; started?: number; ended?: number; doing?: string | null; steps?: number
   wait_until?: number; jobs: JobLine[]; final?: Final; note?: string
+  active?: string // multi cards: the job_id being worked on now (else the last line)
+  typical_ms?: number // how long a job usually takes for this user (from data/stage_times.json)
+}
+
+// ---- How long things usually take: per-stage durations from this user's own runs ----
+const TIMES = join(DATA, 'stage_times.json')
+export function recordStage(stage: Stage, ms: number) {
+  if (ms <= 0 || ms > 3600_000) return // a pause for answers or a usage limit is not a stage time
+  const t = readJson<Partial<Record<Stage, number[]>>>(TIMES, {})
+  t[stage] = [...(t[stage] ?? []), Math.round(ms)].slice(-20)
+  writeJson(TIMES, t)
+}
+// Sum of the median time of each stage before the review; null until every stage has 3 samples.
+export function typicalMs(t = readJson<Partial<Record<Stage, number[]>>>(TIMES, {})): number | null {
+  let sum = 0
+  for (const s of STAGES.slice(0, -1)) {
+    const v = [...(t[s] ?? [])].sort((a, b) => a - b)
+    if (v.length < 3) return null
+    sum += v[Math.floor(v.length / 2)]
+  }
+  return sum
 }
 
 function stepper(j: JobLine, running: boolean): string[] {
@@ -37,7 +58,7 @@ function stepper(j: JobLine, running: boolean): string[] {
 
 const jobLine = (j: JobLine, running: boolean) => {
   if (j.final) return `${j.final.emoji} <b>${esc(short(j.title, 48))}</b>\n     ${note(esc(short(j.final.text, 90)))}`
-  const at = j.stage ? STAGE_TEXT[j.stage][0] : 'Starting'
+  const at = j.stage ? STAGE_TEXT[j.stage][0] : running ? 'Starting' : 'Waiting in line'
   return `${running ? '⏳' : '▫️'} <b>${esc(short(j.title, 48))}</b>\n     ${note(at + (j.stage && j.details[j.stage] ? ` · ${esc(j.details[j.stage]!)}` : ''))}`
 }
 
@@ -49,13 +70,17 @@ export function renderCard(c: Card, now = Date.now()): Page {
   if (c.state === 'queued') lines.push(`🕒 Waiting in line${c.position && c.position > 1 ? ` (#${c.position})` : ''}. ${note("I'll start as soon as I'm free.")}`)
   if (c.state === 'paused') lines.push(`⏸ Waiting: the agent is paused. ${note('Resume from Home to continue.')}`)
   if (single) lines.push('', ...stepper(single, running))
-  else if (c.jobs.length) lines.push('', ...c.jobs.slice(-12).map(j => jobLine(j, running && !j.final && j === c.jobs.at(-1))), ...(c.jobs.length > 12 ? [note(`…and ${c.jobs.length - 12} earlier`)] : []))
+  else if (c.jobs.length) lines.push('', ...c.jobs.slice(-12).map(j => jobLine(j, running && !j.final && (c.active ? j.job_id === c.active : j === c.jobs.at(-1)))), ...(c.jobs.length > 12 ? [note(`…and ${c.jobs.length - 12} earlier`)] : []))
   if (c.note) lines.push('', esc(c.note))
   if (running && c.doing) lines.push('', `↳ ${note(esc(c.doing))}`)
   if (c.state === 'waiting' && c.wait_until) lines.push('', `⏳ <b>Claude usage limit reached.</b>\n${note(`I'll pick this up again automatically at ${clock(c.wait_until)}.`)}`)
   const fin = single?.final ?? c.final
   if (c.state === 'ended' && fin) lines.push('', `${fin.emoji} ${esc(fin.text)}`)
-  if (running && c.started) lines.push(note(`⏱ ${elapsed(now - c.started)}${c.steps ? ` · ${c.steps} steps` : ''}`))
+  if (running && c.started) {
+    const at = single?.stage ? STAGES.indexOf(single.stage) : 0
+    const usual = single && c.typical_ms ? ` · usually about ${Math.max(1, Math.round(c.typical_ms / 60_000))} min` : ''
+    lines.push(`${single ? `${bar(at, STAGES.length - 1, 8)} ` : ''}${note(`⏱ ${elapsed(now - c.started)}${usual}${c.steps ? ` · ${c.steps} steps` : ''}`)}`)
+  }
   else if (c.state === 'ended' && c.started && c.ended) lines.push(note(`Took ${elapsed(c.ended - c.started)} · finished ${clock(c.ended)}`))
 
   const rows: Btn[][] = []
@@ -74,10 +99,15 @@ export function finalFor(status: string, detail: string, jobId: string): Final |
   switch (status) {
     case 'AWAITING_APPROVAL': case 'FILLED_DRY': return { emoji: '🔔', text: 'Ready for your review (below).' }
     case 'NEEDS_ANSWERS': return { emoji: '❓', text: 'I need a few answers from you (below).' }
+    case 'KIT_READY': return { emoji: '🧰', text: `I can't fill this form, so your kit to apply yourself is below${d ? ` (${d})` : ''}.`, buttons: [{ text: '✅ I applied', data: `j:ap:${c}` }] }
+    case 'APPLIED_SELF': return { emoji: '✅', text: 'You applied.' }
     case 'SKIPPED': return { emoji: '⏭', text: `Skipped${d ? `: ${d}` : ''}`, buttons: [{ text: '↩ Apply anyway', data: `j:any:${c}` }] }
     case 'CLOSED': return { emoji: '🚪', text: 'This posting is closed. Nothing to do.' }
     case 'NEEDS_HUMAN': return { emoji: '🙋', text: `Needs you${d ? `: ${d}` : ''}`, buttons: [{ text: '🔄 Try again', data: `j:rt:${c}` }] }
-    case 'FAILED': return { emoji: '⚠️', text: d || 'Something went wrong.', buttons: [{ text: '🔄 Try again', data: `j:rt:${c}` }] }
+    case 'FAILED': { // fetch's needs-login detail ("LinkedIn only shows this posting to people who are logged in...") gets a log-in button
+      const site = /\blogged in\b/i.test(d) ? (/^Indeed\b/.test(d) ? 'indeed' : /^LinkedIn\b/.test(d) ? 'linkedin' : null) : null
+      return { emoji: '⚠️', text: d || 'Something went wrong.', buttons: [...(site ? [{ text: `🔑 Log in to ${site === 'indeed' ? 'Indeed' : 'LinkedIn'}`, data: `L:in:${site}` }] : []), { text: '🔄 Try again', data: `j:rt:${c}` }] }
+    }
     case 'DRY_RUN_DONE': return { emoji: '🧪', text: 'Practice run done. Nothing was sent.' }
     case 'SUBMITTED': return { emoji: '✅', text: 'Applied.' }
     case 'APPROVED': case 'SUBMITTING': return { emoji: '📤', text: 'Approved and on its way.' }

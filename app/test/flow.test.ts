@@ -1,6 +1,6 @@
 // Behaviour: question forms, the Claude task runner (with a fake `claude`), the local bridge, and the review gate.
 import { beforeEach, describe, expect, test } from 'bun:test'
-import { existsSync, mkdirSync, rmSync } from 'fs'
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { createAgent, promptFor, type Outcome, type Task } from '../src/agent'
 import { startBridge } from '../src/bridge'
@@ -216,5 +216,134 @@ describe('review gate', () => {
       { id: 'c', status: 'APPROVED', auto: false },
       { id: 'd', status: 'AWAITING_APPROVAL', auto: true },
     ], now).map(x => x.do)).toEqual(['needs_human', 'submit_at', 'submit_now', 'resend_review'])
+  })
+})
+
+describe('upgrade: queue, index and local reads', () => {
+  test('links the user sends run before auto-search jobs, which run before finding companies', async () => {
+    rmSync(join(DATA, 'tasks.json'), { force: true })
+    writeJson(join(DATA, 'settings.json'), { ...DEFAULT_SETTINGS, agent_on: false }) // paused: nothing starts, we only look at the line
+    const a = createAgent({ bridge: () => ({ url: 'http://x', secret: 's' }), onLive: () => {}, onFinish: () => {}, onUsage: () => {}, exec: () => ({ done: new Promise(() => {}) }) })
+    a.enqueue({ kind: 'discover', title: 'companies', payload: { expand_boards: true } })
+    a.enqueue({ kind: 'job', job_id: 'found-1', title: 'found', payload: { url: 'https://x/1', source: 'discovery', parent: 'search-1' } })
+    a.enqueue({ kind: 'job', title: 'mine', payload: { url: 'https://x/2' } })
+    expect(a.queued().map(t => t.title)).toEqual(['mine', 'found', 'companies'])
+    expect(promptFor(a.queued()[1])).toContain('--source discovery')
+    writeJson(join(DATA, 'settings.json'), DEFAULT_SETTINGS)
+  })
+  test('profile.md and boards.json are read without Python', () => {
+    const { readAnswers, readSection, boardCount } = require('../src/profile') as typeof import('../src/profile')
+    writeFileSync(join(DATA, 'profile.md'), '# Profile\n\n## Contact\n- full_name: Jane Doe\n- email: jane@example.com\n\n## Saved answers\n<!-- x -->\n### work_auth_us\n- question: Authorized?\\nIn the US\n- answer: Yes\n- sensitive: true\n- scope: global\n- updated: 2026-11-01\n### acme-1__why\n- question: Why?\n- answer: Because\n- sensitive: false\n- scope: job\n- source_job: acme-1\n')
+    expect(readSection('Contact')).toEqual({ full_name: 'Jane Doe', email: 'jane@example.com' })
+    const all = readAnswers()
+    expect(all.map(x => x.key)).toEqual(['work_auth_us'])
+    expect(all[0]).toMatchObject({ question: 'Authorized?\nIn the US', answer: 'Yes', sensitive: true, scope: 'global' })
+    expect(readAnswers('acme-1').find(x => x.key === 'acme-1__why')?.base_key).toBe('why')
+    writeJson(join(DATA, 'boards.json'), { greenhouse: ['a', 'b'], lever: ['c'] })
+    expect(boardCount()).toBe(3)
+  })
+  test('a 1,000-job folder keeps Home fast after the first read', () => {
+    const { allJobs, readJob } = require('../src/jobs') as typeof import('../src/jobs')
+    for (let i = 0; i < 1000; i++) {
+      const d = join(DATA, 'jobs', `perf-${i}`)
+      mkdirSync(d, { recursive: true })
+      writeFileSync(join(d, 'status.json'), JSON.stringify({ status: 'SKIPPED', updated_at: '2026-11-01T00:00:00Z', history: [] })) // plain writes: setup speed only
+      writeFileSync(join(d, 'meta.json'), '{"url":"https://x"}')
+    }
+    allJobs()
+    const t0 = performance.now()
+    expect(allJobs().length).toBeGreaterThanOrEqual(1000)
+    expect(performance.now() - t0).toBeLessThan(300)
+    writeJson(join(DATA, 'jobs', 'perf-1', 'status.json'), { status: 'SCORED', updated_at: '2026-11-02T00:00:00Z', history: [] })
+    expect(readJob('perf-1')?.status).toBe('SCORED') // a change on disk is seen
+    rmSync(join(DATA, 'jobs'), { recursive: true, force: true })
+  }, 60_000) // creating 2,000 files is slow on Windows; the budget checked above is the second read only
+})
+
+describe('upgrade: dashboard', () => {
+  test('needs the secret, rejects other hosts, masks private answers, and approves only the review it showed', async () => {
+    const { startDashboard, jobJson, columnOf } = await import('../src/dashboard')
+    const id = 'greenhouse-dash-1', d = join(DATA, 'jobs', id)
+    mkdirSync(d, { recursive: true })
+    writeFileSync(join(d, 'status.json'), JSON.stringify({ status: 'AWAITING_APPROVAL', updated_at: new Date().toISOString(), history: [] }))
+    writeFileSync(join(d, 'review.json'), JSON.stringify({ plan_hash: 'h1', answers: [{ label: 'Salary', value: '150000', sensitive: true }, { label: 'Name', value: 'Jane', sensitive: false }] }))
+    const calls: string[] = []
+    const dash = startDashboard({ botToken: TOKEN, pairedId: () => 42, approve: async (i, h) => { calls.push(`${i}:${h}`); return h === 'h1' ? null : 'changed' }, skip: async () => null, health: () => null }, 0)
+    try {
+      const base = `http://127.0.0.1:${dash.port}`
+      expect((await fetch(`${base}/api/state`)).status).toBe(403) // no cookie
+      expect((await fetch(`${base}/?k=${'0'.repeat(64)}`, { redirect: 'manual' })).status).toBe(403) // wrong secret
+      const login = await fetch(dash.link, { redirect: 'manual' })
+      expect(login.status).toBe(303)
+      const cookie = login.headers.get('set-cookie')!.split(';')[0]
+      expect((await fetch(`${base}/api/state`, { headers: { cookie, host: 'evil.example' } })).status).toBe(403) // DNS rebinding
+      const st = await (await fetch(`${base}/api/state`, { headers: { cookie } })).json()
+      expect(st.jobs.find((j: any) => j.id === id).column).toBe('Needs you')
+      const j = jobJson(id)!
+      expect(j.answers).toEqual([{ label: 'Salary', value: null, source: '', private: true }, { label: 'Name', value: 'Jane', source: '', private: false }])
+      expect(JSON.stringify(j)).not.toContain('150000')
+      const post = (body: unknown, extra: Record<string, string> = {}) => fetch(`${base}/api/job/${id}/approve`, { method: 'POST', headers: { cookie, 'content-type': 'application/json', ...extra }, body: JSON.stringify(body) })
+      expect((await post({ plan_hash: 'h1' }, { origin: 'https://evil.example' })).status).toBe(403) // cross-site
+      expect((await post({ plan_hash: 'old' })).status).toBe(409)
+      expect((await post({ plan_hash: 'h1' })).status).toBe(200)
+      expect(calls).toEqual([`${id}:old`, `${id}:h1`])
+      expect((await fetch(`${base}/api/job/${id}/img/x.png`, { headers: { cookie } })).status).toBe(404) // only known screenshots
+      expect(columnOf({ status: 'SUBMITTED' } as any, 'interview')).toBe('Interview')
+    } finally { dash.stop(); rmSync(d, { recursive: true, force: true }) }
+  })
+})
+
+const TOKEN = '123456:test-token'
+describe('upgrade: dashboard on the phone (Telegram Mini App)', () => {
+  const { createHmac } = require('crypto') as typeof import('crypto')
+  const sign = (fields: Record<string, string>, token = TOKEN) => {
+    const check = Object.keys(fields).sort().map(k => `${k}=${fields[k]}`).join('\n')
+    const key = createHmac('sha256', 'WebAppData').update(token).digest()
+    return new URLSearchParams({ ...fields, hash: createHmac('sha256', key).update(check).digest('hex') }).toString()
+  }
+  const now = Math.floor(Date.now() / 1000)
+  test('only Telegram-signed, recent data for a real user passes', async () => {
+    const { checkInitData } = await import('../src/dashboard')
+    const good = sign({ auth_date: String(now), query_id: 'q', user: JSON.stringify({ id: 42, first_name: 'J' }) })
+    expect(checkInitData(good, TOKEN)).toBe(42)
+    expect(checkInitData(good, '999:other-bot')).toBeNull() // signed for another bot
+    expect(checkInitData(good.replace('42', '43'), TOKEN)).toBeNull() // tampered
+    expect(checkInitData(sign({ auth_date: String(now - 2 * 86400), user: '{"id":42}' }), TOKEN)).toBeNull() // too old
+    expect(checkInitData('user=%7B%22id%22%3A42%7D', TOKEN)).toBeNull() // no hash
+  })
+  test('the tunnel address must be a plain https origin with a real name', async () => {
+    const { setPhoneUrl, phoneUrl } = await import('../src/dashboard')
+    for (const bad of ['http://x.trycloudflare.com', 'https://1.2.3.4', 'https://x.example.com/path', 'https://u:p@x.example.com', 'nonsense']) expect(setPhoneUrl(bad)).toBeNull()
+    expect(setPhoneUrl('https://abc.trycloudflare.com/')).toBe('https://abc.trycloudflare.com')
+    expect(phoneUrl()).toBe('https://abc.trycloudflare.com')
+    expect(setPhoneUrl(null)).toBe('')
+    expect(phoneUrl()).toBeNull()
+  })
+  test('through the tunnel: off means refused; on means Telegram sign-in for the paired user only, never the local secret', async () => {
+    const { startDashboard, setPhoneUrl } = await import('../src/dashboard')
+    let paired: number | null = 42
+    const dash = startDashboard({ botToken: TOKEN, pairedId: () => paired, approve: async () => null, skip: async () => null, health: () => null }, 0)
+    const base = `http://127.0.0.1:${dash.port}`, host = 'abc.trycloudflare.com'
+    const req = (path: string, init: RequestInit & { headers?: Record<string, string> } = {}) => fetch(base + path, { ...init, redirect: 'manual', headers: { host, ...(init.headers ?? {}) } })
+    const auth = (init_data: string) => req('/api/tg-auth', { method: 'POST', headers: { 'content-type': 'application/json', origin: `https://${host}` }, body: JSON.stringify({ init_data }) })
+    const signed = sign({ auth_date: String(now), user: JSON.stringify({ id: 42 }) })
+    try {
+      expect((await req('/')).status).toBe(403) // phone access off: the tunnel host is unknown
+      setPhoneUrl(`https://${host}`)
+      const page = await req('/')
+      expect(page.status).toBe(200)
+      expect(page.headers.get('content-security-policy')).toContain('frame-ancestors https://web.telegram.org')
+      expect((await req(dash.link.slice(base.length))).status).toBe(403) // the local secret link is refused remotely
+      expect((await req('/api/state')).status).toBe(403)
+      expect((await auth(sign({ auth_date: String(now), user: JSON.stringify({ id: 7 }) }))).status).toBe(403) // not the paired user
+      expect((await req('/api/tg-auth', { method: 'POST', headers: { 'content-type': 'application/json', origin: 'https://evil.example' }, body: JSON.stringify({ init_data: signed }) })).status).toBe(403)
+      const ok = await auth(signed)
+      expect(ok.status).toBe(200)
+      const { token } = await ok.json()
+      expect((await req('/api/state', { headers: { 'x-session': token } })).status).toBe(200)
+      expect((await req('/api/state', { headers: { 'x-session': '0'.repeat(64) } })).status).toBe(403)
+      paired = null
+      expect((await auth(signed)).status).toBe(403) // unpaired: nobody signs in
+    } finally { setPhoneUrl(null); dash.stop() }
   })
 })

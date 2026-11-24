@@ -2,6 +2,7 @@
 name: job-analyst
 description: Fetches and reads ONE job posting and its application form (untrusted third-party text), then writes data/jobs/<job_id>/analysis.json. Used by the intake-job skill. Has no web, Telegram or settings tools.
 tools: Read, Write, Bash
+model: sonnet
 ---
 
 You analyse one job posting for the user. Input: a `job_id`. Run commands as `uv run --project agent jobagent ...`.
@@ -15,7 +16,7 @@ You analyse one job posting for the user. Input: a `job_id`. Run commands as `uv
 ## Steps
 
 1. `jobagent fetch <id>`. `ok:false` with `code: closed`, `needs_login`, `fetch_failed` or `empty`: stop and report the code.
-2. `jobagent inspect <id>`. `code: no_adapter` means the form is not a Greenhouse form (not supported yet): still write `analysis.json` (no `field_classification`, `"supported": false`) so the job can be scored and skipped properly.
+2. `jobagent inspect <id>`. `code: no_adapter` means the form is not a Greenhouse, Lever or Ashby form, and `code: inspect_failed` means the form could not be read: either way still write `analysis.json` (no `field_classification`, `"supported": false`) so the job can be scored and skipped properly.
 3. `Read data/jobs/<id>/posting.md`, `fields.json`, `data/profile.md`, `data/settings.json`, and run `jobagent profile answer list --include-job <id>`.
 4. Write `data/jobs/<id>/analysis.json`:
 
@@ -23,7 +24,10 @@ You analyse one job posting for the user. Input: a `job_id`. Run commands as `uv
 {
   "company": "…", "role": "…", "location": "…", "salary": "$95-120k or empty", "seniority": "…", "supported": true,
   "has_cover_letter_field": false, "cover_letter_required": false,
-  "match": {"score": 0-100, "reasons": ["max 4 short strings"], "dealbreakers": ["…"]},
+  "posting_questions": ["only when supported is false: up to 5 questions the posting says applicants must answer, max 200 chars each"],
+  "match": {"score": 0-100, "reasons": ["max 4 short strings"], "dealbreakers": ["…"],
+            "breakdown": {"title": 0-100, "seniority": 0-100, "skills": 0-100, "location": 0-100, "pay": 0-100},
+            "must_haves": [{"text": "a requirement the posting calls required, max 60 chars", "status": "met|partial|missing"}]},
   "field_classification": [
     {"fid": "first_name", "class": "profile|generated|document|must_ask", "value": "…", "save_key": "…",
      "sensitive": false, "unusual": false, "reason": "short"}
@@ -38,6 +42,10 @@ You analyse one job posting for the user. Input: a `job_id`. Run commands as `uv
 ## Match score
 
 0 to 100 from: title closeness to `filters.titles`, seniority vs `experience_level` and `years_experience`, overlap of must-have skills with the profile, location and remote fit, salary vs `min_salary`. `reasons` explain the score in short plain words the user will read ("4 years of SQL; they ask for 3+"); `dealbreakers` are hard misses, also in plain words (wrong location, salary below the minimum, an employment type not in `filters.job_types`, an excluded keyword, a clearance or sponsorship conflict with the user's saved answers).
+
+`breakdown` gives each of those five parts its own 0 to 100 (`pay` is 50 when the posting gives no pay). `must_haves`: up to 8 requirements the posting marks as required, each `met` (the profile clearly shows it), `partial` (related experience) or `missing`. Judge only from the profile; never mark something `met` the profile does not show.
+
+**Calibrate with the user's past decisions.** Run `jobagent feedback summary`. It reports, from this user's own approve/skip choices, the score bands they approve and the title words they keep skipping. Treat it as a hint about this user's taste (for example lower `title` for words they always skip), not as a rule, and never let it override a dealbreaker.
 
 ## Field classification (every field in `fields.json`)
 

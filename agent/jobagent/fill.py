@@ -4,7 +4,7 @@ from pathlib import Path
 
 from . import browser, safety, store
 from .ats import detect
-from .ats.base import Unexpected
+from .ats.base import Unexpected, match_option
 from .paths import atomic_write_json
 
 
@@ -21,6 +21,11 @@ def check_plan(plan, fields: dict) -> list[dict]:
         raise store.JobError("bad_plan", "plan.json must be {fields:[{fid, action: fill|select|check|upload|skip, value, source}]} with fids from fields.json")
     if len({r["fid"] for r in rows}) != len(rows):
         raise store.JobError("bad_plan", "a fid appears twice in plan.json")
+    vals = lambda r: r.get("value") if isinstance(r.get("value"), list) else [r.get("value")]  # noqa: E731
+    off = [r["fid"] for r in rows if r["action"] == "select" and fields[r["fid"]]["options"]
+           and any(match_option(fields[r["fid"]]["options"], v) is None for v in vals(r))]
+    if off:  # caught before a browser opens, with the fields named
+        raise store.JobError("bad_plan", f"select values must be one of the field's options (fields.json): {', '.join(off)}")
     return rows
 
 
@@ -33,7 +38,7 @@ def fill_job(d: Path, job_id: str, dry_run: bool, prepare=None) -> dict:
     j, m = store.jdir(d, job_id), store.meta(d, job_id)
     ad = detect.adapter_for(m)
     if ad is None:
-        raise store.JobError("no_adapter", "only Greenhouse forms are supported so far")
+        raise store.JobError("no_adapter", "only Greenhouse, Lever and Ashby forms can be filled")
     fields = {f["fid"]: f for f in _read(j, "fields.json")}
     rows = check_plan(_read(j, "plan.json"), fields)
     ph = safety.plan_hash(j)  # also proves every upload exists
@@ -48,7 +53,7 @@ def fill_job(d: Path, job_id: str, dry_run: bool, prepare=None) -> dict:
             page.goto(ad.apply_url(m), wait_until="load", timeout=45000)
             first = next(iter(fields.values()))["selector"] if fields else "form"
             try:
-                page.wait_for_selector(first, timeout=15000)
+                page.wait_for_selector(first, state="attached", timeout=15000)  # attached: file inputs are often hidden
             except Exception:  # noqa: BLE001 - the blocker scan below explains why
                 pass
             blocker = ad.detect_blockers(page)

@@ -1,0 +1,57 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Data Analyst @ Acme</title>
+<style>.opts div{padding:4px;border:1px solid #888;width:300px}</style></head>
+<body>
+<!-- Structure of an Ashby application page (jobs.ashbyhq.com/<board>/<id>/application), hand-built from its public markup
+     (not a byte-for-byte recording). Rendered by script like the real single-page app. Submit and Enter-key spies must never fire. -->
+<div id="root"></div>
+<script>
+  const root = document.getElementById('root')
+  const spy = k => { window['__' + k] = (window['__' + k] || 0) + 1; fetch('/__spy?k=' + k) }
+  setTimeout(() => {
+    root.innerHTML = `
+    <div class="ashby-application-form-container"><form onsubmit="return false">
+      <div class="ashby-application-form-section-container">
+        <div class="ashby-application-form-field-entry"><label class="ashby-application-form-question-title _required_x" for="_systemfield_name">Name</label>
+          <input id="_systemfield_name" name="_systemfield_name" type="text" required></div>
+        <div class="ashby-application-form-field-entry"><label class="ashby-application-form-question-title _required_x" for="_systemfield_email">Email</label>
+          <input id="_systemfield_email" name="_systemfield_email" type="email" required></div>
+        <div class="ashby-application-form-field-entry"><label class="ashby-application-form-question-title _required_x" for="_systemfield_resume">Resume</label>
+          <button type="button">Upload File</button><input id="_systemfield_resume" name="_systemfield_resume" type="file" style="display:none"></div>
+        <div class="ashby-application-form-field-entry"><label class="ashby-application-form-question-title" for="_systemfield_location">Location</label>
+          <input id="_systemfield_location" name="_systemfield_location" role="combobox" type="text"><div class="opts"></div></div>
+        <div class="ashby-application-form-field-entry"><label class="ashby-application-form-question-title _required_x">Will you now or in the future require visa sponsorship?</label>
+          <div class="_yesno"><button type="button" aria-pressed="false">Yes</button><button type="button" aria-pressed="false">No</button></div>
+          <input type="checkbox" name="0a1b2c3d-0000-4000-8000-000000000001" style="display:none"></div>
+        <div id="visa-slot"></div>
+        <fieldset class="ashby-application-form-field-entry"><legend class="ashby-application-form-question-title">Years of SQL</legend>
+          <label><input type="radio" name="0a1b2c3d-0000-4000-8000-000000000002" value="a" style="display:none">0-2</label>
+          <label><input type="radio" name="0a1b2c3d-0000-4000-8000-000000000002" value="b" style="display:none">3-5</label>
+          <label><input type="radio" name="0a1b2c3d-0000-4000-8000-000000000002" value="c" style="display:none">6+</label></fieldset>
+        <div class="ashby-application-form-field-entry"><label class="ashby-application-form-question-title" for="0a1b2c3d-0000-4000-8000-000000000003">Anything else?</label>
+          <textarea id="0a1b2c3d-0000-4000-8000-000000000003" name="0a1b2c3d-0000-4000-8000-000000000003"></textarea></div>
+      </div>
+      <div class="ashby-application-form-section-container"><h3 class="ashby-application-form-section-header-title">U.S. Equal Employment Opportunity</h3>
+        <div class="ashby-application-form-field-entry"><label class="ashby-application-form-question-title" for="eeo-1">What is your gender?</label>
+          <select id="eeo-1" name="0a1b2c3d-0000-4000-8000-000000000004"><option value="">Select</option><option>Female</option><option>Male</option><option>Decline to self-identify</option></select></div>
+      </div>
+      <button type="submit" class="ashby-application-form-submit-button">Submit Application</button>
+    </form></div>`
+    document.querySelector('.ashby-application-form-submit-button').addEventListener('click', () => spy('submitted'))
+    document.querySelectorAll('._yesno button').forEach(b => b.addEventListener('click', () => {
+      b.parentNode.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x === b)))
+      if (b.textContent === 'Yes' && !document.getElementById('visa')) document.getElementById('visa-slot').outerHTML =
+        '<div class="ashby-application-form-field-entry"><label class="ashby-application-form-question-title _required_x" for="visa">Which visa?</label><input id="visa" name="visa" type="text" required></div>'
+    }))
+    const loc = document.getElementById('_systemfield_location'), opts = loc.nextElementSibling
+    loc.addEventListener('input', () => {
+      opts.innerHTML = ''
+      ;['Austin, Texas, United States', 'Boston, Massachusetts, United States'].filter(o => loc.value && o.toLowerCase().includes(loc.value.toLowerCase())).forEach(o => {
+        const d = document.createElement('div'); d.setAttribute('role', 'option'); d.textContent = o
+        d.addEventListener('click', () => { loc.value = o; opts.innerHTML = '' }); opts.appendChild(d)
+      })
+    })
+  }, 200)
+  document.addEventListener('keydown', e => { if (e.key === 'Enter') spy('enter') })
+</script>
+</body></html>

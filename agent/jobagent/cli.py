@@ -3,7 +3,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import accounts, check, errlog, fetch, fill, log, pair, profile, repair, resume, review, safety, store, submit, tailor
+from . import accounts, canary, check, errlog, feedback, fetch, fill, log, pair, profile, repair, resolve, resume, review, safety, store, submit, tailor
 from .discover import ats_api, boards
 from .docs.plan import DocError
 from .paths import default_data_dir
@@ -31,7 +31,9 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_parser("cover-letter").add_argument("job_id")
 
     sub.add_parser("fetch").add_argument("job_id")
+    sub.add_parser("canary").add_argument("--live", metavar="URL", help="also read one real posting's form (nothing is typed)")
     sub.add_parser("inspect").add_argument("job_id")
+    sub.add_parser("resolve").add_argument("job_id")  # job site listing -> the employer's fillable posting (writes meta.json only)
     fl = sub.add_parser("fill")
     fl.add_argument("job_id")
     fl.add_argument("--dry-run", action="store_true")
@@ -65,15 +67,19 @@ def _parser() -> argparse.ArgumentParser:
     lo.add_argument("value")
 
     sub.add_parser("discover").add_subparsers(dest="sub", required=True).add_parser("poll")
+    sub.add_parser("feedback").add_subparsers(dest="sub", required=True).add_parser("summary")
+    sub.add_parser("coverage").add_argument("job_id")
     bd = sub.add_parser("boards").add_subparsers(dest="sub", required=True)
     ba = bd.add_parser("add")
     ba.add_argument("ats", choices=boards.ATS)
     ba.add_argument("slugs", nargs="+")
     bd.add_parser("list")
     br = bd.add_parser("remove")
-    br.add_argument("ats", choices=boards.ATS)
+    br.add_argument("ats", choices=[*boards.ATS, "any"])
     br.add_argument("slugs", nargs="+")
-    bd.add_parser("check").add_argument("slug")
+    bc = bd.add_parser("check")
+    bc.add_argument("slug")
+    bc.add_argument("--ats", choices=boards.ATS)
 
     ps = sub.add_parser("profile").add_subparsers(dest="sub", required=True)
     ps.add_parser("write-draft").add_argument("file")
@@ -114,6 +120,10 @@ def _dispatch(a) -> dict:
         return tailor.cover_letter(d, a.job_id)
     if a.cmd == "fetch":
         return fetch.fetch(d, a.job_id)
+    if a.cmd == "canary":
+        return canary.run(a.live)
+    if a.cmd == "resolve":
+        return resolve.resolve(d, a.job_id)
     if a.cmd == "inspect":
         return fetch.inspect_job(d, a.job_id)
     if a.cmd == "fill":
@@ -136,9 +146,13 @@ def _dispatch(a) -> dict:
         return {"ok": True, "jobs": store.list_jobs(d, a.status)}
     if a.cmd == "discover":
         return ats_api.poll(d)
+    if a.cmd == "feedback":
+        return feedback.summary(d)
+    if a.cmd == "coverage":
+        return {"ok": True, **review.coverage(d, a.job_id)}
     if a.cmd == "boards":
         if a.sub == "check":
-            return boards.check(a.slug)
+            return boards.check(a.slug, a.ats)
         if a.sub == "remove":
             return boards.remove(d, a.ats, a.slugs)
         return boards.add(d, a.ats, a.slugs) if a.sub == "add" else {"ok": True, "boards": boards.load_boards(d)}

@@ -38,6 +38,15 @@ def next_allowed(d: Path, job_id: str, now: datetime) -> datetime | None:
     return until
 
 
+def _receipt(d: Path, job_id: str, ph: str, practice: bool) -> None:
+    """receipt.json: what was sent and when (no answer values), so every application can be looked up later."""
+    j, plan = store.jdir(d, job_id), _json(store.jdir(d, job_id) / "plan.json") or {}
+    rows = [r for r in plan.get("fields", []) if isinstance(r, dict) and r.get("action") != "skip"]
+    atomic_write_json(j / "receipt.json", {"at": store.now(), "url": store.meta(d, job_id)["canonical_url"], "plan_hash": ph, "practice": practice,
+                                           "files": [r["value"] for r in rows if r.get("action") == "upload"], "answers": sum(r.get("action") != "upload" for r in rows),
+                                           "screenshot": "screenshots/submitted.png" if (j / "screenshots" / "submitted.png").exists() else ""})
+
+
 def _stop(d, job_id, status, code, msg, **kw):
     store.set_status(d, job_id, status, msg)
     return {"ok": False, "code": code, "error": msg, **kw}
@@ -61,6 +70,7 @@ def run(d: Path, job_id: str, prepare=None, now: datetime | None = None) -> dict
         store.set_status(d, job_id, "SUBMITTING", "dry-run")
         store.set_status(d, job_id, "DRY_RUN_DONE", "dry-run: nothing was submitted")
         atomic_write_json(j / "result.json", {"dry_run": True, "at": store.now()})
+        _receipt(d, job_id, ph, True)
         return {"ok": True, "status": "DRY_RUN_DONE", "dry_run": True}
     nxt = next_allowed(d, job_id, now)
     if nxt:
@@ -76,7 +86,7 @@ def run(d: Path, job_id: str, prepare=None, now: datetime | None = None) -> dict
                 prepare(ctx)
             page = ctx.new_page()
             page.goto(ad.apply_url(m), wait_until="load", timeout=45000)
-            page.wait_for_selector(next(iter(fields.values()))["selector"], timeout=15000)
+            page.wait_for_selector(next(iter(fields.values()))["selector"], state="attached", timeout=15000)  # file inputs are often hidden
             if (b := ad.detect_blockers(page)):
                 return _stop(d, job_id, "NEEDS_HUMAN", "needs_human", f"{b}: a person has to look at this page")
             rep = ad.fill(page, rows, fields, j)
@@ -93,5 +103,6 @@ def run(d: Path, job_id: str, prepare=None, now: datetime | None = None) -> dict
     if not ok:
         return _stop(d, job_id, "NEEDS_HUMAN", "not_confirmed", "no confirmation page: it may or may not have been submitted, check your email")
     atomic_write_json(j / "result.json", {"submitted_at": store.now()})
+    _receipt(d, job_id, ph, False)
     store.set_status(d, job_id, "SUBMITTED", "confirmed")
     return {"ok": True, "status": "SUBMITTED"}

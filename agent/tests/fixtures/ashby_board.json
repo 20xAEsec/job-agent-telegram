@@ -1,0 +1,16 @@
+{
+  "apiVersion": "1",
+  "jobs": [
+    {"id": "7d1e2f3a-4b5c-4d6e-9f70-8a9b0c1d2e3f", "title": "Data Analyst", "department": "Data", "team": "Analytics", "employmentType": "FullTime",
+     "location": "Austin", "secondaryLocations": [], "publishedAt": "2026-11-22T10:00:00.000+00:00", "isListed": true, "isRemote": true, "workplaceType": "Remote",
+     "jobUrl": "https://jobs.ashbyhq.com/acme/7d1e2f3a-4b5c-4d6e-9f70-8a9b0c1d2e3f", "applyUrl": "https://jobs.ashbyhq.com/acme/7d1e2f3a-4b5c-4d6e-9f70-8a9b0c1d2e3f/application",
+     "descriptionHtml": "<p>Acme builds widgets.</p>", "descriptionPlain": "Acme builds widgets. We need a Data Analyst.",
+     "compensation": {"compensationTierSummary": "$110K – $140K • Offers Equity", "scrapeableCompensationSalarySummary": "$110K - $140K",
+       "summaryComponents": [{"compensationType": "Salary", "interval": "1 YEAR", "currencyCode": "USD", "minValue": 110000, "maxValue": 140000},
+                             {"compensationType": "EquityPercentage", "interval": "NONE", "currencyCode": null, "minValue": 0.1, "maxValue": 0.2}]}},
+    {"id": "8e2f3a4b-5c6d-4e7f-8a90-9b0c1d2e3f4a", "title": "Office Chef", "department": "Ops", "employmentType": "FullTime", "location": "Boston",
+     "publishedAt": "2026-11-20T10:00:00.000+00:00", "isListed": true, "isRemote": false, "workplaceType": "OnSite",
+     "jobUrl": "https://jobs.ashbyhq.com/acme/8e2f3a4b-5c6d-4e7f-8a90-9b0c1d2e3f4a", "descriptionPlain": "Cook.", "compensation": {"summaryComponents": []}},
+    {"id": "9f3a4b5c-6d7e-4f80-9a01-0b1c2d3e4f5a", "title": "Hidden Role", "isListed": false, "location": "Remote", "jobUrl": "https://jobs.ashbyhq.com/acme/9f3a4b5c-6d7e-4f80-9a01-0b1c2d3e4f5a"}
+  ]
+}

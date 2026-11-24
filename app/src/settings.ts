@@ -1,6 +1,6 @@
 // Settings screens, table-driven. Every setting says in plain words what it does, shows its current value,
 // and opens an editor that fits its type (choices, chips, toggle, list or typed value). Callback codes stay short.
-import { esc, heading, label, money, nav, note, pairs, short, type Btn, type Page } from './kit'
+import { COUNTRIES, CURRENCIES, esc, heading, label, money, nav, note, pairs, short, type Btn, type Page } from './kit'
 import { getPath, practiceForced, practiceOn, SOURCES, type Settings } from './state'
 
 type Opt = [value: string, label: string, desc?: string]
@@ -13,6 +13,7 @@ export type Spec = {
 const S = (id: string, emoji: string, lbl: string, path: string, t: Spec['t'], what: string, x: Partial<Spec> = {}): Spec =>
   ({ id, emoji, label: lbl, path: path.split('.'), t, what, ...x })
 
+const LOUD: Opt[] = [['loud', '🔔 With sound', 'Rings your phone'], ['silent', '🔕 Silent', 'Arrives without a sound']]
 const LEVELS: Opt[] = ['intern', 'entry', 'mid', 'senior', 'staff', 'lead', 'manager', 'director'].map(v => [v, label(v)])
 
 export const CATS: Record<string, { emoji: string; title: string; blurb: string; items: Spec[] }> = {
@@ -32,7 +33,8 @@ export const CATS: Record<string, { emoji: string; title: string; blurb: string;
         ],
       }),
       S('sa', '💵', 'Minimum salary', 'filters.min_salary', 'int', 'The lowest yearly pay you would accept. Jobs that post a lower range are skipped.', { presets: [50000, 75000, 100000, 125000, 150000, 200000], nullable: 'No minimum', show: (v, s) => (v == null ? 'No minimum' : `${money(v, s.filters.currency)} / year`) }),
-      S('cu', '💱', 'Salary currency', 'filters.currency', 'enum', 'The currency of your minimum salary.', { opts: ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'INR'].map(c => [c, c] as Opt) }),
+      S('cu', '💱', 'Salary currency', 'filters.currency', 'enum', 'The currency of your minimum salary.', { opts: Object.keys(CURRENCIES).map(c => [c, c] as Opt) }),
+      S('co', '🌍', 'Country', 'filters.country', 'enum', 'The country LinkedIn, Indeed and Glassdoor are searched in.', { opts: [['', 'Not set', 'Guess from my locations, then from the currency'], ...COUNTRIES.map(c => [c, c] as Opt)], show: v => v || 'Not set (guessed)' }),
       S('us', '❔', 'Jobs with no salary listed', 'filters.allow_unknown_salary', 'bool', 'Many postings hide the pay. ON keeps them (I still check the rest); OFF skips them when you have a minimum salary.'),
       S('jt', '🗂', 'Job types', 'filters.job_types', 'multi', 'Employment types you want. Jobs of other types are skipped.', { opts: ['full_time', 'part_time', 'contract', 'internship'].map(v => [v, label(v)] as Opt) }),
       S('tm', '🔤', 'Title matching', 'filters.title_match', 'enum', 'How closely a posting\'s title must match one of yours.', {
@@ -56,6 +58,7 @@ export const CATS: Record<string, { emoji: string; title: string; blurb: string;
           ['auto', 'Auto-apply to strong matches', `Jobs at or above your auto-apply score are sent after a short countdown you can cancel. Odd forms and private questions still come to you.`],
         ],
       }),
+      S('fu', '📬', 'Follow-up reminder', 'apply.followup_days', 'int', 'When an application has no news after this many days, I ask how it went and offer to draft a follow-up email (I never send it).', { presets: [0, 5, 7, 10, 14], unit: 'days', show: v => (v ? `after ${v} days` : 'Off') }),
       S('ms', '📊', 'Minimum match score', 'apply.min_match_score', 'int', 'I score each job 0–100 against your profile and settings. Jobs below this are skipped, so you only see real candidates.', { presets: [40, 50, 60, 70, 80], unit: '/ 100' }),
       S('am', '⚡', 'Auto-apply score', 'apply.auto_min_score', 'int', 'With auto-apply on, only jobs at or above this score are sent without your review. The rest wait for you.', { presets: [75, 80, 85, 90, 95], unit: '/ 100' }),
       S('gr', '⏱', 'Auto-apply countdown', 'apply.auto_grace_seconds', 'int', 'Before an auto-apply goes out I show it with a Cancel button for this long.', { presets: [60, 120, 300, 600], show: v => (v >= 60 ? `${v / 60} min` : `${v} s`), unit: 'seconds' }),
@@ -82,16 +85,22 @@ export const CATS: Record<string, { emoji: string; title: string; blurb: string;
     emoji: '🔭', title: 'Auto-search', blurb: 'Let me look for new jobs on a schedule instead of waiting for your links.',
     items: [
       S('ae', '🔭', 'Auto-search', 'discovery.enabled', 'bool', 'ON: I check the companies you watch and the job sites you picked for new jobs that fit your settings, and prepare the good ones. Nothing is sent without you (unless you turn on auto-apply).'),
-      S('as', '🌍', 'Where I look', 'discovery.sources', 'multi', 'The places auto-search checks. Job sites are searched with your titles and locations only, for jobs posted within your "Posted within" window. Jobs I can fill for you are the ones that use Greenhouse; for the rest I score them and you apply yourself.', {
+      S('as', '🌍', 'Where I look', 'discovery.sources', 'multi', 'The places auto-search checks. Job sites are searched with your titles and locations only, for jobs posted within your "Posted within" window. Jobs I can fill for you are the ones that use Greenhouse, Lever or Ashby; for the rest I score them and you apply yourself.', {
         opts: Object.entries(SOURCES) as Opt[], show: v => v.map((x: keyof typeof SOURCES) => SOURCES[x]).join(', '),
       }),
       S('ai', '🔁', 'How often', 'discovery.interval_hours', 'int', 'Time between searches. Searches pause during quiet hours.', { presets: [1, 2, 4, 6, 12, 24], show: v => `every ${v} h`, unit: 'hours' }),
+      S('ar', '⚡', 'Keep Claude in reserve', 'discovery.reserve_pct', 'int', 'Auto-search waits when less than this share of your 5-hour Claude limit is left, so links you send still get done. Links you send always run.', { presets: [0, 10, 20, 30, 50], unit: '%', show: v => (v ? `keep ${v}% free` : 'Off') }),
       S('aw', '🌐', 'Find new companies', 'discovery.web_search', 'bool', 'ON: once a day I also search the web for companies hiring for your titles, and start watching them. Only your titles and locations are used in the search, never personal details.'),
     ],
   },
   quiet: {
-    emoji: '🌙', title: 'Quiet hours', blurb: 'No notification sounds and no automatic searches overnight.',
+    emoji: '🔔', title: 'Notifications', blurb: 'Which messages ring, which arrive silently, and quiet hours overnight. "snooze" in the chat silences everything for an hour.',
     items: [
+      S('nr', '🔔', 'Reviews & questions', 'notify.reviews', 'enum', 'An application ready for your review, an auto-apply countdown, or a question only you can answer.', { opts: LOUD }),
+      S('ns', '🔭', 'Auto-search results', 'notify.search', 'enum', 'The summary after each auto-search, and application kits for jobs you apply to yourself.', { opts: LOUD }),
+      S('nf', '📬', 'Follow-up reminders', 'notify.followups', 'enum', 'When an application has had no news for a while. (Turn the reminder itself off under How I apply.)', { opts: LOUD }),
+      S('nh', '🩺', 'Problems on your computer', 'notify.health', 'enum', 'For example Claude logged out or the disk nearly full.', { opts: LOUD }),
+      S('nw', '📊', 'Weekly summary', 'notify.weekly', 'enum', 'Monday morning: what was found, prepared and applied that week.', { opts: [...LOUD, ['off', 'Off', 'Do not send it']] }),
       S('qe', '🌙', 'Quiet hours', 'quiet_hours.enabled', 'bool', 'ON: messages still arrive in these hours, but silently, and auto-search waits until morning.'),
       S('qf', '🌒', 'Starts at', 'quiet_hours.from', 'time', 'When quiet hours begin (your computer\'s clock).'),
       S('qt', '🌅', 'Ends at', 'quiet_hours.to', 'time', 'When quiet hours end.'),
@@ -119,14 +128,14 @@ export function settingsRoot(s: Settings, companies: number): Page {
     `🎯 <b>What I look for</b>\n${note(esc(short(s.filters.titles.join(', ') || 'No job titles yet', 60)))}`,
     `📨 <b>How I apply</b>\n${note(s.apply.mode === 'auto' ? `Auto-apply at ${s.apply.auto_min_score}+ · skip below ${s.apply.min_match_score}` : `You approve every application · skip below ${s.apply.min_match_score}`)}`,
     `🔭 <b>Auto-search</b>\n${note(s.discovery.enabled ? `On, every ${s.discovery.interval_hours} h · ${companies} compan${companies === 1 ? 'y' : 'ies'} watched` : 'Off')}`,
-    `🌙 <b>Quiet hours</b>\n${note(s.quiet_hours.enabled ? `${s.quiet_hours.from}–${s.quiet_hours.to}` : 'Off')}`,
+    `🔔 <b>Notifications</b>\n${note(`${Object.values(s.notify).filter(v => v === 'loud').length} kinds ring · quiet hours ${s.quiet_hours.enabled ? `${s.quiet_hours.from}–${s.quiet_hours.to}` : 'off'}`)}`,
     `${practiceOn(s) ? '🧪' : '🚀'} <b>Practice mode</b>\n${note(practiceOn(s) ? 'On: applications are prepared but never sent' : 'Off: approved applications are really sent')}`,
   ]
   return {
     text: lines.join('\n'),
     rows: [
       [{ text: '🎯 What I look for', data: 'S:search' }, { text: '📨 How I apply', data: 'S:apply' }],
-      [{ text: '🔭 Auto-search', data: 'S:auto' }, { text: '🌙 Quiet hours', data: 'S:quiet' }],
+      [{ text: '🔭 Auto-search', data: 'S:auto' }, { text: '🔔 Notifications', data: 'S:quiet' }],
       [{ text: practiceOn(s) ? '🧪 Practice mode: On' : '🚀 Practice mode: Off', data: 'P:show' }],
       [{ text: '🔑 Job site logins', data: 'L:show' }],
       nav(),
@@ -223,7 +232,7 @@ export const goLiveConfirm = (): Page => ({
   rows: [[{ text: '🚀 Yes, go live', data: 'P:yes', style: 'danger' }], [{ text: '🧪 Stay in practice mode', data: 'P:show' }]],
 })
 
-// "🏢 Companies I watch": the Greenhouse boards auto-search polls.
+// "🏢 Companies I watch": the Greenhouse, Lever and Ashby boards auto-search polls.
 export function companiesPage(slugs: string[], msg?: string): Page {
   return {
     text: [
@@ -231,21 +240,21 @@ export function companiesPage(slugs: string[], msg?: string): Page {
       'Auto-search checks these companies\' job boards for new openings. I can find more myself ("Find new companies"), or you can add one.', '',
       slugs.length ? slugs.map(x => `• ${esc(x)}`).join('\n') : note('None yet.'),
       ...(msg ? ['', msg] : []),
-      '', note('Only Greenhouse job boards are supported for now.'),
+      '', note('Greenhouse, Lever and Ashby job boards are supported.'),
     ].join('\n'),
     rows: [...pairs(slugs.slice(0, 40).map(x => ({ text: `✖ ${short(x, 22)}`, data: `C:r:${x}` }))), [{ text: '➕ Add a company', data: 'C:a', style: 'success' }], nav('S:auto')],
   }
 }
 
 export const addCompanyPrompt = (): Page => ({
-  text: [heading('➕', 'Add a company'), '', 'Send a link to the company\'s Greenhouse job board, or just its board name.', '', note('For example: https://job-boards.greenhouse.io/acme  or  acme')].join('\n'),
+  text: [heading('➕', 'Add a company'), '', 'Send a link to the company\'s Greenhouse, Lever or Ashby job board, or just its board name.', '', note('For example: https://job-boards.greenhouse.io/acme  or  https://jobs.lever.co/acme  or  acme')].join('\n'),
   rows: [[{ text: '✖ Cancel', data: 'C:list' }]],
 })
 
-// A pasted board link or bare name -> the Greenhouse board slug.
+// A pasted board link or bare name -> the board slug (Greenhouse, Lever or Ashby).
 export function boardSlug(text: string): string | null {
   const t = text.trim()
-  const m = /greenhouse\.io\/(?:embed\/job_board\?for=)?([a-z0-9][a-z0-9_-]*)/i.exec(t) ?? /[?&]for=([a-z0-9][a-z0-9_-]*)/i.exec(t)
+  const m = /(?:greenhouse\.io\/(?:embed\/job_board\?for=)?|lever\.co\/|ashbyhq\.com\/)([a-z0-9][a-z0-9_-]*)/i.exec(t) ?? /[?&]for=([a-z0-9][a-z0-9_-]*)/i.exec(t)
   if (m) return m[1].toLowerCase()
   return /^[a-z0-9][a-z0-9_-]{0,60}$/i.test(t) ? t.toLowerCase() : null
 }

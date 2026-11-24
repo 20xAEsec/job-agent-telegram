@@ -7,3 +7,5 @@ app/node_modules/
 *.log
 .env
 .claude/settings.local.json
+app/dev/out/
+.claude/worktrees/

@@ -38,6 +38,7 @@ Prefer to be guided? Open a terminal in the folder, run `claude`, and say **"set
 - **Mac / Linux:** `scripts/start.sh`
 
 Keep that window open (minimizing is fine). Closing it turns JobAgent off. 
+On Windows you can instead run it in the background (starts at login, no window, restarts if it crashes): `scripts\background.ps1` (turn off with `-Remove`, check with `-Status`).
 Add `-Practice` (Windows) or `--practice` (Mac/Linux) to lock practice mode on.
 
 ## Using it
@@ -47,23 +48,34 @@ Add `-Practice` (Windows) or `--practice` (Mac/Linux) to lock practice mode on.
 | Apply to a job you found | Send the link in the chat. A live card shows each step: reading, scoring, tailoring, filling in, review. |
 | Let it find jobs | Home → **🔭 Turn on Auto-search**. It checks companies you watch and searches LinkedIn and Indeed on a schedule, and can find new companies hiring for your titles. Set **Posted within** to 1 hour (and **How often** to every hour) to see only the newest jobs. |
 | See what needs you | Home → **📥 Needs you**: reviews to approve, questions only you can answer, and stuck jobs. |
-| Approve an application | On the review card: **✅ Approve**, **✏️ Change something** (just say what), **⏭ Skip**, or **🚫 Never this company**. |
+| Approve an application | The review card shows every answer, what changed on your resume, the cover letter, and pictures of your resume and the filled-in form. Tap **✅ Approve**, **✏️ Edit an answer** (instant, no waiting for Claude), **📄 Original resume**, **💬 Ask for a change** (just say what), **⏭ Skip**, or **🚫 Never this company**. |
+| Apply where JobAgent can't fill the form | You get an **application kit**: your tailored resume (and cover letter), drafted answers you tap to copy, and the link. Apply on the site, then tap **✅ I applied** so it is tracked under Jobs → Applied. |
+| Choose which messages ring | **⚙️ Settings → 🔔 Notifications**: reviews, auto-search results, follow-up reminders and computer problems can each ring or arrive silently; the weekly summary can also be turned off. Quiet hours silence everything overnight, and typing *"snooze"* silences everything for an hour. |
 | Change what it looks for | **⚙️ Settings**. Every setting explains what it does. You can also just tell it: *"raise my minimum salary to 120k"*. |
 | Fix a saved answer | **👤 Profile → 💾 Saved answers**. Private ones are hidden behind a tap. |
-| Track how it's going | **📋 Jobs**: mark Interview, Offer, Rejected or No reply, or export everything to a spreadsheet. |
+| Track how it's going | **📋 Jobs**: mark Interview, Offer, Rejected or No reply (Interview and Offer get their own tabs), or export everything to a spreadsheet. **📊 Insights** shows where applications go and what gets replies; a weekly summary arrives on Monday mornings. |
+| Get ready for an interview | Mark the job **🗣 Interview**, then tap **🎤 Interview prep**: a company snapshot, likely questions, STAR stories from your own profile, and questions to ask. |
+| Follow up | After a week with no news, JobAgent asks how it went and can **✍️ draft a follow-up email** for you to send (it never sends email). Change or turn off the reminder in Settings → How I apply. |
+| See everything on one screen | Home → **🖥 Dashboard** gives a link to open on your computer: a pipeline board, score breakdowns, resume changes, insights, and Approve/Skip. It runs only on your computer and never shows private answers. To use it on your phone too, tap **📱 Set up phone access**: you run a free tunnel (Cloudflare Tunnel or Tailscale Funnel), paste its address, and the dashboard opens inside Telegram for your account only (see [docs/dashboard.md](docs/dashboard.md)). |
+| Ask quick questions | Type *"what's waiting?"*, *"status"*, *"show my jobs"*, *"pause"* or *"snooze"* for an instant answer (no Claude needed). Anything else goes to Claude. |
 | Pause or stop | **⏸ Pause** on Home finishes the current step, then waits. **✋ Stop** on a card stops that job. `/stop` stops everything. |
 
 **Practice mode** (on by default): JobAgent does every step except pressing Submit, so you can see exactly what it would send.  
 Turn it off in **Settings → Practice mode** when you're ready; you still approve each application.
+
+**Review queue:** after each auto-search you get one summary of what it prepared, best match first, with **🔔 Review all**, instead of a message per job. Each review shows the match broken down (title, level, skills, place, pay), which requirements you meet, and how many of the posting's keywords your resume covers before and after tailoring; tap **✋ I have one of the missing ones** to add a real skill and rework the resume.  
+**Learning from you:** after 15 approve/skip decisions, Home may suggest a better minimum match score (one tap to apply), and scoring takes your past choices into account.  
+**🩺 Health:** JobAgent checks your computer every few hours (Claude login, browser, disk space…) and shows any problem on Home with the fix. `/health` shows the full list.
 
 **Auto-apply** (off by default, Settings → How I apply): only very strong matches are sent on their own, after a countdown with a Cancel button.  
 Unusual forms and private questions always come to you.
 
 ### What works today
 
-- Filling in **Greenhouse** application forms (used by thousands of companies). Links to other sites are still read and scored, and you get the link to apply yourself.
-- Auto-search over Greenhouse job boards, LinkedIn and Indeed (Glassdoor and ZipRecruiter can be turned on in ⚙️ Settings → Auto-search → Where I look), via [python-jobspy](https://github.com/speedyapply/JobSpy). These sites have no public API, so searches are kept small; LinkedIn may still limit them for a while if you search very often.
-- LinkedIn and Indeed links (sent by you or found by Auto-search) are read in JobAgent's own browser window, where you log in once: ⚙️ Settings → **🔑 Job site logins**. It can't reuse your everyday browser's login (Chrome encrypts its cookies for Chrome alone). **Save password** keeps your login in the computer's password vault (Windows Credential Manager / macOS Keychain) so JobAgent can log back in by itself; it never goes through Telegram. Applying is still done by you on those sites. From a terminal: `uv run --project agent jobagent login linkedin|indeed|status` and `jobagent credentials set|delete linkedin|indeed`.
+- Filling in **Greenhouse**, **Lever** and **Ashby** application forms (used by thousands of companies). For a LinkedIn, Indeed or company-page link, JobAgent first looks for the employer's own form on those systems (the "apply on company site" link, or the company's job board matched by title and location) and fills that instead. Links it can't match are still read and scored, and good matches get an application kit (tailored resume, drafted answers, the link) so you can apply yourself in a few minutes.
+- Auto-search runs without Claude: JobAgent checks the boards and job sites itself and only uses your Claude limit on jobs that pass your filters. Links you send always go ahead of auto-search work. Set your **Country** (⚙️ Settings → What I look for) so LinkedIn, Indeed and Glassdoor search the right place.
+- Auto-search over Greenhouse, Lever and Ashby job boards, LinkedIn and Indeed (Glassdoor and ZipRecruiter can be turned on in ⚙️ Settings → Auto-search → Where I look), via [python-jobspy](https://github.com/speedyapply/JobSpy). These sites have no public API, so searches are kept small; LinkedIn may still limit them for a while if you search very often.
+- LinkedIn links are first read from LinkedIn's public job page, so most need no login (Auto-search reads that page for the LinkedIn results that pass your filters). Indeed links are read through Indeed's app API. When a site still insists on a login, the job is read in JobAgent's own browser window, where you log in once (the job's card has a **🔑 Log in** button): ⚙️ Settings → **🔑 Job site logins**. It can't reuse your everyday browser's login (Chrome encrypts its cookies for Chrome alone). **Save password** keeps your login in the computer's password vault (Windows Credential Manager / macOS Keychain) so JobAgent can log back in by itself; it never goes through Telegram. Applying is still done by you on those sites. From a terminal: `uv run --project agent jobagent login linkedin|indeed|status` and `jobagent credentials set|delete linkedin|indeed`.
 - Resume tailoring for **PDF** and **Word (.docx)** resumes. For .docx you need Microsoft Word or LibreOffice installed (setup tells you).
 
 ## Privacy and safety
@@ -99,7 +111,7 @@ What is kept out: the log copy Claude reads has emails, tokens and your profile 
 
 ```
 app/      Bun + TypeScript: the Telegram bot, screens, live cards, setup wizard, review gate, and the Claude task runner
-agent/    Python (uv): job store, Greenhouse adapter, resume tailoring, form filling (Playwright), discovery, the submit choke point
+agent/    Python (uv): job store, Greenhouse / Lever / Ashby adapters, resume tailoring, form filling (Playwright), discovery, the submit choke point
 .claude/  Claude's skills, the sandboxed job-analyst subagent, and the permission rules for headless tasks
 ```
 
@@ -112,5 +124,9 @@ Tests:
 
 ```
 cd app && bun test                 # app: screens, forms, task runner, bridge, review gate, setup wizard
-uv run --project agent pytest      # Python: store, Greenhouse, tailoring, safety, discovery
+uv run --project agent pytest      # Python: store, ATS adapters, tailoring, safety, discovery
+uv run --project agent jobagent canary [--live <posting url>]   # dry-fill every adapter against its recorded form; --live also reads one real form (types nothing)
 ```
+
+- Adapters live in `agent/jobagent/ats/`. Greenhouse reads its form from the public API; Lever and Ashby have no form API, so `ats/formscan.py` scans the rendered form into the same `fields.json` rows. Every adapter checks for CAPTCHAs and logins (the job goes to "Needs you"), never presses Enter, and only `safety.click_submit` clicks Submit. The Lever and Ashby fixtures in `agent/tests/fixtures` were built from those sites' public markup, not recorded byte for byte, and their submit and confirmation path is not verified live: run `jobagent canary --live <url>` against a real posting after a site redesign.
+- `jobagent resolve <job_id>` upgrades a job-site or company-page listing to the employer's fillable posting (it keeps the job id and stores `resolved_from` in `meta.json`).

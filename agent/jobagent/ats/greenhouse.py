@@ -1,5 +1,6 @@
 """Greenhouse (new job-boards UI: every control's id is the API field name, selects are react-select comboboxes).
 Verified read-only against live postings in stage d; the submit/confirmation/email-code path is NOT verified live."""
+import html
 import json
 import time
 from pathlib import Path
@@ -9,7 +10,7 @@ import httpx
 
 from .. import safety
 from ..paths import atomic_write_json
-from .base import Adapter, Closed, Unexpected
+from .base import Adapter, Closed, Unexpected, match_option, read_back
 
 API = "https://boards-api.greenhouse.io/v1/boards/{board}/jobs/{id}"
 TYPES = {"input_text": "text", "textarea": "textarea", "input_file": "file",
@@ -49,7 +50,14 @@ class Greenhouse(Adapter):
         r.raise_for_status()
         return r.json()
 
-    def inspect(self, meta):
+    def posting_text(self, meta):
+        from ..fetch import html_to_text
+
+        j = self.api_job(meta)
+        loc = (j.get("location") or {}).get("name", "")
+        return f"# {j.get('title', '')}\nCompany: {j.get('company_name', '')}\nLocation: {loc}\n\n{html_to_text(html.unescape(j.get('content', '')))}"
+
+    def inspect(self, meta, d=None, prepare=None):
         return fields_from_api(self.api_job(meta, questions=True))
 
     def detect_blockers(self, page):
@@ -77,7 +85,7 @@ class Greenhouse(Adapter):
                 rep["filled"].append(p["fid"])
             except Exception as e:  # noqa: BLE001 - report the field and the error type, never the value
                 rep["errors"].append({"fid": p["fid"], "error": type(e).__name__})
-        return rep
+        return read_back(page, plan_fields, fields, rep)
 
     def _one(self, page, loc, f, act, value, jdir):
         if act == "upload":
@@ -85,7 +93,7 @@ class Greenhouse(Adapter):
         elif act == "check":
             loc.set_checked(bool(value))
         elif act == "select":
-            for v in value if isinstance(value, list) else [value]:
+            for v in [match_option(f["options"], v) or v for v in (value if isinstance(value, list) else [value])]:  # the page's own spelling
                 if loc.evaluate("e => e.tagName") == "SELECT":
                     loc.select_option(label=str(v))
                 else:

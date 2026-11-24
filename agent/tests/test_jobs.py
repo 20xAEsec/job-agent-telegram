@@ -301,6 +301,9 @@ def test_submit_short_circuits_in_dry_run_and_logs(tmp_path, monkeypatch):
     assert r == {"ok": True, "status": "DRY_RUN_DONE", "dry_run": True}
     assert store.status(tmp_path, jid)["status"] == "DRY_RUN_DONE"
     assert log.export(tmp_path)["rows"][0]["status"] == "DRY_RUN_DONE"
+    rc = json.loads((store.jdir(tmp_path, jid) / "receipt.json").read_text())
+    assert rc["practice"] and rc["files"] == ["resume.pdf"] and rc["answers"] == 10 and rc["plan_hash"] == safety.plan_hash(store.jdir(tmp_path, jid))
+    assert "Jane" not in json.dumps(rc)  # a receipt never holds answer values
     # changing plan.json after approval is refused even in dry-run
     jid2 = mkjob(tmp_path / "b", "APPROVED")
     p = json.loads((store.jdir(tmp_path / "b", jid2) / "plan.json").read_text())
@@ -368,3 +371,72 @@ def test_cli_job_commands_roundtrip(tmp_path, capsys):
     assert [j["job_id"] for j in run("job", "list", "--status", "FETCHED")[1]["jobs"]] == [JID]
     assert run("job", "get", JID)[1]["status"] == "FETCHED"
     assert run("job", "get", "nope")[1]["code"] == "no_job"
+
+
+def test_review_carries_resume_changes_and_cover_letter(tmp_path):
+    jid = mkjob(tmp_path, "FILLED_DRY")
+    j = store.jdir(tmp_path, jid)
+    (j / "diff.json").write_text(json.dumps({"edits": [{"uid": 1, "section": "S", "old": "Ran reports", "new": "Built SQL reports", "reason": "mirrors SQL"}], "reorder": []}))
+    (j / "cover_letter.md").write_text("Dear team,\n\nI build reports.")
+    (j / "cover_letter.pdf").write_bytes(b"%PDF-1.4 x")
+    p = json.loads((j / "plan.json").read_text())
+    p["fields"].append({"fid": "cover_letter", "action": "upload", "value": "cover_letter.pdf", "source": "document"})
+    (j / "plan.json").write_text(json.dumps(p))
+    (j / "fill_report.json").write_text(json.dumps({"plan_hash": safety.plan_hash(j)}))
+    review.build(tmp_path, jid)
+    rv = json.loads((j / "review.json").read_text())
+    assert rv["changes"] == [{"old": "Ran reports", "new": "Built SQL reports", "reason": "mirrors SQL"}]
+    assert rv["cover_letter"].startswith("Dear team") and rv["previews"] == []  # the dummy PDF cannot render: no preview, no error
+
+
+def test_kit_path_for_forms_we_cannot_fill(tmp_path):
+    jid = store.new_job(tmp_path, "https://jobs.lever.co/acme/123")["job_id"]
+    advance(tmp_path, jid, "FETCHED", "SCORED", "KIT_READY", "APPLIED_SELF")
+    assert store.status(tmp_path, jid)["status"] == "APPLIED_SELF"
+    assert not store.allowed("APPLIED_SELF", "READY")  # terminal: the user said they applied
+    assert store.allowed("NEEDS_HUMAN", "APPLIED_SELF") and store.allowed("NEEDS_HUMAN", "KIT_READY")
+    assert log.export(tmp_path)["rows"][0]["status"] == "APPLIED_SELF"
+
+
+def test_feedback_summary_from_the_users_decisions(tmp_path):
+    import json as _j
+    from jobagent import feedback
+
+    rows = [{"job_id": f"j{i}", "decision": "approve", "score": 85, "role": "Data Analyst"} for i in range(3)]
+    rows += [{"job_id": f"k{i}", "decision": "skip", "score": 62, "role": "Sales Analyst"} for i in range(3)]
+    rows += [{"job_id": "j0", "decision": "skip", "score": 85, "role": "Data Analyst"}, {"junk": 1}]  # later decision wins; junk ignored
+    (tmp_path / "feedback.jsonl").write_text("\n".join(_j.dumps(r) for r in rows) + "\nnot json\n", "utf-8")
+    s = feedback.summary(tmp_path)
+    assert s["decisions"] == 6
+    assert {"band": "80-89", "decisions": 3, "approved": 2} in s["by_score"]
+    assert s["title_words_always_skipped"] == ["sales"]
+    assert feedback.summary(tmp_path / "none")["decisions"] == 0
+
+
+def test_coverage_before_and_after_tailoring(tmp_path):
+    jid = mkjob(tmp_path, "FILLED_DRY")
+    j = store.jdir(tmp_path, jid)
+    an = json.loads((j / "analysis.json").read_text())
+    an["match"] = {"score": 80, "must_haves": [{"text": "3+ years of SQL", "status": "met"}, {"text": "dbt", "status": "partial"},
+                                               {"text": "Tableau", "status": "missing"}, {"text": "C++", "status": "met"}]}
+    (j / "analysis.json").write_text(json.dumps(an))
+    (tmp_path / "resume_text.txt").write_text("Built SQL reports in C++ tools. Mysqlx.", "utf-8")
+    assert review.coverage(tmp_path, jid) == {"before": 50, "after": 50, "missing": ["dbt", "Tableau"]}  # no tailored PDF: after = before
+    assert review._keys("Strong knowledge of Python and dbt") == ["python", "dbt"]
+    assert not review._has("mysqlx", "SQL")  # whole words only
+    an["match"] = {"score": 80}
+    (j / "analysis.json").write_text(json.dumps(an))
+    assert review.coverage(tmp_path, jid) == {}
+
+
+def test_concurrent_writes_lose_no_rows(tmp_path):
+    """The app and Claude both run jobagent: parallel status changes and CSV upserts must all land."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    ids = [store.new_job(tmp_path, f"https://boards.greenhouse.io/acme/jobs/{i}")["job_id"] for i in range(16)]
+    with ThreadPoolExecutor(8) as ex:
+        list(ex.map(lambda i: store.set_status(tmp_path, i, "FETCHED"), ids))
+        list(ex.map(lambda i: log.upsert(tmp_path, i), ids))
+    assert sorted(r["job_id"] for r in log.export(tmp_path)["rows"]) == sorted(ids)
+    assert all(store.status(tmp_path, i)["status"] == "FETCHED" for i in ids)
+    assert not list(tmp_path.rglob("*.lock")) and not list(tmp_path.rglob("*.tmp"))

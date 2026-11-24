@@ -1,6 +1,6 @@
 // Read-only view of data/jobs/<id>/ for the screens (fast: no Python). All writes go through `jobagent`.
 import { createHash } from 'crypto'
-import { readdirSync, readFileSync } from 'fs'
+import { appendFileSync, mkdirSync, readdirSync, readFileSync, statSync, watch } from 'fs'
 import { join } from 'path'
 import { DATA, readJson } from './state'
 
@@ -14,14 +14,70 @@ export type Job = {
   id: string; status: string; updated_at: string; history: Hist[]
   url: string; source: string; company: string; role: string; location: string; salary: string
   score: number | null; reasons: string[]; dealbreakers: string[]
+  breakdown: Breakdown; must_haves: MustHave[]
+}
+export type Breakdown = Partial<Record<'title' | 'seniority' | 'skills' | 'location' | 'pay', number>>
+export type MustHave = { text: string; status: 'met' | 'partial' | 'missing' }
+const PARTS = ['title', 'seniority', 'skills', 'location', 'pay'] as const
+export const breakdownOf = (m: any): Breakdown => {
+  const b = m?.breakdown && typeof m.breakdown === 'object' ? m.breakdown : {}
+  return Object.fromEntries(PARTS.filter(k => typeof b[k] === 'number').map(k => [k, Math.max(0, Math.min(100, Math.round(b[k])))]))
+}
+export const mustHavesOf = (m: any): MustHave[] =>
+  (Array.isArray(m?.must_haves) ? m.must_haves : []).filter((x: any) => x && typeof x.text === 'string' && ['met', 'partial', 'missing'].includes(x.status))
+    .slice(0, 8).map((x: any) => ({ text: x.text.slice(0, 80), status: x.status }))
+
+// The user's decisions, for calibration (jobagent feedback summary) and the Home suggestion. Job features only:
+// never posting text or answers.
+export type Decision = 'approve' | 'skip' | 'never' | 'apply_anyway' | 'applied_self' | `outcome_${string}`
+export function logDecision(id: string, decision: Decision) {
+  const j = readJob(id)
+  if (!j) return
+  const row = { at: new Date().toISOString(), job_id: id, decision, score: j.score, role: j.role.slice(0, 120), source: j.source, breakdown: j.breakdown }
+  try { appendFileSync(join(DATA, 'feedback.jsonl'), JSON.stringify(row) + '\n') } catch { /* best effort */ }
+}
+export function readDecisions(): { job_id: string; decision: string; score: number | null }[] {
+  let text = ''
+  try { text = readFileSync(join(DATA, 'feedback.jsonl'), 'utf8') } catch { return [] }
+  const last = new Map<string, any>()
+  for (const l of text.split('\n')) { try { const r = JSON.parse(l); if (r?.job_id && !String(r.decision).startsWith('outcome_')) last.set(r.job_id, r) } catch { /* skip */ } }
+  return [...last.values()]
 }
 
 export function jobIds(): string[] {
   try { return readdirSync(join(DATA, 'jobs')).filter(i => JOB_RE.test(i)) } catch { return [] }
 }
 
-export function readJob(id: string): Job | null {
+// Job index: a job is re-read only when status.json, meta.json or analysis.json changed on disk.
+// Home refreshes every 30 s and on every event, so re-parsing every job folder each time would grow with every search.
+const cache = new Map<string, { stamp: string; job: Job | null }>()
+const mtime = (f: string) => { try { return statSync(f).mtimeMs } catch { return 0 } }
+// A folder watcher marks which jobs changed, so a full list (Home, Jobs) re-checks only those. If the watcher cannot
+// start, or every minute in case an event was missed, it falls back to checking every job's file times.
+let watching = false, verifiedAt = 0
+const dirty = new Set<string>()
+function watchJobs() {
+  if (watching) return
+  try {
+    mkdirSync(join(DATA, 'jobs'), { recursive: true })
+    watch(join(DATA, 'jobs'), { recursive: true }, (_e, f) => { if (f) dirty.add(String(f).split(/[\/]/)[0]) }).unref?.()
+    watching = true
+  } catch { /* no watcher: readJob checks file times every time */ }
+}
+
+export function readJob(id: string, trusted = false): Job | null {
   if (!JOB_RE.test(id)) return null
+  if (trusted && cache.has(id) && !dirty.has(id)) return cache.get(id)!.job
+  dirty.delete(id)
+  const dir = jobDir(id), stamp = `${mtime(join(dir, 'status.json'))}:${mtime(join(dir, 'meta.json'))}:${mtime(join(dir, 'analysis.json'))}`
+  const hit = cache.get(id)
+  if (hit?.stamp === stamp) return hit.job
+  const job = loadJob(id)
+  cache.set(id, { stamp, job })
+  return job
+}
+
+function loadJob(id: string): Job | null {
   const st = readJson<{ status?: string; updated_at?: string; history?: Hist[] } | null>(join(jobDir(id), 'status.json'), null)
   if (!st?.status) return null
   const m = readJson<Record<string, any>>(join(jobDir(id), 'meta.json'), {})
@@ -34,12 +90,18 @@ export function readJob(id: string): Job | null {
     score: typeof match.score === 'number' ? match.score : null,
     reasons: Array.isArray(match.reasons) ? match.reasons.map(String).slice(0, 4) : [],
     dealbreakers: Array.isArray(match.dealbreakers) ? match.dealbreakers.map(String).slice(0, 3) : [],
+    breakdown: breakdownOf(match), must_haves: mustHavesOf(match),
   }
 }
 
-export const allJobs = (): Job[] =>
-  jobIds().map(readJob).filter((j): j is Job => !!j).sort((a, b) => b.updated_at.localeCompare(a.updated_at))
-export const findJob = (c: string) => jobIds().find(i => code(i) === c)
+export function allJobs(now = Date.now()): Job[] {
+  watchJobs()
+  const trusted = watching && now - verifiedAt < 60_000
+  if (!trusted) verifiedAt = now
+  return jobIds().map(id => readJob(id, trusted)).filter((j): j is Job => !!j).sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+}
+const codes = new Map<string, string>() // id -> code: sha1 once per id, not once per id per tap
+export const findJob = (c: string) => jobIds().find(i => { let k = codes.get(i); if (!k) codes.set(i, (k = code(i))); return k === c })
 
 export const jobTitle = (j: Pick<Job, 'company' | 'role' | 'url' | 'id'>) =>
   j.company || j.role ? `${j.company || 'Unknown company'} · ${j.role || 'Unknown role'}` : hostOf(j.url) || j.id
@@ -55,6 +117,8 @@ export const STATUS: Record<string, { emoji: string; text: string; needsYou?: bo
   READY: { emoji: '⚙️', text: 'Preparing the application' },
   FILLED_DRY: { emoji: '⚙️', text: 'Preparing the review' },
   AWAITING_APPROVAL: { emoji: '🔔', text: 'Ready for your review', needsYou: true },
+  KIT_READY: { emoji: '🧰', text: 'Ready for you to apply', needsYou: true },
+  APPLIED_SELF: { emoji: '✅', text: 'You applied', done: true },
   APPROVED: { emoji: '⏳', text: 'Approved, sending soon' },
   SUBMITTING: { emoji: '📤', text: 'Sending now' },
   SUBMITTED: { emoji: '✅', text: 'Applied', done: true },

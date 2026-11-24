@@ -20,7 +20,7 @@ Input: a `job_id` whose `data/jobs/<job_id>/` has `analysis.json` (from the `job
 ```
 
 Rules (the command rejects most of these, but do not rely on that):
-- **Never invent** employers, titles, dates, degrees, certifications, metrics or skills that are not in the base resume or `profile.md`. Rephrasing, emphasis, reordering inside a section, and swapping in the posting's own synonyms for things the user really did are fine.
+- **Never invent** employers, titles, dates, degrees, certifications, metrics or skills that are not in the base resume or `profile.md`. Skills under `## Confirmed skills` in `profile.md` are facts the user confirmed: you may name them (in Skills, or in a bullet where they really used it), without inventing where or how long. Lines under `## Achievements` are wins the user told you about: you may turn one into a resume bullet under the job it belongs to, keeping its meaning and its numbers exactly (never larger, never more precise). Rephrasing, emphasis, reordering inside a section, and swapping in the posting's own synonyms for things the user really did are fine.
 - `new_text` must be at most the unit's `max_chars`, keep its tense and style, and for a unit with a bold lead-in (skills lines) contain only the text after the lead-in.
 - At most 5 edited units for `tailoring: light`, at most 12 for `moderate` (the outline says which). `reorder` lists every uid it moves, all from one section.
 - Prefer few, high-value edits: the summary, then the bullets whose wording is closest to the posting's requirements.

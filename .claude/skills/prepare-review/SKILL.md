@@ -21,7 +21,7 @@ One entry per field in `fields.json` that gets a value (`action: skip` for the r
 | `profile` | `fill` (text, textarea) or `select` (value = one of the field's `options`, exactly) with the classification's `value` | `profile` |
 | `generated` | `fill` with the draft, only if `settings.apply.draft_free_text` | `generated` |
 | `must_ask` | the user's answer from `answers.json` (it maps `fid` to value), same actions | `user` |
-| `document` | `upload` with the bare file name: `resume.pdf` for `resume`, `cover_letter.pdf` for `cover_letter` (only if that file exists; otherwise `skip`) | `document` |
+| `document` | `upload` with the bare file name: `resume.pdf` for the resume upload (`resume`, `_systemfield_resume`, ...), `cover_letter.pdf` for the cover letter upload (only if that file exists; otherwise `skip`) | `document` |
 
 - `select` for a multiselect takes a list of options. `check` is for checkboxes (`value` true/false).
 - A required field with no value: do not guess. `tg_ask` it with its `fid` (batch_id `<job_id>-2`, or `-3` if that exists), `jobagent job set-status <job_id> NEEDS_ANSWERS`, stop.

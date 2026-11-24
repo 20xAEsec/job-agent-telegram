@@ -2,7 +2,7 @@
 // Page text is Telegram HTML: wrap every user- or posting-derived value in esc().
 import { InlineKeyboard } from 'grammy'
 
-export type Btn = { text: string; data?: string; url?: string; style?: 'success' | 'danger' | 'primary' }
+export type Btn = { text: string; data?: string; url?: string; web_app?: string; style?: 'success' | 'danger' | 'primary' }
 export type Page = { text: string; rows: Btn[][] }
 
 export const esc = (s: unknown) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -14,6 +14,15 @@ export const kv = (label: string, value: string) => `<b>${label}:</b> ${value}`
 export const note = (t: string) => `<i>${t}</i>`
 export const quote = (t: string, expandable = false) => `<blockquote${expandable ? ' expandable' : ''}>${t}</blockquote>`
 // ▰▰▰▱▱ progress bar
+// Score parts and must-haves on one or two short lines each: "Title ▰▰▰▰▱ · Skills ▰▰▰▱▱ …", "✅ SQL · 🟡 dbt · ❌ Tableau".
+const PART_LABEL: Record<string, string> = { title: 'Title', seniority: 'Level', skills: 'Skills', location: 'Place', pay: 'Pay' }
+export const breakdownLines = (b: Record<string, number | undefined>) => {
+  const parts = Object.entries(PART_LABEL).filter(([k]) => typeof b[k] === 'number').map(([k, l]) => `${l} ${bar(b[k]!, 100, 5)}`)
+  return parts.length ? [parts.slice(0, 3).join('  '), ...(parts.length > 3 ? [parts.slice(3).join('  ')] : [])] : []
+}
+const MUST_ICON = { met: '✅', partial: '🟡', missing: '❌' } as const
+export const mustHaveLine = (m: { text: string; status: keyof typeof MUST_ICON }[]) => m.map(x => `${MUST_ICON[x.status]} ${esc(x.text)}`).join(' · ')
+
 export const bar = (done: number, total: number, w = 10) => {
   const n = total ? Math.max(0, Math.min(w, Math.round((done / total) * w))) : 0
   return '▰'.repeat(n) + '▱'.repeat(w - n)
@@ -33,6 +42,7 @@ export function kb(p: Page | Btn[][]): InlineKeyboard {
     if (!row.length) continue
     for (const b of row) {
       if (b.url) k.url(b.text, b.url)
+      else if (b.web_app) k.webApp(b.text, b.web_app) // a Telegram Mini App (https only)
       else k.add({ text: b.text, callback_data: b.data ?? 'noop', ...(b.style ? { style: b.style } : {}) } as any)
     }
     k.row()
@@ -53,10 +63,15 @@ const LABELS: Record<string, string> = {
 }
 export const label = (v: unknown) => LABELS[String(v)] ?? String(v).replace(/_/g, ' ')
 
+// The one list of salary currencies (settings, onboarding and money() all use it). '' = no symbol: "95k CHF".
+export const CURRENCIES: Record<string, string> = { USD: '$', EUR: '€', GBP: '£', CAD: 'CA$', AUD: 'A$', INR: '₹', NZD: 'NZ$', SGD: 'S$', CHF: '', SEK: '', NOK: '', DKK: '', PLN: '' }
+// Countries auto-search can search on Indeed and Glassdoor (names python-jobspy understands).
+export const COUNTRIES = ['United States', 'Canada', 'United Kingdom', 'Ireland', 'Germany', 'France', 'Netherlands', 'Spain', 'Italy', 'Switzerland', 'Sweden', 'Poland', 'Australia', 'New Zealand', 'India', 'Singapore']
+export const isUS = (country: string) => !country.trim() || /^(us|usa|u\.s\.a?\.?|united states( of america)?|america)$/i.test(country.trim())
+
 export const money = (n: number, cur = 'USD') => {
-  const sym: Record<string, string> = { USD: '$', EUR: '€', GBP: '£', CAD: 'CA$', AUD: 'A$', INR: '₹' }
   const v = n >= 1000 ? `${Math.round(n / 1000)}k` : String(n)
-  return sym[cur] ? `${sym[cur]}${v}` : `${v} ${cur}`
+  return CURRENCIES[cur] ? `${CURRENCIES[cur]}${v}` : `${v} ${cur}`
 }
 
 export const clock = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })

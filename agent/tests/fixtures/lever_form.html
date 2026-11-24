@@ -1,0 +1,66 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Acme - Data Analyst</title></head>
+<body>
+<!-- Structure of a Lever apply page (jobs.lever.co/<site>/<id>/apply), hand-built from its public markup (not a byte-for-byte recording).
+     onsubmit and Enter-key spies: neither may ever fire. Uploading a resume re-fills the name after a moment, like Lever's resume parser. -->
+<div class="posting-header"><h2>Data Analyst</h2></div>
+<form id="application-form" method="POST" enctype="multipart/form-data" novalidate
+      onsubmit="window.__submitted=(window.__submitted||0)+1; fetch('/__spy?k=submit'); return false">
+  <input type="hidden" name="accountId" value="x">
+  <div class="section page-centered application-form"><h4>Submit your application</h4>
+    <ul>
+      <li class="application-question resume"><label><div class="application-label">Resume/CV<span class="required">✱</span></div>
+        <div class="application-field"><a class="postings-btn template-btn-utility">ATTACH RESUME/CV<input type="file" id="resume-upload-input" name="resume" style="display:none"></a></div></label></li>
+      <li class="application-question"><label><div class="application-label">Full name<span class="required">✱</span></div>
+        <div class="application-field"><input type="text" name="name" required></div></label></li>
+      <li class="application-question"><label><div class="application-label">Email<span class="required">✱</span></div>
+        <div class="application-field"><input type="email" name="email" required></div></label></li>
+      <li class="application-question"><label><div class="application-label">Phone</div>
+        <div class="application-field"><input type="tel" name="phone"></div></label></li>
+      <li class="application-question"><label><div class="application-label">Current company</div>
+        <div class="application-field"><input type="text" name="org"></div></label></li>
+      <li class="application-question"><label><div class="application-label">Current location</div>
+        <div class="application-field"><input type="text" name="location" id="location-input"><input type="hidden" name="selectedLocation"></div></label></li>
+    </ul>
+  </div>
+  <div class="section page-centered application-form"><h4>Links</h4>
+    <ul><li class="application-question"><label><div class="application-label">LinkedIn URL</div>
+      <div class="application-field"><input type="text" name="urls[LinkedIn]"></div></label></li></ul>
+  </div>
+  <div class="section page-centered application-form">
+    <input type="hidden" name="cards[11111111-1111-4111-8111-111111111111][baseTemplate]" value="{}">
+    <ul>
+      <li class="application-question custom-question"><div class="application-label full-width"><div class="text">Are you legally authorized to work in the United States?<span class="required">✱</span></div></div>
+        <div class="application-field full-width"><ul data-qa="multiple-choice">
+          <li><label><input type="radio" name="cards[11111111-1111-4111-8111-111111111111][field0]" value="Yes" required><span class="application-answer-alternative">Yes</span></label></li>
+          <li><label><input type="radio" name="cards[11111111-1111-4111-8111-111111111111][field0]" value="No" required><span class="application-answer-alternative">No</span></label></li>
+        </ul></div></li>
+      <li class="application-question custom-question"><div class="application-label full-width"><div class="text">Which tools do you use?</div></div>
+        <div class="application-field full-width"><ul data-qa="checkboxes">
+          <li><label><input type="checkbox" name="cards[11111111-1111-4111-8111-111111111111][field1]" value="SQL"><span class="application-answer-alternative">SQL</span></label></li>
+          <li><label><input type="checkbox" name="cards[11111111-1111-4111-8111-111111111111][field1]" value="dbt"><span class="application-answer-alternative">dbt</span></label></li>
+          <li><label><input type="checkbox" name="cards[11111111-1111-4111-8111-111111111111][field1]" value="Python"><span class="application-answer-alternative">Python</span></label></li>
+        </ul></div></li>
+      <li class="application-question custom-question"><div class="application-label full-width"><div class="text">Why Acme?<span class="required">✱</span></div></div>
+        <div class="application-field full-width"><textarea name="cards[11111111-1111-4111-8111-111111111111][field2]" required></textarea></div></li>
+      <li class="application-question custom-question"><label><div class="application-label full-width"><div class="text">How did you hear about us?</div></div>
+        <div class="application-field full-width"><select name="cards[11111111-1111-4111-8111-111111111111][field3]">
+          <option value="">Select...</option><option value="LinkedIn">LinkedIn</option><option value="A friend">A friend</option></select></div></label></li>
+    </ul>
+  </div>
+  <div class="section page-centered application-form eeo-section"><h4>U.S. Equal Employment Opportunity information</h4>
+    <ul><li class="application-question"><label><div class="application-label">Gender</div>
+      <div class="application-field"><select name="eeo[gender]"><option value="">Select ...</option><option value="Female">Female</option>
+        <option value="Male">Male</option><option value="Decline to self-identify">Decline to self-identify</option></select></div></label></li></ul>
+  </div>
+  <div class="section page-centered application-form"><h4>Additional information</h4>
+    <textarea name="comments" placeholder="Add a cover letter or anything else you want to share."></textarea>
+  </div>
+  <div class="h-captcha" data-size="invisible" data-sitekey="k"></div>
+  <button type="submit" id="btn-submit" data-qa="btn-submit" class="postings-btn template-btn-submit">Submit application</button>
+</form>
+<script>
+  document.addEventListener('keydown', e => { if (e.key === 'Enter') { window.__enter = (window.__enter || 0) + 1; fetch('/__spy?k=enter') } })
+  document.querySelector('#resume-upload-input').addEventListener('change', () => setTimeout(() => { document.querySelector('[name=name]').value = 'Parsed From Resume' }, 300))
+</script>
+</body></html>

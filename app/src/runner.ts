@@ -4,16 +4,20 @@ import { join } from 'path'
 import { spawn, spawnSync } from 'child_process'
 import { DATA, ROOT } from './state'
 
-export type Run = (args: string[]) => Promise<any>
+export type Run = (args: string[], o?: { timeoutMs?: number }) => Promise<any>
 
-export const runJobagent: Run = args => new Promise(resolve => {
+export const runJobagent: Run = (args, o = {}) => new Promise(resolve => {
   const p = spawn('uv', ['run', '--quiet', '--project', join(ROOT, 'agent'), 'jobagent', '--data-dir', DATA, ...args], {
     cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
   })
-  let out = ''
+  let out = '', timedOut = false
   p.stdout.on('data', d => (out += d))
+  p.stderr.on('data', () => {}) // drain: a full stderr pipe would block the helper
+  const timer = o.timeoutMs ? setTimeout(() => { timedOut = true; if (p.pid) killTree(p.pid) }, o.timeoutMs) : null
   p.on('error', e => resolve({ ok: false, code: 'no_uv', error: `could not run uv: ${e.message}` }))
   p.on('close', () => {
+    if (timer) clearTimeout(timer)
+    if (timedOut) return resolve({ ok: false, code: 'timeout', error: 'the helper took too long' })
     try { resolve(JSON.parse(out.trim().split('\n').pop() ?? '')) } catch { resolve({ ok: false, code: 'bad_output', error: 'the helper gave no answer' }) }
   })
 })

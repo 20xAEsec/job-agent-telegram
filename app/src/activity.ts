@@ -8,6 +8,8 @@ const CLI: [RegExp, string | null][] = [
   [/\bjob new\b/, 'Saving the job'],
   [/\bfetch\b/, 'Downloading the posting'],
   [/\binspect\b/, 'Reading the application form'],
+  [/\bresolve\b/, "Looking for the employer's own application form"],
+  [/\bcanary\b/, 'Checking that form filling still works'],
   [/\bprofile (show|answer list|answer get)\b/, 'Checking your profile and saved answers'],
   [/\bprofile write-draft\b/, 'Saving your profile'],
   [/\bprofile answer set\b/, 'Saving your answer for next time'],
@@ -55,6 +57,9 @@ const SKILLS: Record<string, string> = {
   'discover-jobs': 'Looking for new jobs',
   'read-resume': 'Reading your resume',
   'repair-app': 'Looking into the problem',
+  'followup-email': 'Writing your follow-up email',
+  'interview-prep': 'Building your interview prep',
+  'company-researcher': 'Reading about the company',
 }
 
 const clip = (s: string, n = 60) => (s.length > n ? s.slice(0, n - 1) + '…' : s)

@@ -12,7 +12,8 @@ from ..ats import detect
 from ..paths import atomic_write_json
 
 SITES = {"linkedin": "LinkedIn", "indeed": "Indeed", "glassdoor": "Glassdoor", "zip_recruiter": "ZipRecruiter"}
-COUNTRY_BY_CURRENCY = {"USD": "usa", "GBP": "uk", "CAD": "canada", "AUD": "australia", "INR": "india"}
+COUNTRY_BY_CURRENCY = {"USD": "usa", "GBP": "uk", "CAD": "canada", "AUD": "australia", "INR": "india", "NZD": "new zealand", "SGD": "singapore",
+                       "CHF": "switzerland", "SEK": "sweden", "NOK": "norway", "DKK": "denmark", "PLN": "poland"}  # EUR spans many: set filters.country
 COUNTRY_NAME = {"usa": "United States", "uk": "United Kingdom"}
 MAX_TITLES, MAX_PLACES = 3, 2  # up to 9 searches: 3 titles x (2 places + remote)
 # Per site, each run: (searches, results per search, seconds between searches, minimum minutes between runs).
@@ -23,11 +24,11 @@ LIMITS = {"linkedin": (4, 10, 8, 50), "zip_recruiter": (3, 20, 6, 50),  # 50, no
 COOLDOWN_HOURS = 6  # a site that refused (429, "blocked") is left alone this long
 
 
-def country(places: list[str], currency: str) -> str:
-    """Indeed and Glassdoor search one country: the first location that names one, else a guess from the salary currency."""
+def country(places: list[str], currency: str, preferred: str = "") -> str:
+    """Indeed and Glassdoor search one country: settings.filters.country, else the first location that names one, else a guess from the currency."""
     from jobspy.model import Country
 
-    for p in places:
+    for p in [preferred, *places] if preferred.strip() else places:
         try:
             return Country(p.split(",")[-1].strip().lower()).value
         except ValueError:
@@ -38,7 +39,7 @@ def country(places: list[str], currency: str) -> str:
 def queries(f: dict) -> tuple[str, list[tuple[str, str, bool]]]:
     """(country, [(search term, location, remote)]) built only from settings.filters (never personal data)."""
     places = [p.strip() for p in f.get("locations", []) if p.strip() and "remote" not in p.lower()]
-    c = country(places, f.get("currency", "USD"))
+    c = country(places, f.get("currency", "USD"), str(f.get("country") or ""))
     mode = f.get("remote", "any")
     where = [] if mode == "remote_only" else places[:MAX_PLACES] or [COUNTRY_NAME.get(c, c.title())]
     out = []
@@ -64,8 +65,8 @@ def _cand(r: dict, currency: str) -> dict:
     val = lambda k: None if r.get(k) is None or r[k] != r[k] else r[k]  # noqa: E731 - pandas NaN != NaN
     url = str(val("job_url") or "")
     direct = str(val("job_url_direct") or "")
-    if direct and detect.from_url(direct)["ats"] == "greenhouse":
-        url = direct  # the employer's Greenhouse form: fillable
+    if direct and detect.from_url(direct)["ats"] != "generic":
+        url = direct  # the employer's own Greenhouse, Lever or Ashby form: fillable
     loc = str(val("location") or "")
     if val("is_remote") and "remote" not in loc.lower():
         loc = f"{loc} (Remote)".strip()

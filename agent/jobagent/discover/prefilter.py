@@ -59,16 +59,17 @@ def title_matches(title: str, wanted: list[str], mode: str = "close") -> bool:
     return False
 
 
-def _remote(c: dict) -> bool:
-    return bool(re.search(r"remote|anywhere|hybrid", f"{c.get('location', '')} {c.get('title', '')}", re.I))
+def _remote(c: dict, hybrid: bool = True) -> bool:
+    return bool(re.search(r"remote|anywhere" + ("|hybrid" if hybrid else ""), f"{c.get('location', '')} {c.get('title', '')}", re.I))
 
 
 def location_ok(c: dict, f: dict) -> bool:
     mode, loc = f.get("remote", "any"), (c.get("location") or "").lower()
-    places = [p.lower() for p in f.get("locations", []) if p.strip() and p.strip().lower() != "remote"]
-    here = not places or not loc or any(p in loc for p in places)  # unknown location is judged later by the analyst
+    # "Austin, TX" is matched by its city: postings write "Austin", "Austin, Texas" or "Austin, TX, US" (the analyst checks the rest)
+    places = [p.split(",")[0].strip().lower() for p in f.get("locations", []) if p.strip() and p.strip().lower() != "remote"]
+    here = not places or not loc or any(re.search(rf"\b{re.escape(p)}\b", loc) for p in places if p)  # unknown location is judged later by the analyst
     if mode == "remote_only":
-        return _remote(c)
+        return _remote(c, hybrid=False)  # a hybrid job still needs you in an office
     if mode == "onsite_only":
         return not _remote(c) and here
     if mode == "remote_or_hybrid":

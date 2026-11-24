@@ -10,7 +10,7 @@ import { describe } from './activity'
 import { killHelpers, killTree } from './runner'
 import { DATA, ROOT, loadSettings, log, logError, readJson, writeJson } from './state'
 
-export type Kind = 'chat' | 'resume' | 'job' | 'revise' | 'discover' | 'repair'
+export type Kind = 'chat' | 'resume' | 'job' | 'revise' | 'discover' | 'repair' | 'followup' | 'prep'
 export type Lane = 'work' | 'chat'
 export type Task = {
   id: string; kind: Kind; title: string; payload: Record<string, unknown>
@@ -28,8 +28,11 @@ type Exec = (args: string[], env: Record<string, string>, onLine: (l: string) =>
 const FILE = join(DATA, 'tasks.json')
 const CHAT_FILE = join(DATA, 'chat.json')
 const TIMEOUT_MS = 45 * 60_000
+const IDLE_MS = 8 * 60_000 // no output at all from Claude for this long: it is stuck, restart it once
 const CHAT_IDLE_MS = 6 * 3600_000 // a chat older than this starts a fresh conversation
 const laneOf = (k: Kind): Lane => (k === 'chat' ? 'chat' : 'work')
+// What runs first: anything the user started (links, answers, changes) > jobs auto-search found > finding new companies.
+export const rank = (t: Pick<Task, 'kind' | 'payload'>) => (t.kind === 'discover' ? 0 : t.payload.source === 'discovery' ? 1 : 2)
 
 const TOOLS: Record<Lane, string> = {
   work: 'Bash,Read,Write,Edit,Glob,Grep,WebSearch,Task,Skill',
@@ -40,13 +43,15 @@ const TOOLS: Record<Lane, string> = {
 export function promptFor(t: Task): string {
   const p = t.payload
   const what: Record<Kind, string> = {
-    job: p.url ? 'The user sent a job link. Run the intake-job skill for it.'
+    job: p.url ? (p.source === 'discovery' ? 'Auto-search found this job. Run the intake-job skill for it (New link, with --source discovery).' : 'The user sent a job link. Run the intake-job skill for it.')
       : `Continue job ${t.job_id} (mode "${p.mode}"). Run the intake-job skill, section Continue.`,
     resume: 'The user uploaded their resume (already imported). Run the read-resume skill.',
     revise: `The user wants a change to the prepared application for job ${t.job_id}. Run the revise-application skill.`,
-    discover: 'Time to look for new jobs. Run the discover-jobs skill.',
+    discover: 'Time to find new companies to watch. Run the discover-jobs skill.',
     repair: `The user asked you to look into a problem with JobAgent itself (${p.trigger}). Run the repair-app skill.`,
     chat: 'A message from the user in Telegram. Answer it (see CLAUDE.md, Chat).',
+    followup: `The user wants a follow-up email for job ${t.job_id}. Run the followup-email skill.`,
+    prep: `The user has an interview for job ${t.job_id}. Run the interview-prep skill.`,
   }
   return [
     `JobAgent task: ${t.kind} (task id ${t.id})`,
@@ -75,6 +80,7 @@ export type AgentDeps = {
   onLive: (lane: Lane, live: Live | null) => void
   onFinish: (task: Task, o: Outcome) => void | Promise<void>
   onUsage: (u: Usage) => void
+  canRunBackground?: () => boolean // false while the user's Claude limit is nearly used up: only their own work runs
   exec?: Exec
   now?: () => number
 }
@@ -98,12 +104,15 @@ export function createAgent(d: AgentDeps) {
     return { task, position: position(task.id), existing: false }
   }
 
+  // The line in the order tasks will run: highest rank first, oldest first within a rank (sort is stable).
+  const ordered = (lane: Lane) => queue.filter(x => laneOf(x.kind) === lane).sort((a, b) => rank(b) - rank(a))
+
   // 0 = running now, 1 = next, ...
   function position(id: string): number {
     const t = queue.find(x => x.id === id)
     if (!t) return 0
     const lane = laneOf(t.kind)
-    return queue.filter(x => laneOf(x.kind) === lane).findIndex(x => x.id === id) + (live[lane] ? 1 : 0)
+    return ordered(lane).findIndex(x => x.id === id) + (live[lane] ? 1 : 0)
   }
 
   function pump() {
@@ -111,7 +120,8 @@ export function createAgent(d: AgentDeps) {
     for (const lane of ['work', 'chat'] as Lane[]) {
       if (live[lane]) continue
       if (lane === 'work' && !s.agent_on) continue // paused: work waits in line, chat still answers
-      const t = queue.find(x => laneOf(x.kind) === lane && (x.not_before ?? 0) <= now())
+      const bg = d.canRunBackground?.() ?? true
+      const t = ordered(lane).find(x => (x.not_before ?? 0) <= now() && (bg || rank(x) >= 2))
       if (!t) continue
       queue = queue.filter(x => x !== t)
       void run(lane, t)
@@ -125,7 +135,7 @@ export function createAgent(d: AgentDeps) {
 
   async function run(lane: Lane, t: Task) {
     const s = loadSettings()
-    const L: Live & { pid?: number; cancelled?: boolean; timedOut?: boolean } = { task: t, started: now(), doing: null, steps: 0 }
+    const L: Live & { pid?: number; cancelled?: boolean; timedOut?: boolean; idle?: boolean } = { task: t, started: now(), doing: null, steps: 0 }
     live[lane] = L
     persist()
     d.onLive(lane, L)
@@ -141,8 +151,9 @@ export function createAgent(d: AgentDeps) {
       '--strict-mcp-config', '--mcp-config', mcp, '--tools', TOOLS[lane], '--model', s.agent_model,
       ...(resume ? ['--resume', resume] : []),
     ]
-    let result: any = null, limited: number | undefined, lastText = '', session = ''
+    let result: any = null, limited: number | undefined, lastText = '', session = '', heard = now()
     const onLine = (line: string) => {
+      heard = now()
       let m: any
       try { m = JSON.parse(line) } catch { return }
       if (m.type === 'system' && m.subtype === 'init') session = m.session_id ?? ''
@@ -164,8 +175,10 @@ export function createAgent(d: AgentDeps) {
     const h = exec(args, { JOBBOT_TASK: t.id }, onLine)
     L.pid = h.pid
     const timer = setTimeout(() => { L.timedOut = true; if (h.pid) killTree(h.pid) }, TIMEOUT_MS)
+    const watchdog = setInterval(() => { if (now() - heard > IDLE_MS && !L.idle) { L.idle = true; if (h.pid) killTree(h.pid) } }, 30_000)
     const { code, stderr } = await h.done
     clearTimeout(timer)
+    clearInterval(watchdog)
     rmSync(mcp, { force: true })
     delete live[lane]
 
@@ -174,6 +187,10 @@ export function createAgent(d: AgentDeps) {
     const errText = `${result?.is_error ? result?.result ?? '' : ''} ${stderr}`
     let o: Outcome
     if (L.cancelled) o = { kind: 'cancelled', denials }
+    else if (L.idle && t.tries < 1) {
+      queue.unshift({ ...t, tries: t.tries + 1, interrupted: true })
+      o = { kind: 'retrying', text: 'Claude went quiet for several minutes, so I restarted it.', denials }
+    } else if (L.idle) o = { kind: 'timeout', denials }
     else if (L.timedOut) o = { kind: 'timeout', denials }
     else if (limited || (result?.is_error && /usage limit|rate limit|limit reached/i.test(errText))) {
       const at = limited ?? now() + 3600_000
@@ -217,7 +234,7 @@ export function createAgent(d: AgentDeps) {
   return {
     enqueue, cancel, pump, position,
     live: (lane: Lane) => live[lane] as Live | undefined,
-    queued: (lane: Lane = 'work') => queue.filter(t => laneOf(t.kind) === lane),
+    queued: (lane: Lane = 'work') => ordered(lane),
     _queue: () => queue,
   }
 }
