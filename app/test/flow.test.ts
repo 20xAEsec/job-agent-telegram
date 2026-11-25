@@ -26,7 +26,7 @@ describe('question forms', () => {
     expect(F.answerText(f, 'lots').error).toContain('number')
     f = F.answerText(f, '95k').form
     expect(f.confirming).toBe(true)
-    expect(F.render(f).rows.flat().map(b => b.text)).toContain('✅ Looks good, send')
+    expect(F.render(f).rows.flat().map(b => b.text)).toContain('✅ Looks good, continue')
     const done = F.act(f, 'c')
     expect(done.event?.kind).toBe('answers')
     const ans = done.event?.kind === 'answers' ? done.event.answers : []

@@ -88,8 +88,8 @@ export function reviewPage(rv: Review, practice: boolean, extra?: string): Page 
     rows: [
       [{ text: practice ? '✅ Approve (practice)' : '✅ Approve & send', data: `r:ok:${c}`, style: 'success' }],
       [...(editable(rv).length ? [{ text: '✏️ Edit an answer', data: `r:ea:${c}` }] : []), { text: '💬 Ask for a change', data: `r:ch:${c}` }],
-      [...(rv.resume.fallback ? [] : [{ text: '📄 Original resume', data: `r:or:${c}` }]), { text: '📎 Files', data: `r:fl:${c}` }, ...(more ? [{ text: '📝 All changes', data: `r:df:${c}` }] : [])],
-      ...(rv.coverage?.missing?.length ? [[{ text: '✋ I have one of the missing ones', data: `r:hv:${c}` }]] : []),
+      [...(rv.resume.fallback ? [] : [{ text: '📄 Use my original', data: `r:or:${c}` }]), { text: '📎 Files', data: `r:fl:${c}` }, ...(more ? [{ text: '📝 All changes', data: `r:df:${c}` }] : [])],
+      ...(rv.coverage?.missing?.length ? [[{ text: '✋ I have a missing skill', data: `r:hv:${c}` }]] : []),
       [{ text: '⏭ Skip', data: `r:sk:${c}` }, { text: '🚫 Never this company', data: `r:nv:${c}`, style: 'danger' }],
       ...(rv.url ? [[{ text: '🔗 Open posting', url: rv.url }]] : []),
     ],
@@ -190,7 +190,8 @@ export function createReview(d: Deps) {
     }
     const st = r.ok ? r.status : r.code === 'needs_human' || r.code === 'not_confirmed' ? 'NEEDS_HUMAN' : 'FAILED'
     const detail = String(r.error ?? '')
-    if (st === 'DRY_RUN_DONE') say(`${heading('🧪', 'Practice run done')}\n${name(id)}\n${note('Everything worked up to the Submit button. Nothing was sent.')}`)
+    if (st === 'DRY_RUN_DONE') say(`${heading('🧪', 'Practice run done')}\n${name(id)}\n${note('Everything worked up to the Submit button. Nothing was sent.')}\n\nWhen you're ready for real applications, turn practice mode off in Settings, then tap Apply for real.`, false,
+      [[{ text: '🚀 Apply for real', data: `j:go:${code(id)}`, style: 'success' }, { text: '🧾 Practice receipt', data: `j:rc:${code(id)}` }], [{ text: '📋 Jobs', data: 'J:a:0' }, { text: '🏠 Home', data: 'm:home' }]])
     else if (st === 'SUBMITTED') {
       say(`${heading('🎉', 'Application sent')}\n${name(id)}\n${note('Look out for a confirmation email from the company. Your receipt is under Jobs → Applied.')}`, true, [[{ text: '🧾 Receipt', data: `j:rc:${code(id)}` }]])
       const shot = join(jobDir(id), 'screenshots', 'submitted.png'), to = d.to()
@@ -322,7 +323,7 @@ export function createReview(d: Deps) {
     const more = allJobs().some(j => j.status === 'AWAITING_APPROVAL' && j.id !== id)
     const done = (emoji: string, title: string, line: string): Page => ({
       text: `${heading(emoji, title)}\n${esc(rv.company)} · ${esc(rv.role)}\n${line}`,
-      rows: [...(more ? [[{ text: '▶ Next review', data: 'Q:0', style: 'success' as const }]] : []), [{ text: '📥 Jobs', data: 'J:a:0' }, { text: '🏠 Home', data: 'm:home' }]],
+      rows: [...(more ? [[{ text: '▶ Next review', data: 'Q:0', style: 'success' as const }]] : []), [{ text: '📋 Jobs', data: 'J:a:0' }, { text: '🏠 Home', data: 'm:home' }]],
     })
     if (act === 'rv') { cancelAuto(id); return reviewPage(rv, practice) }
     if (act === 'ss') {
@@ -391,6 +392,12 @@ export function createReview(d: Deps) {
         rows: [[{ text: '✖ Cancel', data: `r:rv:${c}` }]],
       }
     }
+    if (act === 'nv') { // one confirm step: it changes what I apply to from now on
+      cancelAuto(id)
+      return { text: `${heading('🚫', `Never apply to ${esc(rv.company)}?`)}\n${note('I skip this job and every future job there. You can undo it under Settings → What I look for → Companies to avoid.')}`,
+        rows: [[{ text: '🚫 Yes, never', data: `r:nx:${c}`, style: 'danger' }, { text: '↩ Keep reviewing', data: `r:rv:${c}` }]] }
+    }
+    if (act === 'nx') act = 'nv'
     if (act === 'sk' || act === 'nv') {
       cancelAuto(id)
       if (act === 'nv' && rv.company) {

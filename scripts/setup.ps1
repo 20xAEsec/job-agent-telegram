@@ -7,7 +7,7 @@ Set-Location (Split-Path $PSScriptRoot -Parent)
 function Step($n, $text) { Write-Host ''; Write-Host "[$n/5] $text" -ForegroundColor Cyan }
 function Ok($text) { Write-Host "  OK  $text" -ForegroundColor Green }
 function Warn($text) { Write-Host "  !   $text" -ForegroundColor Yellow }
-function Fail($text) { Write-Host "  X   $text" -ForegroundColor Red; Write-Host ''; Write-Host 'Fix that, then run this setup again.'; exit 1 }
+function Fail($text) { Write-Host "  X   $text" -ForegroundColor Red; Write-Host ''; Write-Host 'Fix that, then run this setup again.'; Read-Host '  Press Enter to close' | Out-Null; exit 1 } # a right-click run closes the window on exit
 function Refresh-Path {
     # WindowsApps holds winget; it is not always in the saved user Path.
     $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User') + ";$HOME\.bun\bin;$HOME\.local\bin;$env:LOCALAPPDATA\Microsoft\WindowsApps"
@@ -74,8 +74,9 @@ while (-not $bot) {
     Write-Host ''
     Write-Host '  JobAgent talks to you through your own private Telegram bot. To make one (1 minute):'
     Write-Host '    1. In Telegram, open a chat with @BotFather  (https://t.me/BotFather, I just opened it) and tap START'
-    Write-Host '    2. Send  /newbot , pick any name, then a username ending in "bot"'
+    Write-Host '    2. Send  /newbot , pick any name, then a username ending in "bot" (if it is taken, add some digits)'
     Write-Host '    3. BotFather replies with a token like  123456789:AAH...  Click it to copy it.'
+    Write-Host '  Telegram only on your phone? Open https://web.telegram.org on this computer to copy the token there.'
     Write-Host ''
     $typed = Read-Host '  Paste the token here, or just press Enter once you copied it'
     if (-not $typed) { $typed = Get-Clipboard -Raw -ErrorAction SilentlyContinue }
@@ -115,7 +116,15 @@ if ($p.ok) {
 else { Fail "Could not make a pairing link: $($p.error)" }
 
 Write-Host ''
-Write-Host '  Setup is done. JobAgent starts now; keep its window open while you use it.' -ForegroundColor Green
-Write-Host '  Next time, start it with:  scripts\start.ps1'
+Write-Host '  Setup is done. In Telegram I ask for your resume first: have it ready as a PDF or Word file.' -ForegroundColor Green
+Write-Host ''
+# JobAgent only works while it runs; most "it stopped answering" is a closed window.
+if (Ask-YesNo 'Once your phone is connected: keep JobAgent running in the background (no window, starts when you log in)?') {
+    & (Join-Path $PSScriptRoot 'background.ps1')
+    Read-Host '  Press Enter to close this window' | Out-Null
+    exit 0
+}
+Write-Host '  JobAgent starts now; keep its window open while you use it.' -ForegroundColor Green
+Write-Host '  Next time, start it with:  scripts\start.ps1  (or turn on background mode:  scripts\background.ps1)'
 Write-Host ''
 & (Join-Path $PSScriptRoot 'start.ps1')

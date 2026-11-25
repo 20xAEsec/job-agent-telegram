@@ -16,7 +16,7 @@ Every status change you make with `job set-status ... --detail "..."` is shown t
    - `duplicate_of: <other id>`: that employer posting is already in the job list. `jobagent job set-status <job_id> SKIPPED --detail "Same job as one already in your list"` and stop.
 3. Run the `job-analyst` subagent with the `job_id`. It fetches, inspects and writes `data/jobs/<job_id>/analysis.json`.
    - It reports `closed`: the status is already CLOSED. Stop.
-   - It reports `needs_login`: the status is already FAILED with a plain-words detail (LinkedIn or Indeed wants a login). `tg_send` one short line with the `L:show` button saying they can log in there, then tap Try again. Stop.
+   - It reports `needs_login`: the status is already FAILED with a plain-words detail (LinkedIn or Indeed wants a login). Stop: the card shows a log-in button, and logging in offers to retry this job.
    - It reports `fetch_failed` or `empty`: `jobagent job set-status <job_id> FAILED --detail "I couldn't download the posting. The site may be down; try again later."` and stop.
 4. `Read data/jobs/<job_id>/analysis.json`. `jobagent job set-status <job_id> SCORED`. `tg_progress(job_id, stage: "score", title: "<company> · <role>", detail: "<score>/100")`.
 5. **Skip** when any of these hold (`settings_get` for the settings): `match.dealbreakers` is not empty; `match.score` is below `apply.min_match_score`; the company is in `filters.company_blocklist` (case-insensitive). Then `jobagent job set-status <job_id> SKIPPED --detail "<the main reason, plain words>"` and stop. Examples: "Match 48/100: they want 8+ years of Java", "Contract role; you asked for full time".

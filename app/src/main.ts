@@ -47,7 +47,7 @@ if (import.meta.main) {
       '',
       '  ✅ JobAgent is running.',
       '',
-      `  • Open Telegram and talk to @${bot}. ${s.paired_user_id == null ? 'Use the pairing link from setup to connect.' : 'Send /menu to see what is going on.'}`,
+      `  • Open Telegram and talk to @${bot}. ${s.paired_user_id == null ? 'Not connected yet: scroll up for the QR code, or run the setup again for a fresh link.' : 'Send /menu to see what is going on.'}`,
       `  • ${practiceForced() || s.dry_run ? 'Practice mode is ON: nothing is ever submitted.' : 'Practice mode is OFF: approved applications are really sent.'}`,
       '  • Keep this window open (you can minimize it). Closing it turns JobAgent off.',
       '',

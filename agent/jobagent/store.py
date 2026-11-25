@@ -27,6 +27,7 @@ FLOW = {
     "APPROVED": {"SUBMITTING", "READY"}, "SUBMITTING": {"SUBMITTED", "FAILED", "NEEDS_HUMAN", "DRY_RUN_DONE"},
     "NEEDS_HUMAN": {"READY", "KIT_READY", "APPLIED_SELF"}, "FAILED": {"NEW", "READY", "APPLIED_SELF"},
     "SKIPPED": {"SCORED"},  # "Apply anyway" on a skipped job (the user overrides the filters)
+    "DRY_RUN_DONE": {"READY", "APPLIED_SELF"},  # "Apply for real" after a practice run: prepared and approved again
 }
 STATUSES = set(FLOW) | TERMINAL
 

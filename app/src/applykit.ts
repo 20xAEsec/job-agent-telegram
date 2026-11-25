@@ -40,7 +40,7 @@ export function kitPage(j: Job, kit: ReturnType<typeof readKit>): Page {
   const rows: Btn[][] = [
     [{ text: '✅ I applied', data: `j:ap:${c}`, style: 'success' }, { text: '⏭ Skip it', data: `j:sk:${c}` }],
     ...(j.url ? [[{ text: '🔗 Open the posting', url: j.url }]] : []),
-    [{ text: '📥 Jobs', data: 'J:a:0' }, { text: '🏠 Home', data: 'm:home' }],
+    [{ text: '📋 Jobs', data: 'J:a:0' }, { text: '🏠 Home', data: 'm:home' }],
   ]
   return {
     text: [

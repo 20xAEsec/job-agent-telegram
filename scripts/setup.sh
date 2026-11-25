@@ -64,8 +64,9 @@ while [ -z "$bot" ]; do
   [ -n "$opened" ] || { opened=1; open_tg BotFather; }
   printf '\n  JobAgent talks to you through your own private Telegram bot. To make one (1 minute):\n'
   printf '    1. In Telegram, open a chat with @BotFather  (https://t.me/BotFather, I just opened it) and tap START\n'
-  printf '    2. Send  /newbot , pick any name, then a username ending in "bot"\n'
-  printf '    3. BotFather replies with a token like  123456789:AAH...  Click it to copy it.\n\n'
+  printf '    2. Send  /newbot , pick any name, then a username ending in "bot" (if it is taken, add some digits)\n'
+  printf '    3. BotFather replies with a token like  123456789:AAH...  Click it to copy it.\n'
+  printf '  Telegram only on your phone? Open https://web.telegram.org on this computer to copy the token there.\n\n'
   read -r -p '  Paste the token here, or just press Enter once you copied it: ' typed
   [ -n "$typed" ] || typed="$(clip)"
   token="$(printf '%s' "$typed" | find_token)"
@@ -90,5 +91,6 @@ if [ "$(echo "$pair" | json 'd["ok"]')" = "True" ]; then
 elif echo "$pair" | grep -q already_paired; then ok 'Already connected to your Telegram'
 else fail "Could not make a pairing link: $pair"; fi
 
-printf '\n  \033[32mSetup is done. JobAgent starts now; keep its window open while you use it.\033[0m\n  Next time, start it with:  scripts/start.sh\n\n'
+printf '\n  \033[32mSetup is done. In Telegram I ask for your resume first: have it ready as a PDF or Word file.\033[0m\n'
+printf '  JobAgent starts now; keep its window open while you use it.\n  Next time, start it with:  scripts/start.sh\n\n'
 exec "$(dirname "$0")/start.sh"

@@ -84,7 +84,7 @@ export function nextAction(c: HomeCtx): Btn {
   const one = (st: string) => c.jobs.find(j => j.status === st)
   if (!c.s.onboarded) return { text: '🧩 Finish setup', data: 'o:resume', style: 'success' }
   if (n.reviews) return { text: n.reviews === 1 ? '🔔 Review your application' : `🔔 Review ${n.reviews} applications`, data: n.reviews === 1 ? `r:rv:${code(one('AWAITING_APPROVAL')!.id)}` : 'Q:0', style: 'success' }
-  if (n.kits) return { text: n.kits === 1 ? '🧰 Apply to your match' : `🧰 Apply to ${n.kits} matches`, data: n.kits === 1 ? `j:kit:${code(one('KIT_READY')!.id)}` : 'N:0', style: 'success' }
+  if (n.kits) return { text: n.kits === 1 ? '🧰 Apply yourself: 1 match' : `🧰 Apply yourself: ${n.kits} matches`, data: n.kits === 1 ? `j:kit:${code(one('KIT_READY')!.id)}` : 'N:0', style: 'success' }
   if (n.forms) return { text: `❓ Answer ${plural(n.forms, 'question form')}`, data: 'N:0', style: 'primary' }
   if (n.other) return { text: `🙋 Fix ${plural(n.other, 'stuck job')}`, data: 'N:0', style: 'primary' }
   if (c.work) return { text: '📋 See my jobs', data: 'J:a:0' }
@@ -103,7 +103,7 @@ export function home(c: HomeCtx, now = Date.now()): Page {
     heading('🏠', 'JobAgent'),
     `${s.agent_on ? '🟢 Running' : '⏸ Paused'} · ${mode}`,
     '',
-    ...workLines(c, now),
+    ...(s.onboarded ? workLines(c, now) : [`🧩 <b>Setup isn't finished.</b> ${note("I need your resume and what you're looking for first.")}`]),
     ...(c.tip ? ['', `💡 ${esc(c.tip.text)}`] : []),
     ...(c.updates ? ['', `⬆️ ${note('An update for JobAgent is available.')}`] : []),
     ...(c.problems?.length ? ['', `🩺 <b>Problem:</b> ${c.problems[0]}${c.problems.length > 1 ? note(` (+${c.problems.length - 1} more)`) : ''}`] : []),
@@ -128,7 +128,7 @@ export function home(c: HomeCtx, now = Date.now()): Page {
   rows.push([{ text: '⚙️ Settings', data: 'm:settings' }, { text: '👤 Profile', data: 'm:prof' }])
   if (c.updates) rows.push([{ text: '⬆️ How to update', data: 'm:upd' }])
   if (c.tip) rows.push([{ text: `📊 Set it to ${c.tip.min}`, data: `sg:ms:${c.tip.min}` }, { text: '✖ No thanks', data: `sg:no:${c.tip.min}` }])
-  rows.push([{ text: '❔ Help', data: 'm:help' }, ...(c.problems?.length ? [{ text: '🩺 Health', data: 'm:health' }] : []), { text: '🖥 Dashboard', data: 'm:dash' }, { text: '🔄 Refresh', data: 'm:home' }])
+  rows.push([{ text: '❔ Help', data: 'm:help' }, ...(c.problems?.length ? [{ text: '🩺 Health', data: 'm:health' }] : []), ...(c.jobs.length ? [{ text: '🖥 Dashboard', data: 'm:dash' }] : [])]) // no Refresh: Home updates itself
   return { text: lines.join('\n'), rows }
 }
 
@@ -155,11 +155,11 @@ export function needsPage(c: Pick<HomeCtx, 'jobs' | 'forms'>): Page {
   const rows: Btn[][] = [
     ...(reviews.length > 1 ? [[{ text: `🔔 Review all ${reviews.length}, best first`, data: 'Q:0', style: 'success' as const }]] : []),
     ...reviews.map(j => [{ text: `🔔 Review · ${short(jobTitle(j), 44)}`, data: `r:rv:${code(j.id)}` }]),
-    ...kits.map(j => [{ text: `🧰 Apply · ${short(jobTitle(j), 46)}`, data: `j:kit:${code(j.id)}` }]),
+    ...kits.map(j => [{ text: `🧰 Apply yourself · ${short(jobTitle(j), 38)}`, data: `j:kit:${code(j.id)}` }]),
     ...c.forms.map(f => [{ text: `❓ Answer · ${short(f.title ?? 'Questions', 44)}`, data: `f:${code(f.batch_id)}:open` }]),
     ...problems.map(j => [{ text: `${statusOf(j.status).emoji} ${short(jobTitle(j), 50)}`, data: `j:v:${code(j.id)}` }]),
   ]
-  if (!rows.length) return { text: `${heading('📥', 'Needs you')}\n\n✨ All clear. Nothing is waiting for you.\n\n${note('Reviews, questions and problems show up here.')}`, rows: [nav()] }
+  if (!rows.length) return { text: `${heading('📥', 'Needs you')}\n\n✨ All clear. Nothing is waiting for you.\n\n${note('Reviews, questions and problems show up here.')}`, rows: [[{ text: '🔎 Search now', data: 'd:run', style: 'primary' }], nav()] }
   const text = [
     heading('📥', 'Needs you'), '',
     ...(reviews.length ? [`🔔 <b>${plural(reviews.length, 'application')} to review</b>`, note('Approve, change or skip.')] : []),
@@ -235,7 +235,7 @@ const INTENTS: [Intent, RegExp][] = [
   ['search', /^(search( now)?|find( me)?( new)? jobs( now)?|look for jobs)$/],
   ['snooze', /^(snooze|quiet|mute|be quiet|shh+)( for (an|1|one) hour)?$/],
   ['help', /^(help|what can you do|how does (this|it) work)$/],
-  ['home', /^(status|home|menu|what('?s| is) (up|happening|going on)|what are you doing|how('?s| is) it going|this week|stats)$/],
+  ['home', /^(hi|hello|hey|start|status|home|menu|what('?s| is) (up|happening|going on)|what are you doing|how('?s| is) it going|this week|stats)$/],
 ]
 export const intentOf = (text: string): Intent | null => {
   const t = text.trim().toLowerCase().replace(/[?!.]+$/, '').replace(/\s+/g, ' ')
@@ -260,7 +260,7 @@ export function digestPage(jobs: Job[]): Page | null {
     ].join('\n'),
     rows: [
       ...(reviews.length ? [[{ text: reviews.length === 1 ? '🔔 Review it' : `🔔 Review all ${reviews.length}`, data: 'Q:0', style: 'success' as const }]] : []),
-      ...kits.slice(0, 5).map(j => [{ text: `🧰 Apply · ${short(jobTitle(j), 44)}`, data: `j:kit:${code(j.id)}` }]),
+      ...kits.slice(0, 5).map(j => [{ text: `🧰 Apply yourself · ${short(jobTitle(j), 38)}`, data: `j:kit:${code(j.id)}` }]),
       [{ text: '🏠 Home', data: 'm:home' }],
     ],
   }
@@ -278,13 +278,14 @@ const TABS: Record<string, [string, (j: Job, outcome?: string) => boolean]> = {
 const PER = 6
 export function jobsPage(jobs: Job[], tab: string, pg: number, outcomes: Record<string, string> = {}): Page {
   const [name, keep] = TABS[tab] ?? TABS.a
-  const list = jobs.filter(j => keep(j, outcomes[j.id]))
+  const list = jobs.filter(j => keep(j, outcomes[j.id])).sort((a, b) => tab === 'a' ? +needsYou(b) - +needsYou(a) : 0) // what needs you first (stable sort keeps the order within)
   const pages = Math.max(1, Math.ceil(list.length / PER)), p = Math.min(Math.max(pg, 0), pages - 1)
   const slice = list.slice(p * PER, (p + 1) * PER)
   const counts = Object.fromEntries(Object.entries(TABS).map(([k, [, f]]) => [k, jobs.filter(j => f(j, outcomes[j.id])).length]))
   const body = slice.length
     ? slice.map(j => `${statusOf(j.status).emoji} <b>${esc(short(jobTitle(j), 56))}</b>${j.score != null ? ` · ${j.score}` : ''}\n     ${note(`${statusOf(j.status).text}${outcomes[j.id] ? ` · ${esc(label(outcomes[j.id]))}` : ''} · ${ago(j.updated_at)}`)}`)
-    : [note(tab === 'a' ? 'Nothing in progress. Send me a job link to start one.' : 'Nothing here yet.')]
+    : [note(tab === 'a' ? 'Nothing in progress. Send me a job link to start one, or search now.' : 'Nothing here yet.')]
+  if (tab === 'd' && slice.some(j => j.status === 'DRY_RUN_DONE')) body.push('', note('🧪 = practice run: nothing was sent.'))
   const pager: Btn[] = pages > 1 ? [
     { text: p > 0 ? '◀' : ' ', data: p > 0 ? `J:${tab}:${p - 1}` : 'noop' }, { text: `${p + 1} / ${pages}`, data: 'noop' }, { text: p < pages - 1 ? '▶' : ' ', data: p < pages - 1 ? `J:${tab}:${p + 1}` : 'noop' },
   ] : []
@@ -294,6 +295,7 @@ export function jobsPage(jobs: Job[], tab: string, pg: number, outcomes: Record<
       ...pairs(Object.entries(TABS).filter(([k]) => k === tab || counts[k] || 'ads'.includes(k)).map(([k, [n]]) => ({ text: `${k === tab ? '◉ ' : ''}${n} (${counts[k]})`, data: `J:${k}:0` })), 3),
       ...pairs(slice.map(j => ({ text: `${statusOf(j.status).emoji} ${short(jobTitle(j), 26)}`, data: `j:v:${code(j.id)}` }))),
       ...(pager.length ? [pager] : []),
+      ...(!list.length && tab === 'a' ? [[{ text: '🔎 Search now', data: 'd:run', style: 'primary' as const }]] : []),
       [{ text: '📊 Insights', data: 'I:0' }, { text: '⬇️ Spreadsheet (CSV)', data: 'J:csv' }],
       nav(),
     ],
@@ -329,7 +331,8 @@ export function jobPage(j: Job, x: { running: boolean; hasForm: boolean; outcome
   if (j.status === 'SUBMITTED' || j.status === 'DRY_RUN_DONE') act.push([{ text: j.status === 'SUBMITTED' ? '🧾 Receipt' : '🧾 Practice receipt', data: `j:rc:${c}` }])
   if (x.outcome === 'interview' && !x.running) act.push([{ text: '🎤 Interview prep', data: `j:pr:${c}`, style: 'success' }])
   if ((j.status === 'SUBMITTED' || j.status === 'APPLIED_SELF') && !x.running && (!x.outcome || x.outcome === 'ghosted')) act.push([{ text: '✍️ Draft a follow-up email', data: `j:fu:${c}` }])
-  if (j.status === 'SUBMITTED' || j.status === 'DRY_RUN_DONE' || j.status === 'APPLIED_SELF') {
+  if (j.status === 'DRY_RUN_DONE' && !x.running) act.push([{ text: '🚀 Apply for real', data: `j:go:${c}`, style: 'success' }, { text: '✅ I applied myself', data: `j:ap:${c}` }])
+  if (j.status === 'SUBMITTED' || j.status === 'APPLIED_SELF') { // a practice run was never sent, so it has no outcome
     act.push(Object.entries(OUTCOMES).slice(0, 2).map(([k, v]) => ({ text: `${x.outcome === v ? '◉ ' : ''}${OUTCOME_LABEL[v]}`, data: `j:o:${c}:${k}` })))
     act.push(Object.entries(OUTCOMES).slice(2).map(([k, v]) => ({ text: `${x.outcome === v ? '◉ ' : ''}${OUTCOME_LABEL[v]}`, data: `j:o:${c}:${k}` })))
   }
@@ -486,14 +489,14 @@ export const answerDeleteConfirm = (a: AnswerRec): Page => ({
 const HELP: Record<string, [string, string]> = {
   how: ['🧭 How it works', [
     '1️⃣ <b>You send a job link</b> (or Auto-search finds one).',
-    '2️⃣ <b>I read the posting</b> in a sandboxed reader and score how well it fits you (0–100). Weak fits are skipped, with the reason shown.',
+    '2️⃣ <b>I read the posting</b> in a locked-down reader that cannot take orders from the posting, and score how well it fits you (0–100). Weak fits are skipped, with the reason shown.',
     '3️⃣ <b>I ask only what I can\'t know</b>, like work authorization, once. Your answers are saved for next time.',
     '4️⃣ <b>I tailor your resume</b>: I reword a few lines to mirror the job, keep your layout, and never invent experience.',
     '5️⃣ <b>I fill in the form</b> in a hidden browser and take a screenshot.',
     '6️⃣ <b>You review everything</b>: every answer, what I changed on your resume, and a picture of the filled form. Approve, edit an answer, or skip.',
     '', 'Each job has a live card in the chat, so you can always see which step I am on.',
   ].join('\n')],
-  practice: ['🧪 Practice mode', 'Practice mode is <b>on</b> until you turn it off. I do every step except pressing Submit, so you can see exactly what would be sent.\n\nTurn it off in Settings → Practice mode when you are ready. You still approve each application.'],
+  practice: ['🧪 Practice mode', 'Practice mode is <b>on</b> until you turn it off. I do every step except pressing Submit, so you can see exactly what would be sent.\n\nTurn it off in Settings → Practice mode when you are ready. You still approve each application. A job you practised on has 🚀 Apply for real: I prepare it again and you approve it again.'],
   auto: ['🔭 Auto-search', 'With Auto-search on, I check the companies you watch and search LinkedIn and Indeed (Glassdoor and ZipRecruiter too, if you turn them on) for new jobs on a schedule, using only your search settings. Set "Posted within" to 1 hour and "How often" to every hour to see only the newest postings. I can also find new companies hiring for your titles.\n\nI also search your Related titles, and each day pick a few jobs with a different title in your field whose posting asks for several of your skills (⚙️ Settings → Auto-search → Jobs with other titles). Those only get prepared when they score 10 points above your minimum.\n\nGood matches get prepared and sent to you for review. Quiet hours pause it overnight.'],
   approve: ['✅ Approving & auto-apply', 'By default <b>you approve every application</b>. An approval is tied to the exact answers and files you saw: if anything changes, I ask again.\n\n<b>Auto-apply</b> (Settings → How I apply) sends only very strong matches on its own, after a countdown with a Cancel button. Unusual forms and private questions always come to you.'],
   privacy: ['🔒 Your data', 'Everything (your profile, answers and resume) stays in the <code>data</code> folder on your computer. The thinking runs on your own Claude account.\n\nTelegram bot chats are not end-to-end encrypted, so private answers are hidden behind a tap. Job postings are treated as untrusted text and can never give me instructions.'],

@@ -81,7 +81,7 @@ export function obPage(o: Ob, s: Settings, fields: Record<string, string> = {}):
     case 'resume':
       return t([
         heading('📄', 'Send me your resume'), '',
-        'Send it as a <b>PDF</b> or <b>Word (.docx)</b> file: tap 📎 below and pick the file.', '',
+        'Send it as a <b>PDF</b> or <b>Word (.docx)</b> file: tap 📎 below, then <b>File</b>, and pick it.', '',
         'I use it to fill in your profile, and as the starting point for every tailored version. Your original is never changed.',
         ...(o.error ? ['', `❌ ${esc(o.error)}`] : []),
         '', note('No resume handy? On LinkedIn, open your profile → More → Save to PDF, then send me that.'),
@@ -112,7 +112,7 @@ export function obPage(o: Ob, s: Settings, fields: Record<string, string> = {}):
       const pool = titlePool(o), rel = relPool(o)
       return t([
         heading('🎯', 'Which job titles should I look for?'), '',
-        pool.length ? 'Tap to select. I suggested some from your resume.' : 'Tap ➕ and send one or more titles.',
+        pool.length ? 'Tap to select, or just type more titles here. I suggested some from your resume.' : 'Type one or more job titles here, separated by commas.',
         ...(o.picks.length ? ['', `<b>Selected:</b> ${esc(o.picks.join(', '))}`] : []),
         '', note('I also match close variations, like "Senior" or "II" versions.'),
         ...(rel.length ? ['', `🧩 <b>Related titles</b> (optional): other names for the same work. Tap the 🧩 ones you want; I search them too, and hold them to a higher match score.`] : []),
@@ -124,7 +124,7 @@ export function obPage(o: Ob, s: Settings, fields: Record<string, string> = {}):
       ])
     }
     case 'level':
-      return t([heading('📶', 'What level are you aiming for?'), '', note('Jobs far above or below this get a lower match score.')], [
+      return t([heading('📶', 'What level are you aiming for?'), '', `<b>${label(s.filters.experience_level)}</b> is selected. Tap it to keep it, or choose another.`, note('Jobs far above or below this get a lower match score.')], [
         ...pairs(['intern', 'entry', 'mid', 'senior', 'staff', 'lead', 'manager', 'director'].map(v => ({ text: `${s.filters.experience_level === v ? '◉ ' : ''}${label(v)}`, data: `o:lv:${v}` }))),
         [back('titles')],
       ])
@@ -141,7 +141,7 @@ export function obPage(o: Ob, s: Settings, fields: Record<string, string> = {}):
       ])
     }
     case 'remote':
-      return t([heading('🏡', 'Remote, hybrid or on-site?')], [
+      return t([heading('🏡', 'Remote, hybrid or on-site?'), '', note('Tap one to continue.')], [
         ...([['remote_or_hybrid', 'Remote, or hybrid / on-site nearby'], ['remote_only', 'Remote only'], ['any', 'Anything'], ['onsite_only', 'On-site only']] as const)
           .map(([v, l]) => [{ text: `${s.filters.remote === v ? '◉ ' : ''}${l}`, data: `o:rm:${v}` }]),
         [back('locations')],
@@ -205,14 +205,16 @@ export function obPage(o: Ob, s: Settings, fields: Record<string, string> = {}):
         text: [
           heading('🎉', "You're all set"), '',
           '<b>How it works</b>',
-          '1️⃣ Send me a link to a job posting, or turn on <b>Auto-search</b> and I\'ll find jobs myself.',
+          '1️⃣ Send me a link to a job posting (on your phone: open the job, tap <b>Share</b>, then Telegram), or turn on <b>Auto-search</b> and I\'ll find jobs myself.',
           '2️⃣ I read it, score the fit, tailor your resume and fill in the form. You can watch each step live.',
           '3️⃣ You get a review with every answer and file. <b>Nothing is sent until you approve.</b>', '',
           quote(`🎯 ${esc(short(s.filters.titles.join(', '), 80))}\n📍 ${esc(short(s.filters.locations.join(', ') || 'Anywhere', 60))} · ${label(s.filters.remote)}${s.filters.min_salary ? `\n💵 ${money(s.filters.min_salary, s.filters.currency)}+ per year` : ''}`),
           `🧪 ${note('Practice mode is on: approving runs a practice application. Turn it off in Settings when you are ready.')}`,
+          `💻 ${note('I only work while JobAgent is open on your computer. If I stop answering, it was closed.')}`,
           ...(s.filters.titles.length ? ['', `🔎 <b>I'm running your first search now.</b> ${note('The best few matches get prepared for you; watch the card below.')}`] : []),
+          ...(s.discovery.enabled ? ['', `🔭 <b>Auto-search is on.</b> ${note(`I look again every ${s.discovery.interval_hours} h.`)}`] : []),
         ].join('\n'),
-        rows: [[{ text: '🔭 Turn on Auto-search', data: 'o:auto', style: 'success' }], [{ text: '🏠 Go to Home', data: 'm:home' }]],
+        rows: [...(s.discovery.enabled ? [] : [[{ text: '🔭 Turn on Auto-search', data: 'o:auto', style: 'success' as const }]]), [{ text: '🏠 Go to Home', data: 'm:home' }]],
       }
   }
   return { text: 'Setup', rows: [nav()] }

@@ -215,7 +215,7 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
   let statusText = ''
   async function refreshNow() {
     const to = paired()
-    if (to == null) return
+    if (to == null || !loadSettings().onboarded) return // no status bar mid-setup: "send me a job link" would be refused there
     const ctx = homeCtx()
     if (homeMsg?.showing) await editAt(homeMsg.chat, homeMsg.id, P.home(ctx))
     const text = P.statusBar(ctx)
@@ -323,7 +323,7 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
     const where = whereText(r.boards, r.sites ?? [])
     if (!r.boards && !(r.sites ?? []).length) { end({ emoji: 'ℹ️', text: 'No companies to search yet. Add companies, or turn on "Find new companies".', buttons: [{ text: '🏢 Companies', data: 'C:list' }, { text: '🔭 Auto-search', data: 'S:auto' }] }); return refresh() }
     const slow = [...(r.errors ?? []).filter((e: any) => e.site).map((e: any) => `${e.site} is limiting searches right now; I'll try again later.`), ...(r.skipped ?? []).map((x: any) => String(x.reason)).filter((x: string) => /slow down/.test(x))]
-    if (!r.kept) { end({ emoji: '✅', text: [`Checked ${where}: nothing new that fits your settings.`, ...slow].join(' ') }); return refresh() }
+    if (!r.kept) { end({ emoji: '✅', text: [`Checked ${where}: nothing new fits your settings yet. Try more titles or places, or send me a link to a job you like.`, ...slow].join(' '), buttons: [{ text: '🎯 What I look for', data: 'S:search' }] }); return refresh() }
     const cap = reason === 'first' ? 3 : (usage.five_hour ?? 0) > 0.8 ? 2 : 8 // save the user's Claude limit when it is nearly used up
     const take = (r.candidates as any[]).slice(0, cap)
     card(c => {
@@ -414,8 +414,9 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
       else if (!c.jobs.some(l => l.job_id)) c.final = failText ? { emoji: '⚠️', text: failText, ...(t.payload.url ? { buttons: [{ text: '🔄 Try again', data: `u:again:${t.id}` }] } : {}) } : c.mode === 'multi' ? { emoji: '✅', text: c.note ? 'Done.' : 'Done. Nothing new this time.' } : { emoji: 'ℹ️', text: 'Done. See my message below.' }
       c.state = 'ended'; c.ended = Date.now(); c.doing = null
       if (c.jobs.length === 1 && c.mode === 'job' && c.jobs[0].final) c.final = c.jobs[0].final
-      // Anything that went wrong can be handed to Claude to investigate (the same Final object may sit in both places).
-      for (const f of [c.final, ...c.jobs.map(l => l.final)]) if (f?.emoji === '⚠️' && !f.buttons?.some(b => b.data === FIX_BUTTON.data)) f.buttons = [...(f.buttons ?? []), FIX_BUTTON]
+      // A failure with no known cause can be handed to Claude to investigate; an expected one (a login, a site that is down) has its own fix.
+      const unknown = (f: Final) => out.kind === 'error' || out.kind === 'timeout' || f.text === 'Something went wrong.'
+      for (const f of [c.final, ...c.jobs.map(l => l.final)]) if (f?.emoji === '⚠️' && unknown(f) && !f.buttons?.some(b => b.data === FIX_BUTTON.data || b.data?.startsWith('L:in:'))) f.buttons = [...(f.buttons ?? []), FIX_BUTTON]
     })
     if (t.payload.url) lastUrls.set(t.id, String(t.payload.url))
     for (const l of cards.get(t.id)?.jobs ?? []) await maybeSendKit(l.job_id)
@@ -667,7 +668,7 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
   }
   const { titlePool, locPool } = OB
 
-  async function obRoute(data: string, chat: number, msg: number): Promise<Page | string | undefined> {
+  async function obRoute(data: string, chat: number, msg: number, toast: { text?: string }): Promise<Page | string | undefined> {
     const ob = OB.loadOb()
     ob.msg = msg
     const s = loadSettings()
@@ -733,7 +734,8 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
       case 'auto': {
         trySettingsUpdate({ discovery: { enabled: true } })
         refresh()
-        return { ...OB.obPage(ob, loadSettings()), rows: [[{ text: '🔎 Search now', data: 'd:run', style: 'success' }], [{ text: '🏠 Go to Home', data: 'm:home' }]] }
+        toast.text = '🔭 Auto-search is on'
+        return OB.obPage(ob, loadSettings()) // the first search is already running, so no "Search now" here
       }
     }
     return undefined
@@ -754,7 +756,12 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
   const ideas = (s: Settings) => ST.relatedIdeas(readJson<ST.SeenTitles>(join(DATA, 'seen_titles.json'), {}), s)
   const specView = (spec: ST.Spec, s: Settings, msg?: string) => ST.specPage(spec, s, msg, spec.id === 'rt' ? ideas(s) : [])
   let loginOpen = false // one login window at a time: they share JobAgent's browser profile
-  const loginsNow = async (note?: string) => { const r = loginOpen ? null : await run(['login', 'status']); return ST.loginsPage(r?.ok ? r.sites : null, note) }
+  // Jobs that failed because a job site wanted a login (fetch's detail starts with the site name), so a login can retry them.
+  const needLogin = (site: string) => allJobs().filter(j => j.status === 'FAILED' && /\blogged in\b/i.test(lastDetail(j)) && lastDetail(j).startsWith(ST.JOB_SITES[site]))
+  const loginsNow = async (note?: string, site?: string) => {
+    const r = loginOpen ? null : await run(['login', 'status'])
+    return ST.loginsPage(r?.ok ? r.sites : null, note, site ? { site, n: needLogin(site).length } : undefined)
+  }
 
   // ---- Callback router: returns the page to show in place, a short toast, or nothing ----
   async function route(ctx: Context, data: string, toast: { text?: string }): Promise<Page | string | undefined> {
@@ -793,7 +800,7 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
     if (data === 'm:settings') return ST.settingsRoot(s, boardCount())
     if (data === 'm:prof') return profileHome()
     if (data === 'N:0') return P.needsPage({ jobs: allJobs(), forms: F.openForms() })
-    if (data === 'H:pause' || data === 'H:resume') { setAgent(data === 'H:resume'); toast.text = data === 'H:resume' ? '▶️ Resumed' : '⏸ Paused. I will finish the current step, then wait.'; return P.home(homeCtx()) }
+    if (data === 'H:pause' || data === 'H:resume') { setAgent(data === 'H:resume'); toast.text = data === 'H:resume' ? '▶️ Resumed' : '⏸ Paused. I will finish the current step, then wait.'; return cards.all().some(c => c.msg === msg) ? undefined : P.home(homeCtx()) } // Resume on a paused card keeps the card
     if (data === 'd:run') {
       if (!s.onboarded) return 'Finish setup first.'
       if (discoveryBusy()) return 'A search is already running.'
@@ -801,7 +808,7 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
       toast.text = '🔎 Searching now. Watch the card below.'
       return undefined
     }
-    if (data.startsWith('o:')) return obRoute(data, chat, msg)
+    if (data.startsWith('o:')) return obRoute(data, chat, msg, toast)
 
     // Jobs
     if ((m = /^J:([ads]):(\d+)$/.exec(data))) return P.jobsPage(allJobs(), m[1], parseInt(m[2], 10), readOutcomes())
@@ -811,7 +818,7 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
       await api.sendDocument(chat, new InputFile(r.path, 'jobagent-applications.csv'), { caption: `📋 ${(r.rows as unknown[]).length} jobs. Opens in Excel, Numbers or Google Sheets.`, disable_notification: true })
       return '⬇️ Sent below'
     }
-    if ((m = /^j:(v|rt|any|x|sk|o|ap|kit|rc|fu|zz|pr):([0-9a-f]{8})(?::([iorg]))?$/.exec(data))) {
+    if ((m = /^j:(v|rt|any|x|sk|o|ap|kit|rc|fu|zz|pr|go):([0-9a-f]{8})(?::([iorg]))?$/.exec(data))) {
       const id = findJob(m[2]), j = id ? readJob(id) : null
       if (!id || !j) return 'That job no longer exists.'
       const onCard = cards.all().some(c => c.msg === msg)
@@ -855,6 +862,14 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
         if (onCard) { cards.update(cards.all().find(c => c.msg === msg)!.key, c => { for (const l of c.jobs) if (l.job_id === id) l.final = finalFor('SKIPPED', 'you skipped it', id); if (c.mode === 'job') c.final = c.jobs[0]?.final }); return undefined }
         return detail()
       }
+      if (m[1] === 'go') { // a practice run, now for real: prepared and reviewed again, so nothing is sent without a fresh Approve
+        if (j.status !== 'DRY_RUN_DONE') return 'This one is not a practice run.'
+        if (practiceOn(s)) { toast.text = '🧪 Turn practice mode off first, then tap Apply for real again'; return ST.practicePage(s) }
+        if (running) return 'I am already working on it.'
+        const r = await run(['job', 'set-status', id, 'READY', '--detail', 'you chose to apply for real'])
+        if (!r.ok) return `Could not do that: ${r.error}`
+        continueJob(id, 'retry'); toast.text = '🚀 Preparing it for real. You review it again before it is sent.'; return onCard ? undefined : detail()
+      }
       if (m[1] === 'rt') { if (running) return 'I am already working on it.'; continueJob(id, 'retry'); toast.text = '🔄 On it. Watch the new card below.'; return onCard ? undefined : detail() }
       if (m[1] === 'any') {
         if (running) return 'I am already working on it.'
@@ -878,7 +893,7 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
     if ((m = /^x:([\w-]+)$/.exec(data))) { const k = m[1]; if (searching && k.startsWith('search-')) stoppedSearches.add(k); const hit = stopTasks(t => t.id === k || t.payload.parent === k); finishSearchIfDone(k); return hit || stoppedSearches.has(k) ? '✋ Stopping…' : 'That is already finished.' }
 
     // Review
-    if ((m = /^r:(ok|ch|sk|nv|cx|rv|ss|ea|or|fl|df|hv):([0-9a-f]{8})(?::(\d{1,3}))?$/.exec(data))) return review.press(m[1], m[2], chat, msg, m[3])
+    if ((m = /^r:(ok|ch|sk|nv|nx|cx|rv|ss|ea|or|fl|df|hv):([0-9a-f]{8})(?::(\d{1,3}))?$/.exec(data))) return review.press(m[1], m[2], chat, msg, m[3])
 
     // Forms
     if ((m = /^f:job:([0-9a-f]{8})$/.exec(data))) { const id = findJob(m[1]); const f = F.openForms().find(x => x.job_id === id); if (!f) return 'Those questions are already answered.'; F.saveForm({ ...f, message_id: msg, updated_at: Date.now() }); return F.render(f) }
@@ -934,6 +949,13 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
 
     // Job site logins: windows open on the computer and can take minutes, so they run in the background and edit this page when done.
     if (data === 'L:show') return loginsNow()
+    if ((m = /^L:rt:(linkedin|indeed)$/.exec(data))) {
+      const busy = new Set([agent.live('work')?.task, ...agent.queued()].map(t => t?.job_id))
+      const list = needLogin(m[1]).filter(j => !busy.has(j.id)).slice(0, 5) // each retry is a Claude task: a few at a time
+      for (const j of list) continueJob(j.id, 'retry')
+      toast.text = list.length ? `🔄 Trying ${list.length} again. Watch the new cards below.` : 'Nothing left to retry.'
+      return loginsNow()
+    }
     if ((m = /^L:(in|pw|rm):(linkedin|indeed)$/.exec(data))) {
       const [op, site] = [m[1], m[2]], name = ST.JOB_SITES[site]
       if (op === 'rm') { await run(['credentials', 'delete', site]); toast.text = `Forgot your ${name} password`; return loginsNow() }
@@ -950,7 +972,7 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
           note = r.ok ? `✅ Logged in to ${name}.` : r.code === 'busy' ? '⚠️ Another JobAgent browser window is open. Close it and try again.' : `⚪ The ${name} login wasn't finished. Tap "Log in to ${name}" to try again.`
         }
         loginOpen = false
-        await editAt(chat, msg, await loginsNow(note))
+        await editAt(chat, msg, await loginsNow(note, note.startsWith('✅') ? site : undefined))
       })()
       return ST.loginWaitPage(site, op === 'pw')
     }
@@ -1180,6 +1202,10 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
   bot.command('help', ctx => show(ctx, P.helpPage()))
   bot.command('health', ctx => show(ctx, P.healthPage(health?.checks ?? null, health?.at)))
   bot.command('snooze', ctx => shortcut(ctx, 'snooze'))
+  bot.command(['review', 'search'], async ctx => {
+    if (!loadSettings().onboarded) return void ctx.reply(note('Finish the setup first.'), OPTS)
+    await shortcut(ctx, ctx.message?.text?.startsWith('/review') ? 'reviews' : 'search')
+  })
   bot.command('fix', async ctx => { if (startFix('command').existing) await ctx.reply('🔧 I am already looking into it.') })
   bot.command('pause', async ctx => { setAgent(false); await ctx.reply(`${heading('⏸', 'Paused')}\n${note('I will finish the current step, then wait. Links you send wait in line.')}`, OPTS) })
   bot.command('resume', async ctx => { setAgent(true); await ctx.reply(`${heading('▶️', 'Running again')}`, OPTS) })
@@ -1194,17 +1220,19 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
     const data = ctx.callbackQuery.data
     if (!ctx.callbackQuery.message) return void ctx.answerCallbackQuery().catch(() => {})
     log(`tap ${data.split(':').slice(0, 2).join(':')}`)
-    const slow = /^(m:prof|m:settings|m:hc|a:|p:|C:|L:|J:csv|fix:(ok|no)|j:(?!v)|r:(ok|sk|nv|ss|fl|df|or)|o:(ok|resume|go:profile|f:|cancel)|f:\w+:c$)/.test(data)
-    if (slow) void ctx.answerCallbackQuery().catch(() => {}) // stop the spinner now; the page edit follows
+    // Telegram takes only the first answer to a tap: answer once, at the end so the toast shows, or after 2 s so a slow route stops spinning.
+    let acked = false
+    const ack = (x?: { text: string; show_alert?: boolean }) => { if (acked) return false; acked = true; void ctx.answerCallbackQuery(x).catch(() => {}); return true }
+    const spin = setTimeout(() => ack(), 2000)
     const toast: { text?: string } = {}
     let res: Page | string | undefined
     const t0 = Date.now()
-    try { res = await route(ctx, data, toast) } catch (e) { logError('tap failed', e); res = "⚠️ That didn't work. Please try again." }
+    try { res = await route(ctx, data, toast) } catch (e) { logError('tap failed', e); res = "⚠️ That didn't work. Please try again." } finally { clearTimeout(spin) }
     if (Date.now() - t0 > 300) log(`slow tap ${data.split(':').slice(0, 2).join(':')}: ${Date.now() - t0} ms`) // budget: read-only screens under 300 ms
     const msg = ctx.callbackQuery.message
     if (typeof res === 'string') {
-      if (slow) await ctx.reply(esc(res), OPTS).catch(() => {})
-      else await ctx.answerCallbackQuery({ text: res.slice(0, 190), show_alert: res.length > 60 }).catch(() => {})
+      // Too late for a toast: say it in the chat, unless it only points at what was just sent ("Sent below").
+      if (!ack({ text: res.slice(0, 190), show_alert: res.length > 60 }) && !/Sent below$/.test(res)) await ctx.reply(esc(res), OPTS).catch(() => {})
       return
     }
     if (res) {
@@ -1212,8 +1240,7 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
       if (homeMsg?.id === msg.message_id) homeMsg.showing = data === 'm:home' || data.startsWith('H:')
       else if (data === 'm:home') homeMsg = { chat: msg.chat.id, id: msg.message_id, showing: true }
     }
-    if (!slow) await ctx.answerCallbackQuery(toast.text ? { text: toast.text } : undefined).catch(() => {})
-    else if (toast.text) await ctx.answerCallbackQuery({ text: toast.text }).catch(() => {})
+    ack(toast.text ? { text: toast.text } : undefined)
   })
 
   bot.on('message:text', async ctx => {
@@ -1234,8 +1261,14 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
       for (const u of urls) startJobUrl(u, ctx.message.message_id)
       return
     }
-    if (OB.loadOb().step === 'resume' && !s.onboarded) return void ctx.reply(note('Please send your resume as a file (tap 📎).'), OPTS)
-    if (s.onboarded && await shortcut(ctx, P.intentOf(text))) return
+    if (!s.onboarded) { // mid-setup, typed text answers the step on screen; it never starts a Claude chat
+      const ob = OB.loadOb(), what = ({ titles: 'title', locations: 'loc', salary: 'salary', start: 'start' } as Record<string, string>)[ob.step]
+      if (what && ob.msg) { pending = { kind: 'ob', what, chat: ctx.chat.id, msg: ob.msg, at: Date.now() }; if (await capture(ctx, text)) return }
+      return void ctx.reply(note(ob.step === 'resume' ? 'Please send your resume as a file: tap 📎, then File, and pick the PDF or Word document.'
+        : ob.step === 'reading' ? "I'm still reading your resume. This takes about a minute." : 'Use the buttons above to continue the setup.'), OPTS)
+    }
+    if (/^(thanks|thank you|thx|ty|ok|okay|cool|great|nice|perfect|👍)$/i.test(text.trim().replace(/[!.]+$/, ''))) return void ctx.react('👍').catch(() => {})
+    if (await shortcut(ctx, P.intentOf(text))) return
     startTask({ kind: 'chat', title: 'Chat', payload: { text: text.slice(0, 4000) } }, false)
   })
 
@@ -1257,6 +1290,8 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
     lastUpload = path
     await ctx.reply(`${heading('📎', 'Got your file')}\nShould I use it as your new resume?`, { ...OPTS, reply_markup: kb([[{ text: '✅ Yes, use it', data: 'up:yes', style: 'success' }, { text: 'No', data: 'up:no' }]]) })
   })
+
+  bot.on('message:photo', ctx => ctx.reply(`${heading('📎', "I can't read photos")}\nSend your resume as a <b>file</b>: tap 📎, then <b>File</b> (not Gallery), and pick the PDF or Word document.`, OPTS))
 
   // Everyday questions get an instant answer from the app; anything else goes to Claude.
   async function shortcut(ctx: Context, i: P.Intent | null): Promise<boolean> {
@@ -1319,15 +1354,17 @@ ${note(`No notification sounds until ${clock(snoozeUntil)}. Work continues.`)}`,
             first = false
             o.onReady?.(info.username ?? 'your bot')
             void api.setMyShortDescription('Finds jobs, tailors your resume and prepares applications. Nothing is sent without you.').catch(() => {})
-            void api.setMyDescription('JobAgent finds jobs that fit you, tailors your resume for each one, fills in the application and shows it to you before anything is sent.\n\nIt runs on your own computer with your own Claude account.').catch(() => {})
+            void api.setMyDescription('JobAgent finds jobs that fit you, tailors your resume for each one, fills in the application and shows it to you before anything is sent.\n\nIt runs on your own computer with your own Claude account, and only answers while JobAgent is open there.').catch(() => {})
             void api.setMyCommands([
               { command: 'menu', description: '🏠 Home: what I am doing and what needs you' },
+              { command: 'review', description: '🔔 Applications waiting for your OK' },
+              { command: 'search', description: '🔎 Look for new jobs now' },
               { command: 'jobs', description: '📋 All your jobs and applications' },
               { command: 'settings', description: '⚙️ What I look for and how I apply' },
               { command: 'pause', description: '⏸ Pause after the current step' },
               { command: 'resume', description: '▶️ Continue' },
               { command: 'stop', description: '🛑 Stop everything now' },
-              { command: 'fix', description: '🔧 Let Claude look into a problem' },
+              { command: 'fix', description: '🔧 Report a problem with JobAgent' },
               { command: 'health', description: '🩺 Check that everything on your computer works' },
               { command: 'snooze', description: '🔕 No notification sounds for an hour' },
               { command: 'help', description: '❔ How JobAgent works' },

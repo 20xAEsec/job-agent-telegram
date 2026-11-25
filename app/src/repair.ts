@@ -21,7 +21,7 @@ export function proposalPage(id: string, p: Proposal): Page {
       heading('🔧', 'A fix is ready to share'), '',
       esc(p.summary), '',
       note(`${n} file${n === 1 ? '' : 's'} changed (+${p.added} −${p.removed}). The tests pass.`), '',
-      `If you approve, I'll open a pull request on GitHub as <b>${esc(p.login)}</b> with this title and text:`,
+      `If you approve, I'll send it to the JobAgent developers as a suggested fix on GitHub (a "pull request") from your account, <b>${esc(p.login)}</b>, with this title and text:`,
       quote(`<b>${esc(p.title)}</b>\n\n${esc(short(p.body, 1200))}`, true), '',
       note('Your profile, answers and job details are not included. Nothing is shared unless you tap the button.'),
     ].join('\n'),

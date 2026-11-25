@@ -3,7 +3,7 @@
 import type { Api } from 'grammy'
 import { join } from 'path'
 import { code } from './jobs'
-import { bar, clock, elapsed, esc, heading, kb, note, short, type Btn, type Page } from './kit'
+import { bar, clock, elapsed, esc, heading, kb, note, pairs, short, type Btn, type Page } from './kit'
 import { DATA, log, readJson, writeJson } from './state'
 
 export const STAGES = ['read', 'score', 'tailor', 'fill', 'review'] as const
@@ -68,7 +68,7 @@ export function renderCard(c: Card, now = Date.now()): Page {
   const lines = [heading(single ? '🏢' : c.icon, esc(short(title, 70)))]
   const running = c.state === 'running'
   if (c.state === 'queued') lines.push(`🕒 Waiting in line${c.position && c.position > 1 ? ` (#${c.position})` : ''}. ${note("I'll start as soon as I'm free.")}`)
-  if (c.state === 'paused') lines.push(`⏸ Waiting: the agent is paused. ${note('Resume from Home to continue.')}`)
+  if (c.state === 'paused') lines.push(`⏸ Waiting: JobAgent is paused.`)
   if (single) lines.push('', ...stepper(single, running))
   else if (c.jobs.length) lines.push('', ...c.jobs.slice(-12).map(j => jobLine(j, running && !j.final && (c.active ? j.job_id === c.active : j === c.jobs.at(-1)))), ...(c.jobs.length > 12 ? [note(`…and ${c.jobs.length - 12} earlier`)] : []))
   if (c.note) lines.push('', esc(c.note))
@@ -85,10 +85,14 @@ export function renderCard(c: Card, now = Date.now()): Page {
 
   const rows: Btn[][] = []
   const url = single?.url
+  if (c.state === 'paused') rows.push([{ text: '▶️ Resume', data: 'H:resume', style: 'success' }])
   if (c.state !== 'ended') rows.push([...(url ? [{ text: '🔗 Posting', url }] : []), { text: '✋ Stop', data: `x:${c.key}` }])
   else {
-    const b = fin?.buttons ?? []
-    if (b.length || url) rows.push([...b, ...(url ? [{ text: '🔗 Posting', url }] : [])])
+    rows.push(...pairs(fin?.buttons ?? [], 2)) // two per row: four on one row get cut off on a phone
+    if (url) rows.push([{ text: '🔗 Open posting', url }])
+    // A search card has no room for each job's buttons: point to where they are.
+    const stuck = single ? 0 : c.jobs.filter(j => j.final?.emoji === '⚠️' || j.final?.emoji === '🙋').length
+    if (stuck) rows.push([{ text: `🙋 See the ${stuck} that need${stuck === 1 ? 's' : ''} you`, data: 'N:0' }])
   }
   return { text: lines.join('\n'), rows }
 }
@@ -103,12 +107,12 @@ export function finalFor(status: string, detail: string, jobId: string): Final |
     case 'APPLIED_SELF': return { emoji: '✅', text: 'You applied.' }
     case 'SKIPPED': return { emoji: '⏭', text: `Skipped${d ? `: ${d}` : ''}`, buttons: [{ text: '↩ Apply anyway', data: `j:any:${c}` }] }
     case 'CLOSED': return { emoji: '🚪', text: 'This posting is closed. Nothing to do.' }
-    case 'NEEDS_HUMAN': return { emoji: '🙋', text: `Needs you${d ? `: ${d}` : ''}`, buttons: [{ text: '🔄 Try again', data: `j:rt:${c}` }] }
+    case 'NEEDS_HUMAN': return { emoji: '🙋', text: `Needs you${d ? `: ${d}` : ''}`, buttons: [{ text: '✅ I applied myself', data: `j:ap:${c}` }, { text: '🔄 Try again', data: `j:rt:${c}` }] }
     case 'FAILED': { // fetch's needs-login detail ("LinkedIn only shows this posting to people who are logged in...") gets a log-in button
       const site = /\blogged in\b/i.test(d) ? (/^Indeed\b/.test(d) ? 'indeed' : /^LinkedIn\b/.test(d) ? 'linkedin' : null) : null
       return { emoji: '⚠️', text: d || 'Something went wrong.', buttons: [...(site ? [{ text: `🔑 Log in to ${site === 'indeed' ? 'Indeed' : 'LinkedIn'}`, data: `L:in:${site}` }] : []), { text: '🔄 Try again', data: `j:rt:${c}` }] }
     }
-    case 'DRY_RUN_DONE': return { emoji: '🧪', text: 'Practice run done. Nothing was sent.' }
+    case 'DRY_RUN_DONE': return { emoji: '🧪', text: 'Practice run done. Nothing was sent.', buttons: [{ text: '🚀 Apply for real', data: `j:go:${c}` }] }
     case 'SUBMITTED': return { emoji: '✅', text: 'Applied.' }
     case 'APPROVED': case 'SUBMITTING': return { emoji: '📤', text: 'Approved and on its way.' }
   }

@@ -264,7 +264,7 @@ export function companiesPage(slugs: string[], msg?: string, learned = 0): Page 
 }
 
 export const addCompanyPrompt = (): Page => ({
-  text: [heading('➕', 'Add a company'), '', 'Send a link to the company\'s Greenhouse, Lever or Ashby job board, or just its board name.', '', note('For example: https://job-boards.greenhouse.io/acme  or  https://jobs.lever.co/acme  or  acme')].join('\n'),
+  text: [heading('➕', 'Add a company'), '', 'Most companies list their jobs on a page like jobs.lever.co/acme, job-boards.greenhouse.io/acme or jobs.ashbyhq.com/acme. Send me that address, or just the name at the end of it.', '', note('For example: https://job-boards.greenhouse.io/acme  or  https://jobs.lever.co/acme  or  acme')].join('\n'),
   rows: [[{ text: '✖ Cancel', data: 'C:list' }]],
 })
 
@@ -280,7 +280,7 @@ export function boardSlug(text: string): string | null {
 export const JOB_SITES: Record<string, string> = { linkedin: 'LinkedIn', indeed: 'Indeed' }
 export type SiteLogin = { logged_in: boolean | null; saved: boolean }
 
-export function loginsPage(sites: Record<string, SiteLogin> | null, msg?: string): Page {
+export function loginsPage(sites: Record<string, SiteLogin> | null, msg?: string, retry?: { site: string; n: number }): Page {
   const state = (x?: SiteLogin) => !x || x.logged_in === null ? '❔ can\'t check right now' : x.logged_in ? '✅ logged in' : '⚪ not logged in'
   const lines = [
     heading('🔑', 'Job site logins'),
@@ -293,6 +293,7 @@ export function loginsPage(sites: Record<string, SiteLogin> | null, msg?: string
   return {
     text: lines.join('\n'),
     rows: [
+      ...(retry?.n ? [[{ text: `🔄 Retry ${retry.n === 1 ? 'the job' : `${retry.n} jobs`} that needed this login`, data: `L:rt:${retry.site}`, style: 'success' as const }]] : []),
       ...Object.entries(JOB_SITES).map(([k, n]) => [
         { text: `🌐 Log in to ${n}`, data: `L:in:${k}` },
         sites?.[k]?.saved ? { text: '🗑 Forget password', data: `L:rm:${k}` } : { text: '🔐 Save password', data: `L:pw:${k}` },

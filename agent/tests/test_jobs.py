@@ -96,7 +96,7 @@ def test_state_machine(tmp_path):
     assert e.value.code == "bad_transition"
     advance(tmp_path, jid, "FETCHED", "SCORED", "NEEDS_ANSWERS", "READY", "FILLED_DRY", "AWAITING_APPROVAL", "APPROVED", "SUBMITTING", "DRY_RUN_DONE")
     with pytest.raises(store.JobError):
-        store.set_status(tmp_path, jid, "READY")  # terminal
+        store.set_status(tmp_path, jid, "APPROVED")  # a practice run only goes back through READY ("Apply for real"), never straight to approval
     assert store.set_status(tmp_path, jid, "DRY_RUN_DONE")["ok"]  # same status: no-op
     assert [h["status"] for h in store.status(tmp_path, jid)["history"]][-1] == "DRY_RUN_DONE"
     b = store.new_job(tmp_path, "https://example.com/jobs/1")["job_id"]
@@ -396,6 +396,12 @@ def test_kit_path_for_forms_we_cannot_fill(tmp_path):
     assert not store.allowed("APPLIED_SELF", "READY")  # terminal: the user said they applied
     assert store.allowed("NEEDS_HUMAN", "APPLIED_SELF") and store.allowed("NEEDS_HUMAN", "KIT_READY")
     assert log.export(tmp_path)["rows"][0]["status"] == "APPLIED_SELF"
+
+
+def test_practice_run_can_be_prepared_again_for_real():
+    # "Apply for real" goes back through READY, so the dry fill, review and Approve all happen again
+    assert store.allowed("DRY_RUN_DONE", "READY") and store.allowed("DRY_RUN_DONE", "APPLIED_SELF")
+    assert not store.allowed("DRY_RUN_DONE", "APPROVED") and not store.allowed("DRY_RUN_DONE", "SUBMITTING")
 
 
 def test_feedback_summary_from_the_users_decisions(tmp_path):

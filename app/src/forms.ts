@@ -187,7 +187,7 @@ export function render(f: Form): Page {
   }
   if (f.confirming) {
     const lines = f.questions.map((q, i) => `${i + 1}. ${q.sensitive ? '🔒 ' : ''}${esc(short(q.text, 70))}\n    → <b>${fmt(q, f.answers[q.qid])}</b>`)
-    rows.push([{ text: '✅ Looks good, send', data: `f:${c}:c`, style: 'success' }])
+    rows.push([{ text: '✅ Looks good, continue', data: `f:${c}:c`, style: 'success' }])
     rows.push([{ text: '✏️ Change an answer', data: `f:${c}:p` }])
     let text = `${head}\n\n${lines.join('\n')}\n\n${note('Check your answers, then send them.')}`
     if (f.skipping && f.job_id) {

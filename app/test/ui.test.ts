@@ -66,6 +66,10 @@ describe('settings catalog', () => {
     for (const spec of ST.SPECS) { fits(ST.specPage(spec, s)); fits(ST.promptFor(spec, true)) }
     fits(ST.companiesPage(Array.from({ length: 50 }, (_, i) => `${'x'.repeat(57)}${i}`.slice(0, 60))))
     fits(ST.practicePage(s)); fits(ST.goLiveConfirm())
+    const lp = ST.loginsPage(null, '✅ Logged in to LinkedIn.', { site: 'linkedin', n: 3 })
+    fits(lp)
+    expect(lp.rows[0][0]).toMatchObject({ text: '🔄 Retry 3 jobs that needed this login', data: 'L:rt:linkedin' })
+    expect(ST.loginsPage(null, undefined, { site: 'linkedin', n: 0 }).rows[0][0].data).toBe('L:in:linkedin')
   })
   test('settings files from before related titles still load, and the list is capped', () => {
     writeJson(SETTINGS_FILE, { version: 2, filters: { titles: ['X'] }, discovery: { enabled: true } })
@@ -127,6 +131,8 @@ describe('screens', () => {
     const s = S()
     const jobs = [job('a', 'AWAITING_APPROVAL'), job('b', 'NEEDS_HUMAN'), job('c', 'SKIPPED')]
     const live = { task: { id: 't', kind: 'job' as const, title: 'Acme · Data Analyst', payload: {}, created: 0, tries: 0 }, started: Date.now() - 65_000, doing: 'Tailoring your resume', steps: 4 }
+    expect(P.home({ s, jobs, forms: [], queued: 2, work: live }).text).toContain("Setup isn't finished") // mid-setup: no "send me a link" yet
+    s.onboarded = true
     const p = P.home({ s, jobs, forms: [], queued: 2, work: live, workTitle: 'Acme · Data Analyst', usage: { five_hour: 0.4, at: 0 } })
     expect(p.text).toContain('Working on:')
     expect(p.text).toContain('Tailoring your resume')
@@ -184,6 +190,16 @@ describe('cards', () => {
     expect(p.text).toContain('Ready for your review')
     expect(p.text).toContain('Reading the posting')
     expect(p.text).toContain('Checked 4 companies')
+  })
+  test('ended cards: two buttons a row, the posting on its own, and a way to the stuck jobs of a search', () => {
+    const fin = { ...finalFor('FAILED', 'LinkedIn only shows this posting to people who are logged in.', 'j1')! }
+    const one = renderCard(base({ state: 'ended', ended: Date.now(), jobs: [{ ...base().jobs[0], final: fin }], final: fin }))
+    expect(one.rows.every(r => r.length <= 2)).toBe(true)
+    expect(one.rows.at(-1)).toEqual([{ text: '🔗 Open posting', url: 'https://x.test/1' }])
+    const multi = renderCard({ key: 'd', mode: 'multi', icon: '🔭', title: 'Auto-search', state: 'ended', final: { emoji: '✅', text: 'Done.' },
+      jobs: [{ job_id: 'a', title: 'A', details: {}, final: fin }, { job_id: 'b', title: 'B', details: {}, final: finalFor('AWAITING_APPROVAL', '', 'b') }] })
+    expect(multi.rows.flat().find(b => b.data === 'N:0')?.text).toBe('🙋 See the 1 that needs you')
+    expect(datas(renderCard(base({ state: 'paused' })))).toContain('H:resume')
   })
 })
 
