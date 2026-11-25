@@ -21,6 +21,7 @@ export const CATS: Record<string, { emoji: string; title: string; blurb: string;
     emoji: '🎯', title: 'What I look for', blurb: 'The jobs I go after, and the ones I skip.',
     items: [
       S('ti', '🎯', 'Job titles', 'filters.titles', 'list', 'The titles I search for. I also match close variations (see "Title matching").', { example: 'Data Analyst, BI Analyst' }),
+      S('rt', '🧩', 'Related titles', 'filters.related_titles', 'list', 'Other names for the same work. I search for these too, after your job titles, and only prepare them when the match score is 10 points above your minimum.', { example: 'SOC Analyst, Security Architect' }),
       S('lv', '📶', 'Seniority', 'filters.experience_level', 'enum', 'The level you are aiming for. Jobs far above or below it get a lower match score.', { opts: LEVELS }),
       S('yr', '⏳', 'Years of experience', 'filters.years_experience', 'int', 'Used to judge whether you meet a job\'s experience requirement.', { presets: [1, 2, 3, 5, 8, 10, 15], nullable: 'Not set', unit: 'years' }),
       S('lo', '📍', 'Locations', 'filters.locations', 'list', 'Cities, regions or countries where you would work on-site or hybrid. Remote jobs are judged separately.', { example: 'Austin, TX, Remote US' }),
@@ -91,6 +92,9 @@ export const CATS: Record<string, { emoji: string; title: string; blurb: string;
       S('ai', '🔁', 'How often', 'discovery.interval_hours', 'int', 'Time between searches. Searches pause during quiet hours.', { presets: [1, 2, 4, 6, 12, 24], show: v => `every ${v} h`, unit: 'hours' }),
       S('ar', '⚡', 'Keep Claude in reserve', 'discovery.reserve_pct', 'int', 'Auto-search waits when less than this share of your 5-hour Claude limit is left, so links you send still get done. Links you send always run.', { presets: [0, 10, 20, 30, 50], unit: '%', show: v => (v ? `keep ${v}% free` : 'Off') }),
       S('aw', '🌐', 'Find new companies', 'discovery.web_search', 'bool', 'ON: once a day I also search the web for companies hiring for your titles, and start watching them. Only your titles and locations are used in the search, never personal details.'),
+      S('rj', '🧭', 'Jobs with other titles', 'discovery.related_jobs', 'enum', 'Some jobs that fit you have a title you did not list. I pick them when the title is in your field and the posting asks for several skills from your profile, and only prepare them when the match score is 10 points above your minimum. They never take the place of jobs with your own titles.', {
+        opts: [['few', 'A few', 'Up to 4 a day (recommended)'], ['more', 'More', 'Up to 12 a day'], ['off', 'Off', 'Only your job titles and related titles']],
+      }),
     ],
   },
   quiet: {
@@ -156,8 +160,18 @@ export function categoryPage(key: string, s: Settings): Page {
 
 const chip = (spec: Spec, v: number) => (spec.path[1] === 'min_salary' ? money(v) : spec.show ? spec.show(v, {} as Settings) : String(v))
 
-// The editor for one setting.
-export function specPage(spec: Spec, s: Settings, msg?: string): Page {
+// Titles auto-search keeps seeing in your field (data/seen_titles.json, written by `discover poll`): seen twice in the last
+// 14 days and not in your lists yet. Offered under Related titles; only a tap adds one.
+export type SeenTitles = Record<string, { t: string; n: number; last: string }>
+export function relatedIdeas(seen: SeenTitles, s: Settings, now = Date.now()): string[] {
+  const norm = (x: string) => x.toLowerCase().replace(/[^a-z0-9+#]+/g, ' ').trim()
+  const have = new Set([...s.filters.titles, ...s.filters.related_titles].map(norm))
+  return Object.values(seen).filter(e => e.n >= 2 && now - Date.parse(e.last) < 14 * 86_400_000 && !have.has(norm(e.t)))
+    .sort((a, b) => b.n - a.n).slice(0, 6).map(e => e.t)
+}
+
+// The editor for one setting. `ideas`: suggestions offered with an Add tap (Related titles only).
+export function specPage(spec: Spec, s: Settings, msg?: string, ideas: string[] = []): Page {
   const v = getPath(s, spec.path) as any
   const head = [heading(spec.emoji, spec.label), esc(spec.what), '', `<b>Now:</b> ${esc(valueText(spec, s))}`]
   if (msg) head.push('', msg)
@@ -190,8 +204,10 @@ export function specPage(spec: Spec, s: Settings, msg?: string): Page {
   const items: string[] = Array.isArray(v) ? v : []
   const list = items.length ? items.map(x => `• ${esc(x)}`).join('\n') : note('Nothing here yet.')
   return {
-    text: [heading(spec.emoji, spec.label), esc(spec.what), '', list, ...(msg ? ['', msg] : []), ...(items.length ? ['', note('Tap ✖ to remove one.')] : [])].join('\n'),
-    rows: [...pairs(items.map((x, j) => ({ text: `✖ ${short(x, 22)}`, data: `s:${id}:r:${j}` }))), [{ text: '➕ Add', data: `s:${id}:a`, style: 'success' }], back],
+    text: [heading(spec.emoji, spec.label), esc(spec.what), '', list, ...(msg ? ['', msg] : []), ...(items.length ? ['', note('Tap ✖ to remove one.')] : []),
+      ...(ideas.length ? ['', `<b>Seen often in your searches</b>\n${note('Tap one to add it.')}`] : [])].join('\n'),
+    rows: [...pairs(items.map((x, j) => ({ text: `✖ ${short(x, 22)}`, data: `s:${id}:r:${j}` }))), ...pairs(ideas.map((x, j) => ({ text: `➕ ${short(x, 22)}`, data: `s:${id}:g:${j}` }))),
+      [{ text: '➕ Add', data: `s:${id}:a`, style: 'success' }], back],
   }
 }
 
@@ -233,12 +249,13 @@ export const goLiveConfirm = (): Page => ({
 })
 
 // "🏢 Companies I watch": the Greenhouse, Lever and Ashby boards auto-search polls.
-export function companiesPage(slugs: string[], msg?: string): Page {
+export function companiesPage(slugs: string[], msg?: string, learned = 0): Page {
   return {
     text: [
       heading('🏢', 'Companies I watch'),
       'Auto-search checks these companies\' job boards for new openings. I can find more myself ("Find new companies"), or you can add one.', '',
       slugs.length ? slugs.map(x => `• ${esc(x)}`).join('\n') : note('None yet.'),
+      ...(learned ? ['', note(`+${learned} found from your searches: companies whose jobs fit you. Remove any you don't want; I won't add it again.`)] : []),
       ...(msg ? ['', msg] : []),
       '', note('Greenhouse, Lever and Ashby job boards are supported.'),
     ].join('\n'),

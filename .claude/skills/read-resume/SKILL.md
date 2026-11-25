@@ -38,6 +38,7 @@ One short paragraph per role: employer, title, dates, one line on what they did.
    - `level`: one of intern, entry, mid, senior, staff, lead, manager, director, judged from titles and years,
    - `skills`: up to 10 of their strongest skills, as written on the resume,
    - `suggested_titles`: 3 to 6 job titles this person would realistically search for next (their current title first, then close variants).
+   - `related_titles` (optional): up to 6 other titles for the same kind of work, judged from what the resume shows they did (for a detection engineer: "SOC Analyst", "Threat Hunter"). Different names for the work, not seniority variants of `suggested_titles`. The user ticks the ones they want.
 5. Stop.
 
 If the text is empty or clearly not a resume, do not call `profile_ready`; just stop (the app asks the user for another file).

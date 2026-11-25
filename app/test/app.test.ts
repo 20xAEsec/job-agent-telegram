@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test'
 import { createHash } from 'crypto'
 import { existsSync, readFileSync, rmSync } from 'fs'
 import { join } from 'path'
-import { createApp, extractUrls, isAllowed, tryPair } from '../src/app'
+import { createApp, discoverTitles, extractUrls, isAllowed, tryPair } from '../src/app'
 import * as OB from '../src/onboarding'
 import { DATA, DEFAULT_SETTINGS, PAIR_FILE, loadSettings, logError, readJson, writeJson } from '../src/state'
 
@@ -36,7 +36,7 @@ describe('gate and pairing', () => {
   })
 })
 
-function makeApp() {
+function makeApp(answer: (a: string[]) => any = () => undefined) {
   writeJson(join(DATA, 'settings.json'), { ...DEFAULT_SETTINGS, paired_user_id: 42 })
   const calls: { method: string; payload: any }[] = []
   const pyCalls: string[][] = []
@@ -45,6 +45,8 @@ function makeApp() {
   const exec = () => ({ pid: undefined, done: new Promise<{ code: number; stderr: string }>(r => { held.push(() => r({ code: 0, stderr: '' })) }) })
   const run = async (a: string[]) => {
     pyCalls.push(a)
+    const given = answer(a)
+    if (given) return given
     if (a[0] === 'profile' && a[1] === 'show') return { ok: true, fields: { full_name: 'Jane Doe', email: 'jane@x.test' } }
     if (a[0] === 'boards' && a[1] === 'list') return { ok: true, boards: { greenhouse: [] } }
     return { ok: true }
@@ -93,14 +95,16 @@ describe('tools Claude can call', () => {
 describe('setup wizard', () => {
   test('a full run saves settings and private answers, and finishes setup', async () => {
     const { app, pyCalls } = makeApp()
-    OB.saveOb({ step: 'profile', picks: [], locs: [], country: 'United States', summary: { name: 'Jane', headline: 'Data Analyst at Acme', years: 4, level: 'mid', location: 'Austin, TX', country: 'United States', email: '', phone: '', skills: ['SQL'], suggested_titles: ['Data Analyst', 'BI Analyst'] } })
+    OB.saveOb({ step: 'profile', picks: [], locs: [], country: 'United States', summary: { name: 'Jane', headline: 'Data Analyst at Acme', years: 4, level: 'mid', location: 'Austin, TX', country: 'United States', email: '', phone: '', skills: ['SQL'], suggested_titles: ['Data Analyst', 'BI Analyst'], related_titles: ['Reporting Analyst', 'BI Analyst'] } })
     const ctx: any = { chat: { id: 42 }, callbackQuery: { message: { message_id: 9 } } }
     const tap = (d: string) => app.route(ctx, d, {})
     expect(await tap('o:next:titles')).toContain('at least one')
     await tap('o:ok')
     await tap('o:t:0')
+    await tap('o:rt:0') // a related title is saved only when tapped
     expect(((await tap('o:next:titles')) as any).text).toContain('What level')
     expect(loadSettings().filters.titles).toEqual(['Data Analyst'])
+    expect(loadSettings().filters.related_titles).toEqual(['Reporting Analyst'])
     await tap('o:lv:senior')
     await tap('o:l:0')
     await tap('o:next:locations')
@@ -126,6 +130,34 @@ describe('setup wizard', () => {
     expect(readJson<any>(join(DATA, 'onboarding.json'), {}).step).toBe('done')
     await app.stop()
   })
+})
+
+describe('auto-search', () => {
+  test('"find new companies" takes the titles in turn', () => {
+    expect(discoverTitles(['a', 'b', 'c', 'd', 'e'], 0)).toEqual([['a', 'b', 'c'], 3])
+    expect(discoverTitles(['a', 'b', 'c', 'd', 'e', 'a'], 3)).toEqual([['d', 'e', 'a'], 6])
+    expect(discoverTitles([], 4)).toEqual([[], 3])
+  })
+  test('each job keeps its tier, and the companies search gets the next titles', async () => {
+    const url = (i: number) => `https://job-boards.greenhouse.io/acme/jobs/${i}`
+    const poll = { ok: true, boards: 1, sites: [], kept: 2, candidates: [
+      { job_id: 'greenhouse-acme-1', title: 'Detection Engineer', company: 'Acme', url: url(1), tier: 'exact' },
+      { job_id: 'greenhouse-acme-2', title: 'SOC Analyst', company: 'Acme', url: url(2), tier: 'maybe', hits: 4 },
+    ] }
+    const { app, calls, release } = makeApp(a => (a[0] === 'discover' ? poll : undefined))
+    writeJson(join(DATA, 'settings.json'), { ...DEFAULT_SETTINGS, paired_user_id: 42, onboarded: true, filters: { ...DEFAULT_SETTINGS.filters, titles: ['A', 'B', 'C', 'D'], related_titles: ['E'] } })
+    writeJson(join(DATA, 'discovery.json'), {})
+    await app.route({ chat: { id: 42 }, callbackQuery: { message: { message_id: 9 } } } as any, 'd:run', {})
+    await wait(100)
+    const tasks = [app.agent.live('work')?.task, ...app.agent.queued()].flatMap(t => (t ? [t] : []))
+    expect(tasks.find(t => t.kind === 'discover')?.payload.titles).toEqual(['A', 'B', 'C'])
+    expect(tasks.filter(t => t.kind === 'job').map(t => t.payload.tier)).toEqual([undefined, 'maybe'])
+    expect(readJson<any>(join(DATA, 'discovery.json'), {}).title_cursor).toBe(3)
+    await wait(2800) // cards are edited at most every 2.5 s
+    expect(calls.map(c => c.payload.text ?? '').join('\n')).toContain('1 with a different title')
+    release()
+    await app.stop()
+  }, 10_000)
 })
 
 describe('logging', () => {

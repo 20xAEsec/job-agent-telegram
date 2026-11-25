@@ -1,4 +1,7 @@
-"""data/boards.json (the boards to poll) and data/seen.json (jobs already surfaced, so none appears twice)."""
+"""data/boards.json (the boards to poll), data/seen.json (jobs already surfaced, so none appears twice), data/title_drops.json (jobs
+dropped for their title, looked at again when the titles change) and data/boards_learned.json (boards found in search results)."""
+import hashlib
+import json
 import re
 from pathlib import Path
 
@@ -7,6 +10,7 @@ from ..paths import atomic_write_json
 
 ATS = ("greenhouse", "lever", "ashby")
 SLUG = re.compile(r"^[a-z0-9][a-z0-9_-]{0,60}$")
+LEARN_PER_POLL, LEARN_MAX = 5, 60
 
 
 def _load(p: Path, empty):
@@ -34,7 +38,26 @@ def remove(d: Path, ats: str, slugs: list[str]) -> dict:
     for a in ATS if ats == "any" else [ats]:
         b[a] = [s for s in b[a] if s not in {x.lower() for x in slugs}]
     atomic_write_json(d / "boards.json", b)
+    atomic_write_json(d / "boards_blocked.json", sorted(set(_load(d / "boards_blocked.json", [])) | {x.lower() for x in slugs}))  # never re-learned
     return {"ok": True, "boards": b}
+
+
+def learn(d: Path, found: list[tuple[str, str]]) -> list[str]:
+    """Watch employer boards that search results led to (a posting that fit, on the employer's own Greenhouse, Lever or Ashby board):
+    at most LEARN_PER_POLL a poll and LEARN_MAX ever, never one the user removed. Returns the slugs added."""
+    learned = _load(d / "boards_learned.json", {})
+    skip = {s for v in load_boards(d).values() for s in v} | set(_load(d / "boards_blocked.json", [])) | set(learned)
+    new: dict[str, str] = {}
+    for a, s in found:
+        if a in ATS and SLUG.match(s := s.lower()) and s not in skip:
+            new.setdefault(s, a)
+    picked = list(new.items())[:max(0, min(LEARN_PER_POLL, LEARN_MAX - len(learned)))]
+    for s, a in picked:
+        add(d, a, [s])
+        learned[s] = {"ats": a, "at": store.now()}
+    if picked:
+        atomic_write_json(d / "boards_learned.json", learned)
+    return [s for s, _ in picked]
 
 
 def _probe(ats: str, slug: str) -> tuple[str, int | None] | None:
@@ -81,3 +104,20 @@ def mark_seen(d: Path, ids: list[str], aliases: dict | None = None) -> None:
     """`aliases` maps a `dup-` company+title key to the job id that owns it, so a job listed on several sites is offered once."""
     if ids or aliases:
         atomic_write_json(d / "seen.json", {**seen(d), **{i: store.now() for i in ids}, **(aliases or {})})
+
+
+def title_sig(f: dict, related_jobs: str) -> str:
+    """Changes when anything that decides a title drop changes, so jobs dropped under the old titles get another look."""
+    key = [sorted(f.get("titles") or []), sorted(f.get("related_titles") or []), f.get("title_match", "close"), f.get("experience_level", "mid"), related_jobs]
+    return hashlib.sha1(json.dumps(key).encode()).hexdigest()[:12]
+
+
+def title_drops(d: Path, sig: str) -> set[str]:
+    st = _load(d / "title_drops.json", {})
+    return set(st.get("ids") or []) if st.get("sig") == sig else set()
+
+
+def mark_title_drops(d: Path, sig: str, old: set[str], ids: list[str]) -> None:
+    """`old`: title_drops(d, sig) as read before the poll (empty after a change, so the old list is replaced)."""
+    if ids:
+        atomic_write_json(d / "title_drops.json", {"sig": sig, "ids": sorted(old | set(ids))})

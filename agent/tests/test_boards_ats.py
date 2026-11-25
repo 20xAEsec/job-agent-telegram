@@ -41,12 +41,25 @@ def test_lever_and_ashby_listers(api):
     errs = []
     got = ats_api._lever(["acme", "gone"], "USD", errs)
     assert got[0] == {"title": "Data Analyst", "company": "acme", "location": "Austin, TX (Remote)", "url": LEVER_JOB["hostedUrl"], "board": "acme",
-                      "posted": got[0]["posted"], "salary_max": 125000}
+                      "posted": got[0]["posted"], "salary_max": 125000, "dept": got[0]["dept"], "blurb": got[0]["blurb"]}
+    assert "Data" in got[0]["dept"] and "We need a Data Analyst." in got[0]["blurb"] and "Write SQL" in got[0]["blurb"]  # text + requirement lists
     assert got[1]["salary_max"] is None and errs == [{"board": "gone", "error": "HTTP 404"}]  # other currency: unknown, not wrong
     got = ats_api._ashby(["beta"], "USD", errs)
     assert [g["title"] for g in got] == ["Data Analyst", "Office Chef"]  # the unlisted one stays out
     assert got[0]["location"] == "Austin (Remote)" and got[0]["salary_max"] == 140000 and got[0]["posted"].startswith("2026-11-22")
     assert got[0]["url"] == "https://jobs.ashbyhq.com/acme/7d1e2f3a-4b5c-4d6e-9f70-8a9b0c1d2e3f"
+    assert (got[0]["dept"], got[0]["blurb"]) == ("Data Analytics", "Acme builds widgets. We need a Data Analyst.")
+
+
+def test_greenhouse_lists_light_and_reads_one_posting(api):
+    gh = json.loads((FX / "gh_job.json").read_text("utf-8"))
+    api.update({"boards-api.greenhouse.io/v1/boards/acme/jobs/123": {**gh, "departments": [{"id": 1, "name": "Data"}]},
+                "boards-api.greenhouse.io/v1/boards/acme/jobs?": {"jobs": [{k: v for k, v in gh.items() if k in ("id", "title", "location")}]}})
+    got = ats_api._greenhouse(["acme"], "USD", [])
+    assert [(g["title"], g["url"], g["salary_max"]) for g in got] == [("Data Analyst", "https://job-boards.greenhouse.io/acme/jobs/123", None)]
+    one = ats_api._gh_detail("acme", "123", "USD")
+    assert one["dept"] == "Data" and "We need a Data Analyst." in one["blurb"] and "<p>" not in one["blurb"]
+    assert ats_api._gh_detail("acme", "999", "USD") == {}  # unreadable: nothing, never an error
 
 
 def test_poll_covers_every_watched_ats(tmp_path, api):

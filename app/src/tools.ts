@@ -89,6 +89,7 @@ export const TOOLS: ToolDef[] = [
         years: { type: ['number', 'null'] }, level: { type: 'string', enum: ['intern', 'entry', 'mid', 'senior', 'staff', 'lead', 'manager', 'director'] },
         location: { type: 'string' }, country: { type: 'string' }, email: { type: 'string' }, phone: { type: 'string' },
         skills: { type: 'array', items: { type: 'string' } }, suggested_titles: { type: 'array', items: { type: 'string' }, description: '3 to 6 job titles this person would search for' },
+        related_titles: { type: 'array', items: { type: 'string' }, description: 'Optional: up to 6 other titles for the same kind of work (different names, not seniority variants of suggested_titles). Shown unticked; the user picks.' },
       },
       required: ['name', 'headline', 'level', 'skills', 'suggested_titles'],
     },

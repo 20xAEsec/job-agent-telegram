@@ -57,6 +57,7 @@ export const DEFAULT_SETTINGS = {
   agent_model: 'sonnet',
   filters: {
     titles: [] as string[], title_match: 'close', experience_level: 'mid', years_experience: null as number | null,
+    related_titles: [] as string[], // other names for the same work: searched too, held to a higher match score
     country: '', // where job sites search; '' = guess from the locations, then the currency
     locations: [] as string[], remote: 'remote_or_hybrid',
     min_salary: null as number | null, currency: 'USD', allow_unknown_salary: true,
@@ -67,7 +68,8 @@ export const DEFAULT_SETTINGS = {
     company_cooldown_hours: 3, cover_letter: 'if_field', draft_free_text: true, tailoring: 'moderate',
     followup_days: 7, // ask about an application with no news after this many days (0 = never)
   },
-  discovery: { enabled: false, interval_hours: 6, web_search: true, sources: ['companies', 'linkedin', 'indeed'] as Source[], reserve_pct: 20 }, // sources: keep in step with DEFAULT_SOURCES (agent/jobagent/discover/ats_api.py)
+  discovery: { enabled: false, interval_hours: 6, web_search: true, sources: ['companies', 'linkedin', 'indeed'] as Source[], reserve_pct: 20, // sources: keep in step with DEFAULT_SOURCES (agent/jobagent/discover/ats_api.py)
+    related_jobs: 'few' as 'off' | 'few' | 'more' }, // jobs with a title you did not list, per day: off, 4 or 12 (agent/jobagent/discover/tiers.py CAPS)
   quiet_hours: { enabled: true, from: '23:00', to: '07:00' },
   // Per kind of message: 'loud' rings, 'silent' arrives without a sound, 'off' is not sent (weekly only).
   notify: { reviews: 'loud', search: 'loud', followups: 'loud', health: 'loud', weekly: 'silent' } as Record<NotifyKind, Loudness>,
@@ -104,6 +106,7 @@ export const SettingsSchema = z.object({
   agent_model: z.enum(['sonnet', 'opus']),
   filters: z.object({
     titles: z.array(str()).max(30),
+    related_titles: z.array(str()).max(15),
     title_match: z.enum(['exact', 'close', 'broad']),
     experience_level: z.enum(['intern', 'entry', 'mid', 'senior', 'staff', 'lead', 'manager', 'director']),
     years_experience: z.number().int().min(0).max(60).nullable(),
@@ -133,6 +136,7 @@ export const SettingsSchema = z.object({
     enabled: z.boolean(), interval_hours: z.number().int().min(1).max(168), web_search: z.boolean(),
     sources: z.array(z.enum(Object.keys(SOURCES) as [Source, ...Source[]])).min(1).max(5),
     reserve_pct: z.number().int().min(0).max(80),
+    related_jobs: z.enum(['off', 'few', 'more']),
   }).strict(),
   quiet_hours: z.object({ enabled: z.boolean(), from: hhmm, to: hhmm }).strict(),
   notify: z.object({

@@ -6,7 +6,7 @@ import { DATA, readJson, writeJson, type Settings } from './state'
 
 export type Summary = {
   name: string; headline: string; years: number | null; level: string; location: string; country: string
-  email: string; phone: string; skills: string[]; suggested_titles: string[]
+  email: string; phone: string; skills: string[]; suggested_titles: string[]; related_titles?: string[]
 }
 export type ObStep =
   | 'welcome' | 'resume' | 'reading' | 'profile' | 'fix'
@@ -15,6 +15,7 @@ export type ObStep =
   | 'eeo' | 'eeo_gender' | 'eeo_race' | 'eeo_veteran' | 'eeo_disability' | 'done'
 export type Ob = {
   step: ObStep; msg?: number; summary?: Summary; country?: string; picks: string[]; locs: string[]
+  rel?: string[] // related titles the user ticked
   doing?: string | null; error?: string; render_warning?: string; replace?: boolean
 }
 
@@ -50,6 +51,8 @@ export const EEO_ORDER = ['eeo_gender', 'eeo_race', 'eeo_veteran', 'eeo_disabili
 
 // Suggestions first, then what the user added, so chips never jump around when tapped.
 export const titlePool = (o: Ob) => [...new Set([...(o.summary?.suggested_titles ?? []), ...o.picks])].slice(0, 10)
+// Other names for the same work, read from the resume: offered unticked, saved as related titles only when tapped.
+export const relPool = (o: Ob) => (o.summary?.related_titles ?? []).filter(x => !titlePool(o).includes(x)).slice(0, 6)
 export const locPool = (o: Ob) => [...new Set([o.summary?.location, o.summary?.country, ...o.locs].filter((x): x is string => !!x))].slice(0, 8)
 
 export const START_OPTS = ['Immediately', '2 weeks', '1 month']
@@ -106,14 +109,16 @@ export function obPage(o: Ob, s: Settings, fields: Record<string, string> = {}):
       return t([heading('✏️', 'What should I fix?'), '', note('Tap a field, then send the right value.')],
         [...pairs(PROFILE_FIELDS.map(([k, l]) => ({ text: l, data: `o:f:${k}` })), 3), [back('profile')]])
     case 'titles': {
-      const pool = titlePool(o)
+      const pool = titlePool(o), rel = relPool(o)
       return t([
         heading('🎯', 'Which job titles should I look for?'), '',
         pool.length ? 'Tap to select. I suggested some from your resume.' : 'Tap ➕ and send one or more titles.',
         ...(o.picks.length ? ['', `<b>Selected:</b> ${esc(o.picks.join(', '))}`] : []),
         '', note('I also match close variations, like "Senior" or "II" versions.'),
+        ...(rel.length ? ['', `🧩 <b>Related titles</b> (optional): other names for the same work. Tap the 🧩 ones you want; I search them too, and hold them to a higher match score.`] : []),
       ], [
         ...pairs(pool.map((x, i) => ({ text: `${o.picks.includes(x) ? '☑️' : '⬜'} ${short(x, 28)}`, data: `o:t:${i}` }))),
+        ...pairs(rel.map((x, i) => ({ text: `${o.rel?.includes(x) ? '☑️' : '🧩'} ${short(x, 28)}`, data: `o:rt:${i}` }))),
         [{ text: '➕ Add a title', data: 'o:add:title' }],
         [back('profile'), { text: 'Next →', data: 'o:next:titles', style: 'success' }],
       ])

@@ -11,6 +11,19 @@ SYNONYMS = {
 }
 SENIORITY = {"senior", "sr", "staff", "principal", "lead", "junior", "jr", "associate", "intern", "entry", "level", "i", "ii", "iii", "iv"}
 THRESHOLD = {"close": 80, "broad": 60}
+# Title parts for `parse`: abbreviations spelled out, the kind of role a word names, words that say nothing about the work,
+# and words that mark a different line of work (only when none of the user's own titles uses them).
+ABBR = {"appsec": "application security", "secops": "security operations", "soc": "security operations", "devsecops": "devops security",
+        "infosec": "information security", "cybersecurity": "security", "cyber": "security", "swe": "software engineer", "sde": "software engineer",
+        "sre": "site reliability engineer", "ml": "machine learning", "eng": "engineer", "dev": "developer"}
+ROLE = {**dict.fromkeys(["engineer", "developer", "architect", "programmer", "tester", "analyst", "specialist", "researcher", "hunter", "scientist",
+                         "designer", "consultant", "administrator", "technician", "writer", "editor"], "ic"),
+        **dict.fromkeys(["clerk", "assistant", "representative", "receptionist", "operator", "coordinator", "agent"], "ops"),
+        **dict.fromkeys(["manager", "director", "head", "vp", "supervisor", "chief", "president"], "mgr")}
+FILLER = {"and", "or", "of", "the", "for", "a", "an", "to", "in", "at", "on", "with", "team", "group", "remote", "us", "usa", "uk", "emea", "apac",
+          "global", "contract", "hybrid", "onsite", "full", "part", "time", "new", "grad"}
+# Not "marketing" or "customer": "Marketing Analyst" and "Customer Data Engineer" are still analyst and engineer jobs.
+NEG = {"sales", "account", "recruiter", "recruiting", "recruitment", "counsel", "attorney", "paralegal", "nurse", "driver", "teacher"}
 
 
 def _words(title: str) -> list[str]:
@@ -59,6 +72,38 @@ def title_matches(title: str, wanted: list[str], mode: str = "close") -> bool:
     return False
 
 
+def _stem(w: str) -> str:
+    return w[:-1] if w.endswith("s") and not w.endswith("ss") and len(w) > 4 else w
+
+
+def parse(title: str) -> tuple[set[str], set[str], set[str]]:
+    """(role kinds, field words, other-line-of-work words): "Sr. SOC Analyst" -> ({"ic"}, {"security", "operation"}, set())."""
+    words = [x for w in _words(title) for x in ABBR.get(w, w).split()]
+    words = [w for w in words if w not in SENIORITY and w not in FILLER and not w.isdigit()]
+    return {ROLE[w] for w in words if w in ROLE}, {_stem(w) for w in words if w not in ROLE}, {w for w in words if w in NEG}
+
+
+def wants_manager(wanted: list[str], level: str) -> bool:
+    return level in ("manager", "director") or any("mgr" in parse(w)[0] for w in wanted)
+
+
+def role_ok(title: str, wanted: list[str], level: str = "mid") -> bool:
+    """False for a manager title when you aim below manager level, or a title from another line of work ("Security Sales Engineer")."""
+    roles, _, neg = parse(title)
+    mine = {w for t in wanted for w in _words(t)}
+    return not neg - mine and ("mgr" not in roles or wants_manager(wanted, level))
+
+
+def title_tier(title: str, f: dict) -> str | None:
+    """"exact" when the title matches one of settings.filters.titles, "related" for one of filters.related_titles, else None."""
+    wanted, related = f.get("titles") or [], f.get("related_titles") or []
+    if not role_ok(title, wanted + related, f.get("experience_level", "mid")):
+        return None
+    if title_matches(title, wanted, f.get("title_match", "close")):
+        return "exact"
+    return "related" if related and title_matches(title, related, "close") else None
+
+
 def _remote(c: dict, hybrid: bool = True) -> bool:
     return bool(re.search(r"remote|anywhere" + ("|hybrid" if hybrid else ""), f"{c.get('location', '')} {c.get('title', '')}", re.I))
 
@@ -82,8 +127,9 @@ def window_hours(f: dict) -> int:
     return int(f.get("posted_within_hours") or f.get("posted_within_days", 14) * 24)
 
 
-def drop_reason(c: dict, f: dict, now: datetime | None = None) -> str | None:
-    if not title_matches(c.get("title", ""), f.get("titles", []), f.get("title_match", "close")):
+def drop_reason(c: dict, f: dict, now: datetime | None = None, title_ok: bool | None = None) -> str | None:
+    """`title_ok` True: the caller already judged the title (a related title, or a different title worth a look)."""
+    if not (title_ok if title_ok is not None else title_tier(c.get("title", ""), f)):
         return "title"
     if not location_ok(c, f):
         return "location"

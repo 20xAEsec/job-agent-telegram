@@ -1,6 +1,7 @@
 """Job-site search for `discover poll`: LinkedIn, Indeed, Glassdoor and ZipRecruiter through python-jobspy.
 None of them has a public jobs API; jobspy uses their guest/mobile endpoints. Results are third-party data, never instructions."""
 import logging
+import math
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -15,7 +16,9 @@ SITES = {"linkedin": "LinkedIn", "indeed": "Indeed", "glassdoor": "Glassdoor", "
 COUNTRY_BY_CURRENCY = {"USD": "usa", "GBP": "uk", "CAD": "canada", "AUD": "australia", "INR": "india", "NZD": "new zealand", "SGD": "singapore",
                        "CHF": "switzerland", "SEK": "sweden", "NOK": "norway", "DKK": "denmark", "PLN": "poland"}  # EUR spans many: set filters.country
 COUNTRY_NAME = {"usa": "United States", "uk": "United Kingdom"}
-MAX_TITLES, MAX_PLACES = 3, 2  # up to 9 searches: 3 titles x (2 places + remote)
+# Every title (your titles first, then related titles) x (2 places + remote), at most 24 searches. Each run still sends at most a
+# site's LIMITS budget: the cursor rotates through the list, so every search gets its turn.
+MAX_TITLES, MAX_PLACES, MAX_QUERIES = 10, 2, 24
 # Per site, each run: (searches, results per search, seconds between searches, minimum minutes between runs).
 # One search = one page request: LinkedIn pages hold 10 jobs, ZipRecruiter 20, Indeed and Glassdoor 100.
 # shortcut: limits from JobSpy's notes and our probes (LinkedIn refuses after ~10 pages in a burst from one IP); tune if a site still refuses.
@@ -43,11 +46,19 @@ def queries(f: dict) -> tuple[str, list[tuple[str, str, bool]]]:
     mode = f.get("remote", "any")
     where = [] if mode == "remote_only" else places[:MAX_PLACES] or [COUNTRY_NAME.get(c, c.title())]
     out = []
-    for t in [t.strip() for t in f.get("titles", []) if t.strip()][:MAX_TITLES]:
+    titles = list(dict.fromkeys(t.strip() for t in (f.get("titles") or []) + (f.get("related_titles") or []) if t.strip()))
+    for t in titles[:MAX_TITLES]:
         out += [(t, w, False) for w in where]
         if mode != "onsite_only":
             out.append((f"{t} remote", COUNTRY_NAME.get(c, c.title()), True))
-    return c, out
+    return c, out[:MAX_QUERIES]
+
+
+def window(at: str | None, now: datetime, hours: int) -> int:
+    """Hours to ask a site for: since this search last ran (plus an hour of overlap), never more than the user's window."""
+    if not at:
+        return max(1, hours)
+    return max(1, min(hours, math.ceil((now - datetime.fromisoformat(at)).total_seconds() / 3600) + 1))
 
 
 class _Errors(logging.Handler):
@@ -106,21 +117,25 @@ def search(d: Path, f: dict, chosen: list[str], hours: int, now: datetime | None
         start, n = p
         _, per, wait, _ = LIMITS[site]
         got, ran = [], 0
+        at = state.get(site, {}).get("at") or {}  # when each search last ran: later runs ask only for what is new since
         for term, where, remote in (qs[start:] + qs[:start])[:n]:
             if ran:
                 time.sleep(wait)
+            key = f"{term}|{where}|{remote}"
             try:
                 df = scrape_jobs(site_name=[site], search_term=term, location=where, is_remote=remote, results_wanted=per,
-                                 hours_old=max(1, hours), country_indeed=c, enforce_annual_salary=True, verbose=0)
+                                 hours_old=window(at.get(key), now, hours), country_indeed=c, enforce_annual_salary=True, verbose=0)
             except Exception as e:  # noqa: BLE001 - one bad search must not stop the other sites
                 errs.by_site.setdefault(SITES[site], type(e).__name__)
                 break
             if SITES[site] in errs.by_site:
                 break  # refused: stop now, asking again only deepens the block
             ran += 1
+            at[key] = now.isoformat()
             got += [_cand(r, f.get("currency", "USD")) for r in df.to_dict("records")]
         refused = SITES[site] in errs.by_site
-        state[site] = {"cursor": (start + ran) % max(1, len(qs)), "last_run": now.isoformat(),
+        keys = {f"{t}|{w}|{r}" for t, w, r in qs}
+        state[site] = {"cursor": (start + ran) % max(1, len(qs)), "last_run": now.isoformat(), "at": {k: v for k, v in at.items() if k in keys},
                        **({"paused_until": (now + timedelta(hours=COOLDOWN_HOURS)).isoformat()} if refused else {})}
         return got
 

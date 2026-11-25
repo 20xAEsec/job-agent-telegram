@@ -7,7 +7,7 @@ import { ago, parseList, parseNumber, splitMsg, until, type Page } from '../src/
 import * as OB from '../src/onboarding'
 import * as P from '../src/pages'
 import * as ST from '../src/settings'
-import { DEFAULT_SETTINGS, SettingsSchema, getPath, inWindow, type Settings } from '../src/state'
+import { DEFAULT_SETTINGS, SETTINGS_FILE, SettingsSchema, getPath, inWindow, loadSettings, writeJson, type Settings } from '../src/state'
 
 const S = (): Settings => structuredClone(DEFAULT_SETTINGS)
 const datas = (p: Page) => p.rows.flat().filter(b => !b.url).map(b => b.data ?? 'noop')
@@ -67,6 +67,29 @@ describe('settings catalog', () => {
     fits(ST.companiesPage(Array.from({ length: 50 }, (_, i) => `${'x'.repeat(57)}${i}`.slice(0, 60))))
     fits(ST.practicePage(s)); fits(ST.goLiveConfirm())
   })
+  test('settings files from before related titles still load, and the list is capped', () => {
+    writeJson(SETTINGS_FILE, { version: 2, filters: { titles: ['X'] }, discovery: { enabled: true } })
+    const s = loadSettings()
+    expect([s.filters.related_titles, s.discovery.related_jobs]).toEqual([[], 'few'])
+    expect(SettingsSchema.safeParse(s).success).toBe(true)
+    expect(SettingsSchema.safeParse({ ...s, filters: { ...s.filters, related_titles: Array.from({ length: 16 }, (_, i) => `T${i}`) } }).success).toBe(false)
+  })
+  test('related titles: ideas seen in searches, offered with one tap', () => {
+    const s = S(); s.filters.titles = ['Detection Engineer']; s.filters.related_titles = ['SOC Analyst']
+    const now = Date.parse('2026-11-22T12:00:00Z'), at = (days: number) => new Date(now - days * 86_400_000).toISOString()
+    const seen: ST.SeenTitles = {
+      'soc analyst': { t: 'SOC Analyst', n: 5, last: at(1) }, 'threat hunter': { t: 'Threat Hunter', n: 2, last: at(2) },
+      'security architect': { t: 'Security Architect', n: 9, last: at(20) }, 'siem engineer': { t: 'SIEM Engineer', n: 1, last: at(1) },
+      'appsec engineer': { t: 'AppSec Engineer', n: 3, last: at(0) },
+    }
+    expect(ST.relatedIdeas(seen, s, now)).toEqual(['AppSec Engineer', 'Threat Hunter']) // twice lately, not listed yet, most seen first
+    const page = ST.specPage(ST.specById('rt')!, s, undefined, Array.from({ length: 6 }, (_, i) => `A very long related job title number ${i}`))
+    fits(page)
+    expect(datas(page)).toContain('s:rt:g:5')
+    expect(page.text).toContain('Seen often in your searches')
+    fits(ST.companiesPage(['acme', 'beta'], undefined, 2))
+    expect(ST.companiesPage(['acme'], undefined, 1).text).toContain('+1 found from your searches')
+  })
   test('board links and names', () => {
     expect(ST.boardSlug('https://job-boards.greenhouse.io/acme/jobs/123')).toBe('acme')
     expect(ST.boardSlug('https://boards.greenhouse.io/embed/job_board?for=Beta')).toBe('beta')
@@ -82,6 +105,11 @@ describe('setup wizard', () => {
     const steps: OB.ObStep[] = ['welcome', 'resume', 'reading', 'profile', 'fix', 'titles', 'level', 'locations', 'remote', 'salary', 'auth', 'sponsor', 'start', 'relocate', 'eeo', 'eeo_gender', 'eeo_race', 'eeo_veteran', 'eeo_disability', 'done']
     const summary: OB.Summary = { name: 'Jane', headline: 'Data Analyst at Acme', years: 4, level: 'mid', location: 'Austin, TX', country: 'United States', email: 'j@x', phone: '1', skills: ['SQL'], suggested_titles: ['Data Analyst', 'BI Analyst'] }
     for (const step of steps) fits(OB.obPage({ step, picks: ['Data Analyst'], locs: [], summary }, S()))
+    const rel = Array.from({ length: 8 }, (_, i) => `A long related title from the resume ${i}`)
+    const p = OB.obPage({ step: 'titles', picks: ['Data Analyst'], locs: [], rel: [rel[1]], summary: { ...summary, related_titles: [...rel, 'BI Analyst'] } }, S())
+    fits(p)
+    expect(datas(p).filter(d => d.startsWith('o:rt:'))).toEqual(['o:rt:0', 'o:rt:1', 'o:rt:2', 'o:rt:3', 'o:rt:4', 'o:rt:5']) // at most 6, none repeating a title above
+    expect(p.text).toContain('Related titles')
   })
   test('work authorization keys are reusable save keys', () => {
     expect(OB.keyFor('United States')).toBe('work_auth_united_states')

@@ -225,10 +225,11 @@ describe('upgrade: queue, index and local reads', () => {
     writeJson(join(DATA, 'settings.json'), { ...DEFAULT_SETTINGS, agent_on: false }) // paused: nothing starts, we only look at the line
     const a = createAgent({ bridge: () => ({ url: 'http://x', secret: 's' }), onLive: () => {}, onFinish: () => {}, onUsage: () => {}, exec: () => ({ done: new Promise(() => {}) }) })
     a.enqueue({ kind: 'discover', title: 'companies', payload: { expand_boards: true } })
-    a.enqueue({ kind: 'job', job_id: 'found-1', title: 'found', payload: { url: 'https://x/1', source: 'discovery', parent: 'search-1' } })
+    a.enqueue({ kind: 'job', job_id: 'found-1', title: 'found', payload: { url: 'https://x/1', source: 'discovery', parent: 'search-1', tier: 'maybe' } })
     a.enqueue({ kind: 'job', title: 'mine', payload: { url: 'https://x/2' } })
     expect(a.queued().map(t => t.title)).toEqual(['mine', 'found', 'companies'])
     expect(promptFor(a.queued()[1])).toContain('--source discovery')
+    expect(promptFor(a.queued()[1])).toContain('"tier":"maybe"') // intake-job holds other-title jobs to a higher bar
     writeJson(join(DATA, 'settings.json'), DEFAULT_SETTINGS)
   })
   test('profile.md and boards.json are read without Python', () => {

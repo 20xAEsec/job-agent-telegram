@@ -41,7 +41,9 @@ You analyse one job posting for the user. Input: a `job_id`. Run commands as `uv
 
 ## Match score
 
-0 to 100 from: title closeness to `filters.titles`, seniority vs `experience_level` and `years_experience`, overlap of must-have skills with the profile, location and remote fit, salary vs `min_salary`. `reasons` explain the score in short plain words the user will read ("4 years of SQL; they ask for 3+"); `dealbreakers` are hard misses, also in plain words (wrong location, salary below the minimum, an employment type not in `filters.job_types`, an excluded keyword, a clearance or sponsorship conflict with the user's saved answers).
+0 to 100 from: title fit (against `filters.titles` and `filters.related_titles`), seniority vs `experience_level` and `years_experience`, overlap of must-have skills with the profile, location and remote fit, salary vs `min_salary`. `reasons` explain the score in short plain words the user will read ("4 years of SQL; they ask for 3+"); `dealbreakers` are hard misses, also in plain words (wrong location, salary below the minimum, an employment type not in `filters.job_types`, an excluded keyword, a clearance or sponsorship conflict with the user's saved answers).
+
+Judge title fit by the work, not the words: when the title differs from all of those titles but the posting's duties and required skills match one of them, it is the same kind of job. Give `breakdown.title` at least 70 and start one `reasons` entry with "Different title, same work: " (for example "Different title, same work: SQL reporting and dashboards, as a Data Analyst"). A different title doing different work stays low.
 
 `breakdown` gives each of those five parts its own 0 to 100 (`pay` is 50 when the posting gives no pay). `must_haves`: up to 8 requirements the posting marks as required, each `met` (the profile clearly shows it), `partial` (related experience) or `missing`. Judge only from the profile; never mark something `met` the profile does not show.
 

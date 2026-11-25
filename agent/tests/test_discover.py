@@ -59,6 +59,10 @@ def cand(**kw):
     ({"salary_max": 250_000}, {}, None),
     ({"salary_max": None}, {"allow_unknown_salary": False}, "salary"),
     ({}, {"min_salary": None, "allow_unknown_salary": False}, None),
+    ({"title": "Detection Sales Engineer"}, {}, "title"),  # "close" by words, but another line of work
+    ({"title": "Manager, Detection Engineer"}, {}, "title"),  # a manager role for someone aiming below it
+    ({"title": "Manager, Detection Engineer"}, {"experience_level": "manager"}, None),
+    ({"title": "Threat Hunter"}, {"related_titles": ["Threat Hunter"]}, None),
 ])
 def test_prefilter(kw, filters, why):
     assert drop_reason(cand(**kw), {**F, **filters}, NOW) == why
@@ -70,9 +74,24 @@ def test_salary_max():
     assert ats_api.salary_max("raised $50M, founded 2015, 10-20 people") is None
 
 
-def gh(*jobs):
+def gh(*jobs, content="&lt;p&gt;$220,000 - $260,000&lt;/p&gt;"):
     return {"jobs": [{"id": i, "title": t, "company_name": c, "location": {"name": loc}, "first_published": datetime.now(timezone.utc).isoformat(),
-                      "content": "&lt;p&gt;$220,000 - $260,000&lt;/p&gt;"} for i, t, c, loc in jobs]}
+                      "content": content} for i, t, c, loc in jobs]}
+
+
+def fake_board_api(api: dict):
+    """Greenhouse's light board listing (no `content`) and single postings (with it), from {board: gh(...)}. `.details`: postings read."""
+    def get(url):
+        board, *rest = url.split("/boards/")[1].split("?")[0].split("/")
+        jobs = api.get(board, {}).get("jobs", [])
+        if rest[1:]:  # /jobs/<id>: one posting
+            get.details.append(f"{board}/{rest[1]}")
+            body = next((j for j in jobs if str(j["id"]) == rest[1]), None)
+        else:
+            body = {"jobs": [{k: v for k, v in j.items() if k != "content"} for j in jobs]} if board in api else None
+        return httpx.Response(200 if body is not None else 404, json=body or {}, request=httpx.Request("GET", url))
+    get.details = []
+    return get
 
 
 @pytest.fixture
@@ -81,12 +100,7 @@ def data(tmp_path, monkeypatch):
     boards.add(tmp_path, "greenhouse", ["acme", "beta", "gone"])
     api = {"acme": gh((1, "Detection Engineer", "Acme", "Remote"), (2, "Chef", "Acme", "Remote"), (3, "Detection Engineer", "Cubic", "Remote")),
            "beta": gh((7, "Senior Detection Engineer", "Beta", "San Diego"))}
-
-    def fake_get(url):
-        board = url.split("/boards/")[1].split("/")[0]
-        return httpx.Response(200 if board in api else 404, json=api.get(board, {}), request=httpx.Request("GET", url))
-
-    monkeypatch.setattr(ats_api, "_get", fake_get)
+    monkeypatch.setattr(ats_api, "_get", fake_board_api(api))
     return tmp_path
 
 
@@ -96,13 +110,93 @@ def test_poll_keeps_new_matches_and_never_repeats(data):
     assert (r["found"], r["new"], r["kept"], r["dropped"]) == (4, 4, 2, {"title": 1, "company_blocklist": 1})
     assert r["errors"][0]["board"] == "gone"
     assert r["candidates"][0]["salary_max"] == 260_000 and r["candidates"][0]["url"] == "https://job-boards.greenhouse.io/acme/jobs/1"
+    assert ats_api._get.details == ["acme/1", "beta/7"]  # one posting read per job that passed the cheap checks, none for the others
+    assert {c["tier"] for c in r["candidates"]} == {"exact"} and "blurb" not in r["candidates"][0]
     # Dropped jobs are remembered at once; kept ones come back until a job exists for them (nothing lost if intake never ran).
-    assert sorted(k for k in boards.seen(data) if not k.startswith("dup-")) == ["greenhouse-acme-2", "greenhouse-acme-3"]
+    assert sorted(k for k in boards.seen(data) if not k.startswith("dup-")) == ["greenhouse-acme-3"]
+    assert json.loads((data / "title_drops.json").read_text("utf-8"))["ids"] == ["greenhouse-acme-2"]  # title drops: kept apart
     assert len(ats_api.poll(data)["candidates"]) == 2
     for c in r["candidates"]:
         store.new_job(data, c["url"], "discovery")
     r2 = ats_api.poll(data)
     assert (r2["new"], r2["kept"], r2["candidates"]) == (0, 0, [])
+
+
+def test_title_sig_reset(data):
+    assert "greenhouse-acme-2" not in [c["job_id"] for c in ats_api.poll(data)["candidates"]]
+    assert ats_api.poll(data)["dropped"] == {}  # the Chef stays dropped while the titles stay the same
+    (data / "settings.json").write_text(json.dumps({"filters": {**F, "titles": ["Detection Engineer", "Chef"]}, "discovery": {"sources": ["companies"]}}), "utf-8")
+    assert "greenhouse-acme-2" in [c["job_id"] for c in ats_api.poll(data)["candidates"]]  # new titles: looked at again
+
+
+SKILLS = "# Profile\n## Contact\n- full_name: A\n## Skills\n- languages: Python, Go, SQL\n- tools: Splunk, Terraform, Kubernetes, Sigma\n"
+SEC_F = {**F, "titles": ["Cyber Security Engineer", "Detection Engineer"], "min_salary": None}
+
+
+def other_titles(tmp_path, monkeypatch, jobs, related_jobs="few"):
+    (tmp_path / "profile.md").write_text(SKILLS, "utf-8")
+    (tmp_path / "settings.json").write_text(json.dumps({"filters": SEC_F, "discovery": {"sources": ["companies"], "related_jobs": related_jobs}}), "utf-8")
+    boards.add(tmp_path, "greenhouse", ["acme"])
+    monkeypatch.setattr(ats_api, "_get", fake_board_api({"acme": {"jobs": [
+        {"id": i, "title": t, "company_name": "Acme", "location": {"name": "Remote"}, "first_published": NOW.isoformat(), "content": text} for i, t, text in jobs]}}))
+    return tmp_path
+
+
+FOUR = "&lt;p&gt;Python, Go, Splunk and Terraform every day.&lt;/p&gt;"
+
+
+def test_maybe_tier_comes_after_your_titles(tmp_path, monkeypatch):
+    d = other_titles(tmp_path, monkeypatch, [(2, "Security Software Engineer", FOUR), (1, "Detection Engineer", ""), (3, "Security Sales Engineer", FOUR),
+                                             (4, "Security Analyst", "&lt;p&gt;Splunk.&lt;/p&gt;")])
+    r = ats_api.poll(d, NOW)
+    assert [(c["job_id"], c["tier"]) for c in r["candidates"]] == [("greenhouse-acme-1", "exact"), ("greenhouse-acme-2", "maybe")]
+    assert r["candidates"][1]["hits"] == 4 and r["candidates"][1]["why"] == "Different title, 4 of your skills match"
+    assert r["dropped"] == {"title": 2}  # the sales title, and the analyst job that names one of your skills
+    seen = json.loads((d / "seen_titles.json").read_text("utf-8"))
+    assert {e["t"] for e in seen.values()} == {"Security Software Engineer", "Security Analyst"}  # offered as related titles once seen twice
+
+
+def test_other_titles_off_drops_them(tmp_path, monkeypatch):
+    d = other_titles(tmp_path, monkeypatch, [(2, "Security Software Engineer", FOUR), (1, "Detection Engineer", "")], "off")
+    r = ats_api.poll(d, NOW)
+    assert [c["job_id"] for c in r["candidates"]] == ["greenhouse-acme-1"] and r["dropped"] == {"title": 1}
+
+
+def test_other_titles_daily_cap(tmp_path, monkeypatch):
+    titles = ["Security Software Engineer", "Security Analyst", "SecOps Engineer", "AppSec Engineer", "Security Architect"]
+    d = other_titles(tmp_path, monkeypatch, [(i, t, FOUR) for i, t in enumerate(titles, 1)])
+    noon = NOW + timedelta(hours=12)  # the cap counts per local day: stay clear of midnight in any time zone
+    first = [c["job_id"] for c in ats_api.poll(d, noon)["candidates"]]
+    assert first == [f"greenhouse-acme-{i}" for i in (1, 2, 3, 4)]  # 4 a day
+    assert [c["job_id"] for c in ats_api.poll(d, noon + timedelta(minutes=1))["candidates"]] == first  # the same 4, the 5th still waits
+    for j in first:
+        store.new_job(d, f"https://job-boards.greenhouse.io/acme/jobs/{j.rsplit('-', 1)[1]}", "discovery")
+    assert [c["job_id"] for c in ats_api.poll(d, noon + timedelta(days=1))["candidates"]] == ["greenhouse-acme-5"]  # next day
+
+
+def test_related_titles_are_their_own_tier(tmp_path, monkeypatch):
+    d = other_titles(tmp_path, monkeypatch, [(1, "Senior Threat Hunter", ""), (2, "Detection Engineer", "")])
+    s = json.loads((d / "settings.json").read_text("utf-8"))
+    s["filters"]["related_titles"] = ["Threat Hunter"]
+    (d / "settings.json").write_text(json.dumps(s), "utf-8")
+    r = ats_api.poll(d, NOW)
+    assert [(c["job_id"], c["tier"], c.get("why")) for c in r["candidates"]] == [("greenhouse-acme-2", "exact", None),
+                                                                              ("greenhouse-acme-1", "related", "One of your related titles")]
+
+
+def test_boards_learned_from_search_results(data, monkeypatch):
+    (data / "settings.json").write_text(json.dumps({"filters": F, "discovery": {"sources": ["companies", "indeed"]}}), "utf-8")
+    hits = [site("Detection Engineer", f"Co{i}", f"https://job-boards.greenhouse.io/co{i}/jobs/{i}", description="x") for i in range(7)]
+    monkeypatch.setattr(sites, "search", lambda d, f, chosen, hours: (hits + [site("Chef", "Zed", "https://job-boards.greenhouse.io/zed/jobs/1")], [], []))
+    r = ats_api.poll(data)
+    assert r["learned"] == ["co0", "co1", "co2", "co3", "co4"]  # 5 a poll; the Chef's board is not one
+    assert boards.load_boards(data)["greenhouse"] == ["acme", "beta", "co0", "co1", "co2", "co3", "co4", "gone"]
+    boards.remove(data, "any", ["co0"])
+    assert ats_api.poll(data)["learned"] == ["co5", "co6"]  # a removed board is never learned again
+    learned = json.loads((data / "boards_learned.json").read_text("utf-8"))
+    learned.update({f"x{i}": {"ats": "greenhouse"} for i in range(60)})
+    (data / "boards_learned.json").write_text(json.dumps(learned), "utf-8")
+    assert boards.learn(data, [("greenhouse", "new")]) == []  # 60 at most
 
 
 def test_poll_needs_titles(tmp_path):
@@ -161,11 +255,32 @@ def test_poll_job_sites_dedupe_and_save_listings(data, monkeypatch):
 def test_site_queries_use_settings_only():
     f = {"titles": ["Data Analyst", "BI Analyst", "Analytics Engineer", "Fourth"], "locations": ["Austin, TX", "Remote US", "Denver"], "remote": "remote_or_hybrid", "currency": "USD"}
     c, q = sites.queries(f)
-    assert c == "usa" and len(q) == 9
+    assert c == "usa" and len(q) == 12 and q[-1] == ("Fourth remote", "United States", True)  # every title is searched
     assert q[:3] == [("Data Analyst", "Austin, TX", False), ("Data Analyst", "Denver", False), ("Data Analyst remote", "United States", True)]
     assert sites.queries({**f, "remote": "remote_only"})[1][0] == ("Data Analyst remote", "United States", True)
     assert all(not r for _, _, r in sites.queries({**f, "remote": "onsite_only"})[1])
     assert sites.queries({"titles": ["X"], "locations": ["Berlin, Germany"], "currency": "EUR", "remote": "onsite_only"}) == ("germany", [("X", "Berlin, Germany", False)])
+
+
+def test_queries_cover_all_titles():
+    six = {"titles": [f"T{i}" for i in range(6)], "locations": [], "remote": "remote_only", "currency": "USD"}
+    assert [t for t, _, _ in sites.queries(six)[1]] == [f"T{i} remote" for i in range(6)]
+    q = sites.queries({**six, "titles": ["A", "B"], "related_titles": ["C", "A "]})[1]
+    assert [t for t, _, _ in q] == ["A remote", "B remote", "C remote"]  # your titles first, then related ones, each once
+    assert len(sites.queries({**six, "titles": [f"T{i}" for i in range(12)], "locations": ["X", "Y"], "remote": "any"})[1]) == sites.MAX_QUERIES
+
+
+def test_query_window_since_last_visit(tmp_path, monkeypatch):
+    import jobspy
+    import pandas as pd
+
+    asked = []
+    monkeypatch.setattr(jobspy, "scrape_jobs", lambda **kw: (asked.append(kw["hours_old"]), pd.DataFrame([]))[1])
+    f = {"titles": ["A"], "locations": [], "remote": "remote_only", "currency": "USD"}
+    t0 = datetime(2026, 11, 23, 12, tzinfo=timezone.utc)
+    for when, window in [(t0, 336), (t0 + timedelta(hours=3), 336), (t0 + timedelta(hours=4, minutes=30), 336), (t0 + timedelta(days=30), 336), (t0 + timedelta(days=30, hours=5), 2)]:
+        sites.search(tmp_path, f, ["indeed"], window, when)
+    assert asked == [336, 4, 3, 336, 2]  # first visit: the whole window; then since the last visit plus an hour; never more than the window
 
 
 def test_site_row_to_candidate():

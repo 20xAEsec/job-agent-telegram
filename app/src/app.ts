@@ -45,6 +45,12 @@ export function whereText(boards: number, sites: string[]): string {
   return parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}` : parts[0]
 }
 
+// The 3 titles the daily "find new companies" search uses, taking turns through all of them: [titles, next cursor].
+export function discoverTitles(all: string[], cursor: number): [string[], number] {
+  const list = [...new Set(all)], at = list.length ? cursor % list.length : 0
+  return [[...list.slice(at), ...list.slice(0, at)].slice(0, 3), at + 3]
+}
+
 // ---- Gate (pure, unit-tested) ----
 export const isAllowed = (from: number | undefined, chatType: string | undefined, paired: number | null) =>
   paired != null && from === paired && chatType === 'private'
@@ -84,6 +90,7 @@ const SummarySchema = z.object({
   level: z.enum(['intern', 'entry', 'mid', 'senior', 'staff', 'lead', 'manager', 'director']),
   location: z.string().max(100).optional(), country: z.string().max(60).optional(), email: z.string().max(120).optional(), phone: z.string().max(40).optional(),
   skills: z.array(z.string().max(60)).max(30), suggested_titles: z.array(z.string().min(1).max(80)).max(8),
+  related_titles: z.array(z.string().min(1).max(80)).max(8).optional(),
 })
 
 export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeof createAgent>[0]['exec']; onReady?: (bot: string) => void }) {
@@ -121,7 +128,7 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
   const cards = createCards(api, paired)
 
   // ---- Home and the pinned status bar: always show what is happening ----
-  const discState = () => readJson<{ last_tick?: number; last_expand?: number }>(DISC_FILE, {})
+  const discState = () => readJson<{ last_tick?: number; last_expand?: number; title_cursor?: number }>(DISC_FILE, {})
   const nextSearch = () => { const s = loadSettings(); return s.discovery.enabled ? (discState().last_tick ?? 0) + s.discovery.interval_hours * 3600_000 : null }
   const cardTitle = (t: Task) => { const c = cards.get(t.id); return c?.mode === 'job' && c.jobs[0]?.title ? c.jobs[0].title : t.title }
   function homeCtx(): P.HomeCtx {
@@ -293,9 +300,10 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
   async function startDiscover(reason: 'timer' | 'manual' | 'first') {
     const s = loadSettings(), d = discState(), now = Date.now()
     const expand = s.discovery.web_search && now - (d.last_expand ?? 0) > 24 * 3600_000
-    writeJson(DISC_FILE, { ...d, last_tick: now, ...(expand ? { last_expand: now } : {}) })
+    const [titles, title_cursor] = discoverTitles([...s.filters.titles, ...s.filters.related_titles], d.title_cursor ?? 0)
+    writeJson(DISC_FILE, { ...d, last_tick: now, ...(expand ? { last_expand: now, title_cursor } : {}) })
     // Finding new companies needs web search and judgment: a background Claude task. Its boards are polled from the next run on.
-    if (expand && ![agent.live('work')?.task, ...agent.queued()].some(t => t?.kind === 'discover')) agent.enqueue({ kind: 'discover', title: 'Finding new companies', payload: { expand_boards: true } })
+    if (expand && ![agent.live('work')?.task, ...agent.queued()].some(t => t?.kind === 'discover')) agent.enqueue({ kind: 'discover', title: 'Finding new companies', payload: { expand_boards: true, titles } })
     const key = `search-${now.toString(36)}`
     const sitesOn = s.discovery.sources.filter(x => x !== 'companies').map(x => SOURCES[x])
     const card = (f: (c: Card) => void) => cards.update(key, f, () => ({ key, mode: 'multi', icon: '🔭', title: reason === 'first' ? 'Your first matches' : 'Auto-search', state: 'running', started: now, jobs: [] }))
@@ -320,11 +328,12 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
     const take = (r.candidates as any[]).slice(0, cap)
     card(c => {
       c.state = 'running'; c.doing = 'Waiting for my turn'
-      c.note = `Checked ${where} · ${plural(r.kept, 'new job')} fit${r.kept === 1 ? 's' : ''} your settings${r.kept > cap ? ` · preparing ${cap} now, the rest come next run` : ''}.${slow.length ? ` ${slow.join(' ')}` : ''}`
+      const other = (r.candidates as any[]).filter(x => x.tier && x.tier !== 'exact').length
+      c.note = `Checked ${where} · ${plural(r.kept, 'new job')} fit${r.kept === 1 ? 's' : ''} your settings${other ? ` · ${other} with a different title` : ''}${r.kept > cap ? ` · preparing ${cap} now, the rest come next run` : ''}.${slow.length ? ` ${slow.join(' ')}` : ''}`
       c.jobs = take.map(x => ({ job_id: x.job_id, title: short([x.company, x.title].filter(Boolean).join(' · ') || x.job_id, 80), url: x.url, details: {} }))
     })
     for (const x of take) {
-      const q = agent.enqueue({ kind: 'job', job_id: x.job_id, title: short([x.company, x.title].filter(Boolean).join(' · '), 80), payload: { url: x.url, source: 'discovery', parent: key } })
+      const q = agent.enqueue({ kind: 'job', job_id: x.job_id, title: short([x.company, x.title].filter(Boolean).join(' · '), 80), payload: { url: x.url, source: 'discovery', parent: key, ...(x.tier && x.tier !== 'exact' ? { tier: x.tier } : {}) } })
       if (q.existing) card(c => { const l = c.jobs.find(j => j.job_id === x.job_id); if (l) l.final = { emoji: '🕒', text: 'Already in line from an earlier search.' } })
     }
     finishSearchIfDone(key)
@@ -499,7 +508,7 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
       if (!r.success) throw new Error(`${r.error.issues[0].path.join('.')}: ${r.error.issues[0].message}`)
       const ob = OB.loadOb()
       const sum = r.data
-      ob.summary = { name: sum.name, headline: sum.headline, years: sum.years ?? null, level: sum.level, location: sum.location ?? '', country: sum.country ?? '', email: sum.email ?? '', phone: sum.phone ?? '', skills: sum.skills, suggested_titles: sum.suggested_titles }
+      ob.summary = { name: sum.name, headline: sum.headline, years: sum.years ?? null, level: sum.level, location: sum.location ?? '', country: sum.country ?? '', email: sum.email ?? '', phone: sum.phone ?? '', skills: sum.skills, suggested_titles: sum.suggested_titles, related_titles: sum.related_titles ?? [] }
       ob.country = ob.country || sum.country || ''
       OB.saveOb(ob)
       const s = loadSettings()
@@ -677,13 +686,15 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
         return OB.obPrompt(arg, lbl)
       }
       case 't': { const x = titlePool(ob)[+arg]; if (x) ob.picks = ob.picks.includes(x) ? ob.picks.filter(y => y !== x) : [...ob.picks, x]; OB.saveOb(ob); return OB.obPage(ob, s) }
+      case 'rt': { const x = OB.relPool(ob)[+arg], have = ob.rel ?? []; if (x) ob.rel = have.includes(x) ? have.filter(y => y !== x) : [...have, x]; OB.saveOb(ob); return OB.obPage(ob, s) }
       case 'l': { const x = locPool(ob)[+arg]; if (x) ob.locs = ob.locs.includes(x) ? ob.locs.filter(y => y !== x) : [...ob.locs, x]; OB.saveOb(ob); return OB.obPage(ob, s) }
       case 'add': pending = { kind: 'ob', what: arg, chat, msg, at: Date.now() }; return OB.obPrompt(arg)
       case 'cancel': pending = null; return OB.obPage(ob, s, ob.step === 'profile' ? await contactFields() : {})
       case 'next':
         if (arg === 'titles') {
           if (!ob.picks.length) return 'Pick or add at least one job title.'
-          const r = trySettingsUpdate({ filters: { titles: ob.picks } })
+          const rel = [...new Set([...s.filters.related_titles, ...(ob.rel ?? []).filter(x => OB.relPool(ob).includes(x))])].filter(x => !ob.picks.includes(x)).slice(0, 15)
+          const r = trySettingsUpdate({ filters: { titles: ob.picks, related_titles: rel } })
           return r.ok ? nextAfterSave('level') : r.error
         }
         if (arg === 'locations') { const r = trySettingsUpdate({ filters: { locations: ob.locs } }); return r.ok ? nextAfterSave('remote') : r.error }
@@ -739,6 +750,9 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
     return P.profilePage(loadSettings(), contact, list, resume)
   }
   const boards = async (): Promise<string[]> => [...new Set(Object.values(readBoards()).flat())].sort() // every ATS, read without Python
+  const companies = async (msg?: string) => { const b = await boards(), l = readJson<Record<string, unknown>>(join(DATA, 'boards_learned.json'), {}); return ST.companiesPage(b, msg, b.filter(x => x in l).length) }
+  const ideas = (s: Settings) => ST.relatedIdeas(readJson<ST.SeenTitles>(join(DATA, 'seen_titles.json'), {}), s)
+  const specView = (spec: ST.Spec, s: Settings, msg?: string) => ST.specPage(spec, s, msg, spec.id === 'rt' ? ideas(s) : [])
   let loginOpen = false // one login window at a time: they share JobAgent's browser profile
   const loginsNow = async (note?: string) => { const r = loginOpen ? null : await run(['login', 'status']); return ST.loginsPage(r?.ok ? r.sites : null, note) }
 
@@ -890,9 +904,9 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
         if (!r.ok) return r.error
         toast.text = say ?? `${spec.label}: ${ST.valueText(spec, r.settings)}`
         refresh()
-        return ST.specPage(spec, r.settings)
+        return specView(spec, r.settings)
       }
-      if (!op) return ST.specPage(spec, s)
+      if (!op) return specView(spec, s)
       if (op === 't') return set(!cur)
       if (op === 'v') { const o2 = spec.opts?.[parseInt(arg!, 10)]; return o2 ? set(o2[0]) : undefined }
       if (op === 'n') { const n = parseInt(arg!, 10); return spec.presets?.includes(n) ? set(n) : undefined }
@@ -906,6 +920,7 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
         return nextV.length ? set(nextV) : 'Keep at least one.'
       }
       if (op === 'r') { const items: string[] = cur ?? []; const x = items[parseInt(arg!, 10)]; return x === undefined ? undefined : set(items.filter(y => y !== x), `Removed ${x}`) }
+      if (op === 'g' && spec.id === 'rt') { const x = ideas(s)[parseInt(arg!, 10)]; return x === undefined ? undefined : set([...(cur ?? []), x], `Added ${x}`) }
       if (op === 'a' || op === 'c') { pending = { kind: 'setting', id: spec.id, adding: op === 'a', chat, msg, at: Date.now() }; return ST.promptFor(spec, op === 'a') }
       return undefined
     }
@@ -913,9 +928,9 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
     if (data === 'P:live') return practiceForced() ? 'Practice mode is locked on by the start script.' : ST.goLiveConfirm()
     if (data === 'P:yes') { if (practiceForced()) return 'Practice mode is locked on.'; trySettingsUpdate({ dry_run: false }); toast.text = '🚀 Live: approved applications are now sent'; refresh(); return ST.practicePage(loadSettings()) }
     if (data === 'P:on') { trySettingsUpdate({ dry_run: true }); toast.text = '🧪 Practice mode on'; refresh(); return ST.practicePage(loadSettings()) }
-    if (data === 'C:list') return ST.companiesPage(await boards())
+    if (data === 'C:list') return companies()
     if (data === 'C:a') { pending = { kind: 'company', chat, msg, at: Date.now() }; return ST.addCompanyPrompt() }
-    if ((m = /^C:r:([a-z0-9_-]{1,60})$/.exec(data))) { await run(['boards', 'remove', 'any', m[1]]); toast.text = `Removed ${m[1]}`; return ST.companiesPage(await boards()) }
+    if ((m = /^C:r:([a-z0-9_-]{1,60})$/.exec(data))) { await run(['boards', 'remove', 'any', m[1]]); toast.text = `Removed ${m[1]}`; return companies() }
 
     // Job site logins: windows open on the computer and can take minutes, so they run in the background and edit this page when done.
     if (data === 'L:show') return loginsNow()
@@ -1053,7 +1068,7 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
       const c = await run(['boards', 'check', slug, ...(ats ? [`--ats=${ats}`] : [])])
       if (!c.ok) { pending = { ...p, at: Date.now() }; await editAt(p.chat, p.msg, { ...ST.addCompanyPrompt(), text: `${ST.addCompanyPrompt().text}\n\n❌ ${esc(c.code === 'not_found' ? `There is no Greenhouse, Lever or Ashby job board called "${slug}".` : "I couldn't reach the job board. Try again in a minute.")}` }); return true }
       await run(['boards', 'add', c.ats ?? 'greenhouse', slug])
-      await editAt(p.chat, p.msg, ST.companiesPage(await boards(), `✅ Added <b>${esc(c.company)}</b>${c.open_jobs != null ? ` (${c.open_jobs} open jobs right now)` : ''}.`))
+      await editAt(p.chat, p.msg, await companies(`✅ Added <b>${esc(c.company)}</b>${c.open_jobs != null ? ` (${c.open_jobs} open jobs right now)` : ''}.`))
       return true
     }
     if (p.kind === 'dashurl') {
@@ -1119,7 +1134,7 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
     const r = trySettingsUpdate(patchFor(spec.path, v))
     if (!r.ok) { pending = p; return fail(r.error) }
     tidy()
-    await editAt(p.chat, p.msg, ST.specPage(spec, r.settings, `✅ ${p.adding ? 'Added' : 'Saved'}.`))
+    await editAt(p.chat, p.msg, specView(spec, r.settings, `✅ ${p.adding ? 'Added' : 'Saved'}.`))
     refresh()
     return true
   }
