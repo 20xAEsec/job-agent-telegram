@@ -110,6 +110,23 @@ describe('tools Claude can call', () => {
   }, 10_000)
 })
 
+describe('v4 daily upkeep', () => {
+  test('runs maintain once a day and closes the question forms of jobs it expired', async () => {
+    rmSync(join(DATA, 'forms'), { recursive: true, force: true })
+    rmSync(join(DATA, 'upkeep.json'), { force: true })
+    const { app, pyCalls } = makeApp(a => a[0] === 'maintain' ? { ok: true, pruned: 1, expired: 1, trimmed: 0, expired_ids: ['job-old'] } : undefined)
+    const qs = F.validateQuestions([{ qid: 'q1', text: 'Why us?', kind: 'text' }], false)
+    F.saveForm(F.newForm('job-old', 'job-old', 'Old', qs))
+    F.saveForm(F.newForm('job-new', 'job-new', 'New', qs))
+    await app.upkeep()
+    expect(F.openForms().map(f => f.job_id)).toEqual(['job-new'])
+    writeJson(join(DATA, 'upkeep.json'), { at: new Date().toISOString(), pruned: 1, expired: 1, trimmed: 0 }) // what maintain writes
+    await app.upkeep()
+    expect(pyCalls.filter(a => a[0] === 'maintain').length).toBe(1) // not again the same day
+    await app.stop()
+  })
+})
+
 describe('setup wizard', () => {
   test('a full run saves settings and private answers, and finishes setup', async () => {
     const { app, pyCalls } = makeApp()

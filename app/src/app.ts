@@ -189,12 +189,22 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
     const p = P.dailyPage({ jobs: allJobs(now), forms: F.openForms().length, screened: readScreened(), usage, upkeep: readJson<P.Upkeep>(UPKEEP_FILE, {}), country: s.filters.country }, last ?? now - 86_400_000, now)
     if (p) void sendTo(p.text, p.rows, { loud: false }).catch(e => log(`daily digest failed: ${e}`))
   }
+  // Daily upkeep (v4 AP6): `jobagent maintain` once a day (it writes upkeep.json), then the expired jobs' question forms are closed.
+  async function upkeep(now = Date.now()) {
+    const at = readJson<{ at?: string }>(UPKEEP_FILE, {}).at
+    if (at && new Date(at).toDateString() === new Date(now).toDateString()) return
+    const r = await run(['maintain'], { timeoutMs: 5 * 60_000 }).catch(e => ({ ok: false, code: String(e) }))
+    if (!r?.ok) return log(`upkeep failed: ${r?.code}`)
+    const gone = new Set<string>(r.expired_ids ?? [])
+    for (const f of F.openForms()) if (f.job_id && gone.has(f.job_id)) F.saveForm({ ...f, status: 'skipped', updated_at: now })
+    if (r.pruned || r.expired) log(`upkeep: ${r.pruned} job folders tidied, ${r.expired} unanswered jobs closed`)
+  }
   function followUpCheck() {
     weeklyCheck()
     const s = loadSettings()
     if (s.paired_user_id == null || !s.onboarded || isQuiet(s)) return
     void review.retryDeferred().then(n => n && log(`offered ${n} capped auto-applies again`), e => logError('deferred auto-apply failed', e)) // yesterday's cap
-    dailyCheck(s)
+    void upkeep().catch(e => logError('upkeep failed', e)).finally(() => dailyCheck(s)) // the digest carries today's upkeep counts
     const st = readJson<P.FollowState>(FOLLOW_FILE, {})
     const due = P.followUpsDue(allJobs(), readOutcomes(), st, s.apply.followup_days).slice(0, 3)
     if (!due.length) return
@@ -1779,5 +1789,5 @@ ${note(`No notification sounds until ${clock(snoozeUntil)}. Work continues.`)}`,
     }
   }
 
-  return { bot, agent, cards, review, start, handleTool, route, capture, refresh, askForm, stop: () => { bridge.stop(); return bot.stop() }, _bridge: bridge }
+  return { bot, agent, cards, review, start, handleTool, route, capture, refresh, askForm, upkeep, stop: () => { bridge.stop(); return bot.stop() }, _bridge: bridge }
 }
