@@ -330,6 +330,39 @@ export function digestPage(jobs: Job[]): Page | null {
   }
 }
 
+// ---- Daily digest (v4 AP8): with notify.digest 'daily', one quiet message a day instead of one per search ----
+export type Upkeep = { pruned?: number; expired?: number }
+export type DailyCtx = { jobs: Job[]; forms: number; screened: Screened[]; usage?: Usage; upkeep?: Upkeep; country: string }
+const lowerFirst = (s: string) => s.charAt(0).toLowerCase() + s.slice(1)
+export function dailyPage(c: DailyCtx, since: number, now = Date.now()): Page | null {
+  const hit = (j: Job, st: string[]) => j.history.some(h => st.includes(h.status) && Date.parse(h.at) >= since && Date.parse(h.at) <= now)
+  const sent = c.jobs.filter(j => hit(j, ['SUBMITTED', 'APPLIED_SELF'])), practice = c.jobs.filter(j => hit(j, ['DRY_RUN_DONE']))
+  const reviews = c.jobs.filter(j => j.status === 'AWAITING_APPROVAL').length, kits = c.jobs.filter(j => j.status === 'KIT_READY').length
+  const out = c.screened.filter(r => Date.parse(r.at) >= since), up = c.upkeep ?? {}, u = c.usage
+  if (!sent.length && !practice.length && !reviews && !kits && !c.forms && !out.length) return null
+  const names = (js: Job[], n: number) => esc(short(js.map(jobTitle).join(', '), n))
+  const pct = (x: number) => `${Math.round(x * 100)}%`
+  const waiting = [reviews && plural(reviews, 'review'), c.forms && plural(c.forms, 'question form'), kits && `${kits} to apply yourself`].filter(Boolean)
+  const tidy = [up.expired && `${plural(up.expired, 'unanswered job')} closed`, up.pruned && `${plural(up.pruned, 'old job folder')} tidied`].filter(Boolean)
+  const used = [u?.five_hour != null && `${pct(u.five_hour)} of the 5-hour limit`, u?.seven_day != null && `${pct(u.seven_day)} of the week`].filter(Boolean)
+  const text = [
+    heading('🗞', 'Your daily digest'), '',
+    sent.length ? `🚀 <b>Sent ${sent.length}:</b> ${names(sent, 300)}` : `🚀 ${note('Nothing sent since the last digest.')}`,
+    ...(practice.length ? [`🧪 <b>${plural(practice.length, 'practice run')}:</b> ${names(practice, 200)}`] : []),
+    waiting.length ? `📥 <b>Waiting for you:</b> ${waiting.join(' · ')}` : `✨ ${note('Nothing is waiting for you.')}`,
+    ...(out.length ? [`🔎 <b>Filtered out:</b> ${out.length} · most often ${esc(lowerFirst(groups(out, c.country)[0][0]))}`] : []),
+    ...(tidy.length ? [`🧹 ${note(`Upkeep: ${tidy.join(' · ')}`)}`] : []),
+    ...(used.length ? [`⚡ ${note(`Claude used: ${used.join(', ')}`)}`] : []),
+  ].join('\n')
+  const btns: Btn[] = [
+    ...(reviews ? [{ text: `🔔 Review ${reviews === 1 ? 'it' : `all ${reviews}`}`, data: 'Q:0', style: 'success' as const }] : []),
+    ...(c.forms ? [{ text: '❓ Open Questions', data: 'F:list' }] : []),
+    ...(kits ? [{ text: '🧰 Apply yourself', data: 'N:0' }] : []),
+    ...(out.length ? [{ text: '🔎 Filtered out', data: 'fo:list' }] : []),
+  ]
+  return { text, rows: [...pairs(btns), [{ text: '🏠 Home', data: 'm:home' }]] }
+}
+
 // ---- Jobs ----
 
 const TABS: Record<string, [string, (j: Job, outcome?: string) => boolean]> = {

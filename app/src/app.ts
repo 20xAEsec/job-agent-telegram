@@ -33,6 +33,8 @@ const USAGE_FILE = join(DATA, 'usage.json')
 const DISC_FILE = join(DATA, 'discovery.json')
 const FOLLOW_FILE = join(DATA, 'followups.json')
 const WEEK_FILE = join(DATA, 'weekly.json')
+const DAILY_FILE = join(DATA, 'daily.json') // when the daily digest last went out
+const UPKEEP_FILE = join(DATA, 'upkeep.json') // the last `jobagent maintain` counts
 const TIP_FILE = join(DATA, 'suggestion.json')
 // One suggestion on Home from the user's own decisions, until they apply or dismiss it.
 const tipFor = (s: Settings) => {
@@ -177,11 +179,21 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
     const p = insightsPage(allJobs(), readOutcomes(), s.apply.min_match_score, Date.now(), true)
     if (s.notify.weekly !== 'off' && !/This week:<\/b> 0 found/.test(p.text)) void sendTo(p.text, p.rows, { kind: 'weekly' }).catch(e => log(`weekly failed: ${e}`))
   }
+  // The daily digest (v4 AP8): the first hourly check of a day outside quiet hours sends it, silently. Covers the time since the last one.
+  function dailyCheck(s: Settings, now = Date.now()) {
+    if (s.notify.digest !== 'daily') return
+    const last = readJson<{ last?: number }>(DAILY_FILE, {}).last
+    if (last && new Date(last).toDateString() === new Date(now).toDateString()) return
+    writeJson(DAILY_FILE, { last: now })
+    const p = P.dailyPage({ jobs: allJobs(now), forms: F.openForms().length, screened: readScreened(), usage, upkeep: readJson<P.Upkeep>(UPKEEP_FILE, {}), country: s.filters.country }, last ?? now - 86_400_000, now)
+    if (p) void sendTo(p.text, p.rows, { loud: false }).catch(e => log(`daily digest failed: ${e}`))
+  }
   function followUpCheck() {
     weeklyCheck()
     const s = loadSettings()
     if (s.paired_user_id == null || !s.onboarded || isQuiet(s)) return
     void review.retryDeferred().then(n => n && log(`offered ${n} capped auto-applies again`), e => logError('deferred auto-apply failed', e)) // yesterday's cap
+    dailyCheck(s)
     const st = readJson<P.FollowState>(FOLLOW_FILE, {})
     const due = P.followUpsDue(allJobs(), readOutcomes(), st, s.apply.followup_days).slice(0, 3)
     if (!due.length) return
@@ -398,7 +410,7 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
     if (left || cards.get(key)?.state === 'ended') return
     cards.update(key, c => { c.state = 'ended'; c.ended = Date.now(); c.doing = null; c.active = undefined; c.final = { emoji: '✅', text: 'Done.' } })
     const p = P.digestPage((cards.get(key)?.jobs ?? []).map(l => readJob(l.job_id)).filter((j): j is NonNullable<typeof j> => !!j))
-    if (p) void sendTo(p.text, p.rows, { kind: 'search' }).catch(e => log(`digest failed: ${e}`))
+    if (p && loadSettings().notify.digest !== 'daily') void sendTo(p.text, p.rows, { kind: 'search' }).catch(e => log(`digest failed: ${e}`)) // daily: the day's digest says it
   }
 
   let typingTimer: ReturnType<typeof setInterval> | null = null

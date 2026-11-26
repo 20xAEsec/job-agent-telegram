@@ -122,6 +122,23 @@ describe('settings catalog', () => {
     expect(ST.autopilotOn(loadSettings())).toBe(false)
     writeJson(SETTINGS_FILE, DEFAULT_SETTINGS)
   })
+  test('daily digest: what went out, what waits, what was filtered out, upkeep and Claude use', () => {
+    const now = Date.parse('2026-11-25T15:00:00Z'), since = now - 86_400_000, at = (h: number) => new Date(now - h * 3600_000).toISOString()
+    const job = (id: string, status: string, h: number, company = 'Acme & Co'): any => ({ id, status, company, role: 'Data <Analyst>', history: [{ status, at: at(h), detail: '' }],
+      updated_at: at(h), url: '', source: '', location: '', salary: '', score: 80, reasons: [], dealbreakers: [], breakdown: {}, must_haves: [] })
+    const jobs = [job('a', 'SUBMITTED', 2), job('b', 'SUBMITTED', 40), job('c', 'AWAITING_APPROVAL', 1), job('d', 'AWAITING_APPROVAL', 3), job('e', 'DRY_RUN_DONE', 5)]
+    const screened = [{ at: at(1), job_id: 'x', title: 't', company: 'c', url: 'https://x', stage: 'rules' as const, code: 'where', reason: 'r' }, { at: at(30), job_id: 'y', title: 't', company: 'c', url: 'https://y', stage: 'rules' as const, code: 'pay', reason: 'r' }]
+    const p = P.dailyPage({ jobs, forms: 1, screened, usage: { five_hour: 0.12, seven_day: 0.4, at: now }, upkeep: { pruned: 3, expired: 1 }, country: 'United States' }, since, now)!
+    fits(p)
+    expect(p.text).toContain('🚀 <b>Sent 1:</b> Acme &amp; Co · Data &lt;Analyst&gt;') // the one from 40 h ago went in an earlier digest
+    expect(p.text).toContain('1 practice run')
+    expect(p.text).toContain('2 reviews · 1 question form')
+    expect(p.text).toContain('🔎 <b>Filtered out:</b> 1 · most often not open to people in United States')
+    expect(p.text).toContain('1 unanswered job closed · 3 old job folders tidied')
+    expect(p.text).toContain('12% of the 5-hour limit, 40% of the week')
+    expect(datas(p)).toEqual(['Q:0', 'F:list', 'fo:list', 'm:home'])
+    expect(P.dailyPage({ jobs: [job('b', 'SUBMITTED', 40)], forms: 0, screened: [], country: '' }, since, now)).toBeNull() // a quiet day: no message
+  })
   test('filtered out: reasons grouped, the 10 newest, and a way to look at one anyway', () => {
     const now = Date.parse('2026-11-25T15:00:00Z'), at = (h: number) => new Date(now - h * 3600_000).toISOString()
     const row = (i: number, c: string, h = 1) => ({ at: at(h), job_id: `greenhouse-acme-${i}`, title: `Engineer <${i}> ${'x'.repeat(80)}`, company: 'Acme & Co',
