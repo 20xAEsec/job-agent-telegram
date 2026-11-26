@@ -201,6 +201,44 @@ describe('review gate', () => {
     for (const t of g._later.values()) clearTimeout(t)
   })
 
+  test('two real sends in a row that fail put auto-apply on hold until Resume; a success in between resets the count', async () => {
+    rmSync(join(DATA, 'autopilot.json'), { force: true })
+    writeJson(join(DATA, 'settings.json'), { ...DEFAULT_SETTINGS, dry_run: false })
+    const fail = { ok: false, code: 'needs_human', error: 'The form asked something new' }
+    const once = async (submit: any) => { const t = setup('AWAITING_APPROVAL', 'h1', submit); await t.g.press('ok', code(ID), 1, 1); await wait(30); return t }
+    await once(fail)
+    await once({ ok: true, status: 'SUBMITTED' })
+    await once(fail)
+    expect(readJson<any>(join(DATA, 'autopilot.json'), {}).hold ?? null).toBeNull() // fail, success, fail: not two in a row
+    const t = await once({ ok: false, code: 'failed', error: 'x' })
+    expect(readJson<any>(join(DATA, 'autopilot.json'), {}).hold?.why).toBe('2 applications in a row could not be sent')
+    expect(t.sent.filter(x => x.includes('Auto-apply is on hold'))).toHaveLength(1)
+    expect((await once(fail)).sent.join('\n')).not.toContain('Auto-apply is on hold') // already held: said once
+    t.g.resumeAuto()
+    expect(readJson<any>(join(DATA, 'autopilot.json'), {})).toMatchObject({ fails: 0, hold: null })
+    writeJson(join(DATA, 'settings.json'), DEFAULT_SETTINGS)
+    rmSync(join(DATA, 'autopilot.json'), { force: true })
+  })
+
+  test('the daily cap holds a job back and offers it again on a later day, through the same gate', async () => {
+    rmSync(join(DATA, 'autopilot.json'), { force: true })
+    writeJson(join(DATA, 'settings.json'), { ...DEFAULT_SETTINGS, dry_run: false, apply: { ...DEFAULT_SETTINGS.apply, mode: 'auto', daily_max: 1 } })
+    const sentDir = join(DATA, 'jobs', 'greenhouse-sent-1')
+    mkdirSync(sentDir, { recursive: true })
+    writeJson(join(sentDir, 'status.json'), { status: 'SUBMITTED', updated_at: new Date().toISOString(), history: [{ status: 'SUBMITTED', at: new Date().toISOString(), detail: '' }] })
+    const t = setup('FILLED_DRY')
+    expect(await t.g.send(ID, true)).toContain('review queue') // capped: waits in the queue, no countdown
+    expect(readJson<any>(join(DATA, 'autopilot.json'), {}).deferred).toEqual([ID])
+    expect(await t.g.retryDeferred()).toBe(0) // still the same day
+    rmSync(sentDir, { recursive: true, force: true }) // tomorrow: nothing sent yet
+    expect(await t.g.retryDeferred(Date.now() + 86_400_000)).toBe(1)
+    expect(t.g._grace.has(ID)).toBe(true) // the countdown started: autoGate passed
+    t.g.cancelAuto(ID)
+    expect(readJson<any>(join(DATA, 'autopilot.json'), {}).deferred).toEqual([])
+    writeJson(join(DATA, 'settings.json'), DEFAULT_SETTINGS)
+    rmSync(join(DATA, 'autopilot.json'), { force: true })
+  })
+
   test('auto-apply gates and startup recovery', () => {
     const s = structuredClone(DEFAULT_SETTINGS)
     expect(autoGate(rv(), s)).toContain('review every')
@@ -209,6 +247,12 @@ describe('review gate', () => {
     expect(autoGate(rv({ score: 70 }), s)).toContain('below')
     expect(autoGate(rv({ unusual: ['q9'] }), s)).toContain('unusual')
     expect(autoGate(rv({ generated_sensitive: ['q3'] }), s)).toContain('private')
+    expect(autoGate(rv(), s, { sent: 0, hold: true })).toContain('on hold')
+    expect(autoGate(rv(), s, { sent: 10, hold: false })).toBeNull() // practice mode: nothing reaches an employer, so no cap
+    const live = { ...s, dry_run: false }
+    expect(autoGate(rv(), live, { sent: 9, hold: false })).toBeNull()
+    expect(autoGate(rv(), live, { sent: 10, hold: false })).toBe("today's 10 are sent; the rest go tomorrow")
+    expect(autoGate(rv({ score: 70 }), live, { sent: 10, hold: false })).toContain('below') // the cap is checked last
     const now = Date.now()
     expect(planRecovery([
       { id: 'a', status: 'SUBMITTING', auto: false },

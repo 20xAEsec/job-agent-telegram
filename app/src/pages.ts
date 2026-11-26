@@ -12,6 +12,7 @@ export type HomeCtx = {
   tip?: { min: number; text: string } | null // a suggestion from the user's own decisions
   updates?: number // new versions on GitHub not yet in this copy
   filtered?: string | null // filteredLine(): what auto-search skipped today
+  hold?: boolean // auto-apply stopped itself after failed sends (data/autopilot.json), until ▶ Resume
 }
 
 // ---- Health: `jobagent setup-check`, run at start and every few hours, in plain words ----
@@ -107,6 +108,7 @@ export function home(c: HomeCtx, now = Date.now()): Page {
     ...(s.onboarded ? workLines(c, now) : [`🧩 <b>Setup isn't finished.</b> ${note("I need your resume and what you're looking for first.")}`]),
     ...(c.tip ? ['', `💡 ${esc(c.tip.text)}`] : []),
     ...(c.updates ? ['', `⬆️ ${note('An update for JobAgent is available.')}`] : []),
+    ...(c.hold ? ['', `🛑 <b>Auto-apply is on hold:</b> ${note('the last applications could not be sent. Reviews still come to you.')}`] : []),
     ...(c.problems?.length ? ['', `🩺 <b>Problem:</b> ${c.problems[0]}${c.problems.length > 1 ? note(` (+${c.problems.length - 1} more)`) : ''}`] : []),
     '',
     n.total
@@ -128,6 +130,7 @@ export function home(c: HomeCtx, now = Date.now()): Page {
     s.agent_on ? { text: '⏸ Pause', data: 'H:pause' } : { text: '▶️ Resume', data: 'H:resume', style: 'success' as const },
   ].filter(b => b.data !== first.data))
   rows.push([{ text: '⚙️ Settings', data: 'm:settings' }, { text: '👤 Profile', data: 'm:prof' }])
+  if (c.hold) rows.push([{ text: '▶ Resume auto-apply', data: 'ap:resume', style: 'success' }])
   if (c.updates) rows.push([{ text: '⬆️ How to update', data: 'm:upd' }])
   if (c.tip) rows.push([{ text: `📊 Set it to ${c.tip.min}`, data: `sg:ms:${c.tip.min}` }, { text: '✖ No thanks', data: `sg:no:${c.tip.min}` }])
   rows.push([{ text: '❔ Help', data: 'm:help' }, ...(c.filtered ? [{ text: '🔎 Filtered out', data: 'fo:list' }] : []), ...(c.problems?.length ? [{ text: '🩺 Health', data: 'm:health' }] : []), ...(c.jobs.length ? [{ text: '🖥 Dashboard', data: 'm:dash' }] : [])]) // no Refresh: Home updates itself

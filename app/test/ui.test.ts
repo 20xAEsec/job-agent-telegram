@@ -116,6 +116,11 @@ describe('settings catalog', () => {
     const home = P.home({ s: { ...S(), onboarded: true }, queued: 0, jobs: [], forms: [], filtered: P.filteredLine(rows, '', now) }, now)
     expect(home.text).toContain('Filtered out today:</b> 8')
     expect(home.rows.flat().map(b => b.data)).toContain('fo:list')
+    const held = P.home({ s: { ...S(), onboarded: true }, queued: 0, jobs: [], forms: [], hold: true }, now)
+    fits(held)
+    expect(held.text).toContain('Auto-apply is on hold')
+    expect(datas(held)).toContain('ap:resume')
+    expect(datas(P.home({ s: { ...S(), onboarded: true }, queued: 0, jobs: [], forms: [] }, now))).not.toContain('ap:resume')
   })
   test('board links and names', () => {
     expect(ST.boardSlug('https://job-boards.greenhouse.io/acme/jobs/123')).toBe('acme')

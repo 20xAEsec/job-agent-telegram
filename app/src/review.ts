@@ -8,7 +8,7 @@ import { readSection } from './profile'
 import { breakdownLines, clock, esc, heading, kb, mustHaveLine, note, pairs, plural, quote, short, splitMsg, type Btn, type Page } from './kit'
 import type { Breakdown, MustHave } from './jobs'
 import { runJobagent, type Run } from './runner'
-import { log, logError, loadSettings, practiceOn, readJson, trySettingsUpdate, writeJson, type Settings } from './state'
+import { DATA, log, logError, loadSettings, practiceOn, readJson, trySettingsUpdate, writeJson, type Settings } from './state'
 
 export type Answer = { fid: string; label: string; value: string; source: string; sensitive: boolean; required: boolean }
 export type Review = {
@@ -123,14 +123,33 @@ export function editValue(row: { action: string; value: unknown }, options: stri
 
 // ---- Auto-apply gates (every one checked in code) ----
 
-export function autoGate(rv: Review, s: Settings): string | null {
+// ---- Unattended sending is bounded (v4 rule 12): data/autopilot.json ----
+// fails: real submissions in a row that ended NEEDS_HUMAN or FAILED. hold: set at HOLD_AFTER, cleared only by the user's ▶ Resume.
+// deferred: jobs the daily cap held back on `deferred_on`, offered again (through autoGate) on a later day.
+export type Autopilot = { fails?: number; hold?: { at: string; why: string } | null; deferred?: string[]; deferred_on?: string }
+export type ApState = { sent: number; hold: boolean }
+export const HOLD_AFTER = 2
+const AP_FILE = () => join(DATA, 'autopilot.json')
+export const loadAutopilot = (): Autopilot => readJson<Autopilot>(AP_FILE(), {})
+const saveAutopilot = (a: Autopilot) => writeJson(AP_FILE(), a)
+// Real applications that reached employers today (local day), whoever approved them.
+export function sentToday(now = Date.now()): number {
+  const day = new Date(now).toDateString()
+  return allJobs(now).filter(j => j.history.some(h => h.status === 'SUBMITTED' && new Date(h.at).toDateString() === day)).length
+}
+export const apState = (now = Date.now()): ApState => ({ sent: sentToday(now), hold: !!loadAutopilot().hold })
+export const capText = (s: Settings) => `today's ${s.apply.daily_max} are sent; the rest go tomorrow`
+
+export function autoGate(rv: Review, s: Settings, ap: ApState = { sent: 0, hold: false }): string | null {
   if (s.apply.mode !== 'auto') return 'you review every application'
   if (!s.agent_on) return 'the agent is paused'
+  if (ap.hold) return 'auto-apply is on hold because the last applications could not be sent; tap ▶ Resume once you have looked'
   if (rv.score == null || rv.score < s.apply.auto_min_score) return `the match (${rv.score ?? '?'}) is below your auto-apply score of ${s.apply.auto_min_score}`
   if (rv.ats === 'generic') return 'unfamiliar form types always need your review'
   if (rv.unusual.length) return 'the form has unusual fields'
   if (rv.generated_sensitive.length) return 'a private answer was drafted rather than given by you'
   if (rv.injection_suspected) return 'the posting contained text that tried to give me instructions'
+  if (!practiceOn(s) && ap.sent >= s.apply.daily_max) return capText(s) // last: a capped job passed every other check
   return null
 }
 
@@ -200,8 +219,33 @@ export function createReview(d: Deps) {
       if (to != null && existsSync(shot)) void d.api.sendPhoto(to, new InputFile(shot), { caption: '🧾 The confirmation page', disable_notification: true }).catch(e => log(`receipt shot failed: ${e}`))
     }
     else say(`${heading('🙋', 'This one needs you')}\n${name(id)}\n${esc(short(detail || 'The application could not be sent.', 300))}`, true, [[{ text: '📥 Open in Jobs', data: `j:v:${code(id)}` }]])
+    if (!practiceOn(loadSettings())) breaker(st)
     d.onResult(id, st, detail)
     d.refresh()
+  }
+  // Two real submissions in a row that did not go through: stop sending on my own until the user has looked (v4 rule 12).
+  function breaker(st: string) {
+    const a = loadAutopilot()
+    if (st === 'SUBMITTED') return void (a.fails ? saveAutopilot({ ...a, fails: 0 }) : undefined)
+    if (st !== 'NEEDS_HUMAN' && st !== 'FAILED') return
+    const fails = (a.fails ?? 0) + 1, hold = fails >= HOLD_AFTER && !a.hold
+    saveAutopilot({ ...a, fails, ...(hold ? { hold: { at: new Date().toISOString(), why: `${fails} applications in a row could not be sent` } } : {}) })
+    if (hold) say(`${heading('🛑', 'Auto-apply is on hold')}\n${note(`The last ${fails} applications could not be sent, so I stopped sending on my own until you have looked. Reviews still come to you, and you can approve them as usual.`)}`, true,
+      [[{ text: '▶ Resume auto-apply', data: 'ap:resume', style: 'success' }], [{ text: '📥 Needs you', data: 'N:0' }]])
+  }
+  function resumeAuto() { saveAutopilot({ ...loadAutopilot(), fails: 0, hold: null }) }
+  function defer(id: string, now = Date.now()) {
+    const a = loadAutopilot()
+    saveAutopilot({ ...a, deferred: [...new Set([...(a.deferred ?? []), id])], deferred_on: new Date(now).toDateString() })
+  }
+  // On a later day, the jobs the cap held back go through the same gate again (send → autoGate → countdown). Returns how many.
+  async function retryDeferred(now = Date.now()): Promise<number> {
+    const a = loadAutopilot()
+    if (!a.deferred?.length || a.deferred_on === new Date(now).toDateString()) return 0
+    saveAutopilot({ ...a, deferred: [], deferred_on: undefined })
+    let n = 0
+    for (const id of a.deferred) n += await send(id, true).then(() => 1, () => 0) // gone or no longer waiting: dropped
+    return n
   }
   async function pump() {
     if (running) return
@@ -257,7 +301,8 @@ export function createReview(d: Deps) {
     clearInterval(g.tick); grace.delete(id)
     rmSync(join(jobDir(id), 'auto.json'), { force: true })
     const s = loadSettings(), rv = readReview(id), to = d.to()
-    const why = !rv ? 'the review is gone' : autoGate(rv, s) // check again at the moment of truth: paused, settings changed...
+    const why = !rv ? 'the review is gone' : autoGate(rv, s, apState()) // check again at the moment of truth: paused, the cap, settings changed...
+    if (why === capText(s)) defer(id)
     const err = why ?? (await approve(id, 'auto'))
     const text = err ? `${heading('✋', 'Auto-apply stopped')}\n${name(id)}\n${note(esc(err))}` : `${heading('🚀', 'Auto-applied')}\n${name(id)}`
     if (to != null) await d.api.editMessageText(to, msg, text, { ...OPTS, reply_markup: kb(err && rv ? [[{ text: '👀 Review', data: `r:rv:${code(id)}` }]] : []) }).catch(() => {})
@@ -300,7 +345,8 @@ export function createReview(d: Deps) {
     if (!h.ok || h.plan_hash !== rv.plan_hash) throw new Error('review.json is stale (plan.json or an upload changed): re-run fill --dry-run and review build')
     if (g.status === 'FILLED_DRY') { const s = await run(['job', 'set-status', id, 'AWAITING_APPROVAL']); if (!s.ok) throw new Error(String(s.error)) }
     const s = loadSettings(), practice = practiceOn(s)
-    const why = s.apply.mode === 'auto' ? autoGate(rv, s) : null
+    const why = s.apply.mode === 'auto' ? autoGate(rv, s, apState()) : null
+    if (why === capText(s)) defer(id)
     if (digest && !(s.apply.mode === 'auto' && why === null)) { d.refresh(); return 'review ready: it goes into the review queue and the search digest. Stop now.' }
     await sendPreviews(id, rv)
     if (s.apply.mode === 'auto' && why === null) {
@@ -500,6 +546,6 @@ export function createReview(d: Deps) {
   }
 
   setInterval(watchInput, 3000).unref()
-  return { send, press, approve, submitCode, quickEdit, recover, cancelAuto, readReview, _grace: grace, _later: later, _fireAuto: fireAuto }
+  return { send, press, approve, submitCode, quickEdit, recover, cancelAuto, readReview, resumeAuto, retryDeferred, _grace: grace, _later: later, _fireAuto: fireAuto }
 }
 export type ReviewGate = ReturnType<typeof createReview>

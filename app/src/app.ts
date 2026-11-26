@@ -18,7 +18,7 @@ import { insightsPage, scoreSuggestion } from './insights'
 import { looksLikeAddress, pageButtons, phoneUrl, plain, setPhoneUrl, startDashboard, TAPS, type DashDeps } from './dashboard'
 import * as P from './pages'
 import { boardCount, readAnswers, readBoards, readSection } from './profile'
-import { createReview, reviewPage, type JobPending } from './review'
+import { createReview, loadAutopilot, reviewPage, type JobPending } from './review'
 import { approve as approveFix, discardedPage, failedPage, FIX_BUTTON, FIX_ID, proposalPage, readProposal, sharedPage } from './repair'
 import { killHelpers, runJobagent, type Run } from './runner'
 import * as ST from './settings'
@@ -163,7 +163,7 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
     return {
       s: loadSettings(), work, workTitle: work ? cardTitle(work.task) : undefined, queued: agent.queued('work').length,
       jobs: allJobs(), forms: F.openForms(), usage, nextSearch: nextSearch(), limitedUntil: limitUntil > Date.now() ? limitUntil : undefined,
-      companies: boardCount(), tip: tipFor(loadSettings()), updates, filtered: P.filteredLine(readScreened(), loadSettings().filters.country), problems: health ? P.problemsFrom(health.checks, existsSync(join(DATA, 'base_resume.docx'))) : [],
+      companies: boardCount(), tip: tipFor(loadSettings()), updates, filtered: P.filteredLine(readScreened(), loadSettings().filters.country), hold: !!loadAutopilot().hold, problems: health ? P.problemsFrom(health.checks, existsSync(join(DATA, 'base_resume.docx'))) : [],
     }
   }
   // ---- Follow-ups: once a day, ask about applications with no news (one message each, at most 3 a day) ----
@@ -181,6 +181,7 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
     weeklyCheck()
     const s = loadSettings()
     if (s.paired_user_id == null || !s.onboarded || isQuiet(s)) return
+    void review.retryDeferred().then(n => n && log(`offered ${n} capped auto-applies again`), e => logError('deferred auto-apply failed', e)) // yesterday's cap
     const st = readJson<P.FollowState>(FOLLOW_FILE, {})
     const due = P.followUpsDue(allJobs(), readOutcomes(), st, s.apply.followup_days).slice(0, 3)
     if (!due.length) return
@@ -1005,6 +1006,8 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
 
     // Review
     if ((m = /^r:(ok|ch|sk|nv|nx|cx|rv|ss|ea|or|fl|df|hv):([0-9a-f]{8})(?::(\d{1,3}))?$/.exec(data))) return review.press(m[1], m[2], chat, msg, m[3])
+
+    if (data === 'ap:resume') { review.resumeAuto(); toast.text = '▶ Auto-apply resumed'; return P.home(homeCtx()) }
 
     // Filtered out: what auto-search skipped, and a way to have one read in full anyway (like a link the user sent)
     if (data === 'fo:list') return P.filteredPage(readScreened(), loadSettings().filters.country)
