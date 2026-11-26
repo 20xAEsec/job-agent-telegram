@@ -13,6 +13,7 @@ export type Hist = { status: string; at: string; detail: string }
 export type Job = {
   id: string; status: string; updated_at: string; history: Hist[]
   url: string; source: string; company: string; role: string; location: string; salary: string
+  ats?: string // the form type (meta.json): greenhouse, lever, ashby, generic
   score: number | null; reasons: string[]; dealbreakers: string[]
   breakdown: Breakdown; must_haves: MustHave[]
 }
@@ -96,7 +97,7 @@ function loadJob(id: string): Job | null {
   const s = (v: unknown) => (typeof v === 'string' ? v : '')
   return {
     id, status: st.status, updated_at: st.updated_at ?? '', history: Array.isArray(st.history) ? st.history : [],
-    url: s(m.canonical_url) || s(m.url), source: s(m.source), company: s(a.company), role: s(a.role), location: s(a.location), salary: s(a.salary),
+    url: s(m.canonical_url) || s(m.url), source: s(m.source), ats: s(m.ats) || 'generic', company: s(a.company), role: s(a.role), location: s(a.location), salary: s(a.salary),
     score: typeof match.score === 'number' ? match.score : null,
     reasons: Array.isArray(match.reasons) ? match.reasons.map(String).slice(0, 4) : [],
     dealbreakers: Array.isArray(match.dealbreakers) ? match.dealbreakers.map(String).slice(0, 3) : [],

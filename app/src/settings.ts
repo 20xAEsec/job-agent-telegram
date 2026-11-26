@@ -160,7 +160,7 @@ export const AUTOPILOT = {
 export const autopilotOn = (s: Settings) => s.discovery.enabled && s.apply.mode === 'auto' && s.notify.digest === 'daily'
 export const autopilotText = (s: Settings) => [
   '🤖 <b>Autopilot</b>: I search on my own, prepare the good matches and send the strong ones after a short countdown you can cancel. You get one quiet digest a day; only things that need you ring.',
-  note(`Odd forms, unusual questions and private answers still wait for you. At most ${s.apply.daily_max} a day.${practiceOn(s) ? ' Practice mode stays on: nothing is really sent until you turn it off.' : ''}`),
+  note(`Odd forms, unusual questions, private answers and your first 3 real applications on each form type still wait for you. At most ${s.apply.daily_max} a day.${practiceOn(s) ? ' Practice mode stays on: nothing is really sent until you turn it off.' : ''}`),
   '', '👀 <b>I review each one</b>: nothing is sent until you tap Approve.',
 ].join('\n')
 export const autopilotRows = (s: Settings, prefix: string): Btn[][] => [

@@ -18,7 +18,7 @@ import { insightsPage, scoreSuggestion } from './insights'
 import { looksLikeAddress, pageButtons, phoneUrl, plain, setPhoneUrl, startDashboard, TAPS, type DashDeps } from './dashboard'
 import * as P from './pages'
 import { boardCount, readAnswers, readBoards, readSection } from './profile'
-import { createReview, loadAutopilot, reviewPage, type JobPending } from './review'
+import { createReview, loadAutopilot, realSent, reviewPage, type JobPending } from './review'
 import { approve as approveFix, discardedPage, failedPage, FIX_BUTTON, FIX_ID, proposalPage, readProposal, sharedPage } from './repair'
 import { killHelpers, runJobagent, type Run } from './runner'
 import * as ST from './settings'
@@ -221,6 +221,7 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
     const out = await new Response(p.stdout).text(); clearTimeout(t)
     return (await p.exited) === 0 ? out.trim() : null
   }
+  const healthNow = () => P.healthPage(health?.checks ?? null, health?.at, [P.sentForReal(realSent())], updates)
   // Tapped "Update and restart": note the version, then exit 75 so the start script pulls and starts again.
   async function updateNow(): Promise<string | Page> {
     if (review.sending() || agent.live('work')) return "I'm in the middle of something. Try again in a few minutes."
@@ -960,13 +961,13 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
       return P.home(homeCtx())
     }
     if ((m = /^sg:no:(\d{1,3})$/.exec(data))) { writeJson(TIP_FILE, { dismissed: parseInt(m[1], 10) }); return P.home(homeCtx()) }
-    if (data === 'm:health') return P.healthPage(health?.checks ?? null, health?.at, [], updates)
+    if (data === 'm:health') return healthNow()
     if (data === 'm:dash') return P.dashPage(dash?.link ?? null, phoneUrl())
     if (data === 'm:dash:ph') { if (!dash) return 'The dashboard is not running.'; pending = { kind: 'dashurl', chat, msg, at: Date.now() }; return P.phoneSetupPage(dash.port) }
     if (data === 'm:dash:off') { setPhoneUrl(null); toast.text = '🚫 Phone access is off'; return P.dashPage(dash?.link ?? null, null) }
     if (data === 'm:upd') return P.updatePage(updates)
     if (data === 'up:go') return updateNow()
-    if (data === 'm:hc') { await checkHealth(); return P.healthPage(health?.checks ?? null, health?.at, [], updates) }
+    if (data === 'm:hc') { await checkHealth(); return healthNow() }
     if ((m = /^h:(\w+)$/.exec(data))) return P.helpPage(m[1])
     if (data === 'm:settings') return ST.settingsRoot(s, boardCount())
     if (data === 'm:prof') return profileHome()
@@ -1613,7 +1614,7 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
   bot.command('jobs', ctx => show(ctx, P.jobsPage(allJobs(), 'a', 0, readOutcomes())))
   bot.command('settings', ctx => show(ctx, ST.settingsRoot(loadSettings(), boardCount())))
   bot.command('help', ctx => show(ctx, P.helpPage()))
-  bot.command('health', ctx => show(ctx, P.healthPage(health?.checks ?? null, health?.at, [], updates)))
+  bot.command('health', ctx => show(ctx, healthNow()))
   bot.command('snooze', ctx => shortcut(ctx, 'snooze'))
   bot.command(['review', 'search'], async ctx => {
     if (!loadSettings().onboarded) return void ctx.reply(note('Finish the setup first.'), OPTS)

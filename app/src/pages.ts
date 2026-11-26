@@ -32,6 +32,9 @@ const CHECK_TEXT: Record<string, [label: string, fix: string]> = {
 export const problemsFrom = (checks: Check[], docxResume: boolean) =>
   checks.filter(c => !c.ok && (c.required || c.name === 'disk space' || (c.name === 'docx->pdf converter' && docxResume))).map(c => CHECK_TEXT[c.name]?.[1] ?? `${esc(c.name)}: ${esc(c.detail)}`)
 
+const ATS_NAME: Record<string, string> = { greenhouse: 'Greenhouse', lever: 'Lever', ashby: 'Ashby' }
+export const sentForReal = (real: Record<string, number>) => // v3 P3: the first 3 real sends on each form type wait for the user
+  `📮 Sent for real: ${Object.entries(ATS_NAME).map(([k, n]) => `${n} ${real[k] ?? 0}`).join(' · ')}`
 export function healthPage(checks: Check[] | null, at?: number, extra: string[] = [], updates = 0): Page {
   const lines = checks ? checks.map(c => `${c.ok ? '✅' : c.required ? '❌' : '⚠️'} ${CHECK_TEXT[c.name]?.[0] ?? esc(c.name)}${c.ok ? '' : `\n     ${note(CHECK_TEXT[c.name]?.[1] ?? esc(c.detail))}`}`) : [note('Checking…')]
   return {

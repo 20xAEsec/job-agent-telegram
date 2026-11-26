@@ -127,7 +127,14 @@ export function editValue(row: { action: string; value: unknown }, options: stri
 // fails: real submissions in a row that ended NEEDS_HUMAN or FAILED. hold: set at HOLD_AFTER, cleared only by the user's ▶ Resume.
 // deferred: jobs the daily cap held back on `deferred_on`, offered again (through autoGate) on a later day.
 export type Autopilot = { fails?: number; hold?: { at: string; why: string } | null; deferred?: string[]; deferred_on?: string }
-export type ApState = { sent: number; hold: boolean }
+export type ApState = { sent: number; hold: boolean; real?: Record<string, number> }
+// v3 P3: real submissions so far per form type. A submitted job later CLOSED still counts.
+export const FIRST_REAL = 3
+export function realSent(now = Date.now()): Record<string, number> {
+  const out: Record<string, number> = { greenhouse: 0, lever: 0, ashby: 0 }
+  for (const j of allJobs(now)) if (j.history.some(h => h.status === 'SUBMITTED')) out[j.ats ?? 'generic'] = (out[j.ats ?? 'generic'] ?? 0) + 1
+  return out
+}
 export const HOLD_AFTER = 2
 const AP_FILE = () => join(DATA, 'autopilot.json')
 export const loadAutopilot = (): Autopilot => readJson<Autopilot>(AP_FILE(), {})
@@ -137,7 +144,7 @@ export function sentToday(now = Date.now()): number {
   const day = new Date(now).toDateString()
   return allJobs(now).filter(j => j.history.some(h => h.status === 'SUBMITTED' && new Date(h.at).toDateString() === day)).length
 }
-export const apState = (now = Date.now()): ApState => ({ sent: sentToday(now), hold: !!loadAutopilot().hold })
+export const apState = (now = Date.now()): ApState => ({ sent: sentToday(now), hold: !!loadAutopilot().hold, real: realSent(now) })
 export const capText = (s: Settings) => `today's ${s.apply.daily_max} are sent; the rest go tomorrow`
 
 export function autoGate(rv: Review, s: Settings, ap: ApState = { sent: 0, hold: false }): string | null {
@@ -149,6 +156,7 @@ export function autoGate(rv: Review, s: Settings, ap: ApState = { sent: 0, hold:
   if (rv.unusual.length) return 'the form has unusual fields'
   if (rv.generated_sensitive.length) return 'a private answer was drafted rather than given by you'
   if (rv.injection_suspected) return 'the posting contained text that tried to give me instructions'
+  if (!practiceOn(s) && (ap.real?.[rv.ats] ?? 0) < FIRST_REAL) return `the first ${FIRST_REAL} real applications on each form type always wait for you`
   if (!practiceOn(s) && ap.sent >= s.apply.daily_max) return capText(s) // last: a capped job passed every other check
   return null
 }

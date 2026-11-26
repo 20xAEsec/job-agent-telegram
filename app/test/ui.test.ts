@@ -379,6 +379,7 @@ describe('upgrade: digest, receipts and health', () => {
     fits(P.updatePage(3))
     expect(datas(P.updatePage(3))).toEqual(['up:go', 'm:home'])
     expect(datas(P.updatePage(0))).not.toContain('up:go')
+    expect(P.sentForReal({ greenhouse: 2, generic: 4 })).toBe('📮 Sent for real: Greenhouse 2 · Lever 0 · Ashby 0') // v3 P3's Health line
   })
 })
 

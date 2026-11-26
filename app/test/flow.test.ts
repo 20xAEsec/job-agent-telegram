@@ -226,6 +226,12 @@ describe('review gate', () => {
     const sentDir = join(DATA, 'jobs', 'greenhouse-sent-1')
     mkdirSync(sentDir, { recursive: true })
     writeJson(join(sentDir, 'status.json'), { status: 'SUBMITTED', updated_at: new Date().toISOString(), history: [{ status: 'SUBMITTED', at: new Date().toISOString(), detail: '' }] })
+    const before = new Date(Date.now() - 3 * 86_400_000).toISOString(), older = [1, 2, 3].map(n => join(DATA, 'jobs', `greenhouse-old-${n}`))
+    for (const o of older) { // three earlier real Greenhouse sends, so P3's "first 3 wait" is past and the cap is what holds it
+      mkdirSync(o, { recursive: true })
+      writeJson(join(o, 'meta.json'), { ats: 'greenhouse' })
+      writeJson(join(o, 'status.json'), { status: 'SUBMITTED', updated_at: before, history: [{ status: 'SUBMITTED', at: before, detail: '' }] })
+    }
     const t = setup('FILLED_DRY')
     expect(await t.g.send(ID, true)).toContain('review queue') // capped: waits in the queue, no countdown
     expect(readJson<any>(join(DATA, 'autopilot.json'), {}).deferred).toEqual([ID])
@@ -235,6 +241,7 @@ describe('review gate', () => {
     expect(t.g._grace.has(ID)).toBe(true) // the countdown started: autoGate passed
     t.g.cancelAuto(ID)
     expect(readJson<any>(join(DATA, 'autopilot.json'), {}).deferred).toEqual([])
+    for (const o of older) rmSync(o, { recursive: true, force: true })
     writeJson(join(DATA, 'settings.json'), DEFAULT_SETTINGS)
     rmSync(join(DATA, 'autopilot.json'), { force: true })
   })
@@ -249,10 +256,15 @@ describe('review gate', () => {
     expect(autoGate(rv({ generated_sensitive: ['q3'] }), s)).toContain('private')
     expect(autoGate(rv(), s, { sent: 0, hold: true })).toContain('on hold')
     expect(autoGate(rv(), s, { sent: 10, hold: false })).toBeNull() // practice mode: nothing reaches an employer, so no cap
-    const live = { ...s, dry_run: false }
-    expect(autoGate(rv(), live, { sent: 9, hold: false })).toBeNull()
-    expect(autoGate(rv(), live, { sent: 10, hold: false })).toBe("today's 10 are sent; the rest go tomorrow")
-    expect(autoGate(rv({ score: 70 }), live, { sent: 10, hold: false })).toContain('below') // the cap is checked last
+    const live = { ...s, dry_run: false }, real = { greenhouse: 3, lever: 0 }
+    expect(autoGate(rv(), live, { sent: 9, hold: false, real })).toBeNull()
+    expect(autoGate(rv(), live, { sent: 10, hold: false, real })).toBe("today's 10 are sent; the rest go tomorrow")
+    expect(autoGate(rv({ score: 70 }), live, { sent: 10, hold: false, real })).toContain('below') // the cap is checked last
+    // v3 P3: the first 3 real sends on each form type wait for the user; practice runs don't count and aren't held
+    expect(autoGate(rv(), live, { sent: 0, hold: false, real: { greenhouse: 2 } })).toBe('the first 3 real applications on each form type always wait for you')
+    expect(autoGate(rv({ ats: 'lever' }), live, { sent: 0, hold: false, real })).toContain('first 3 real')
+    expect(autoGate(rv(), live, { sent: 0, hold: false })).toContain('first 3 real') // unknown counts: wait
+    expect(autoGate(rv(), s, { sent: 0, hold: false, real: {} })).toBeNull()
     const now = Date.now()
     expect(planRecovery([
       { id: 'a', status: 'SUBMITTING', auto: false },
