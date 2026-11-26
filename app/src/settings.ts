@@ -107,6 +107,9 @@ export const CATS: Record<string, { emoji: string; title: string; blurb: string;
       S('nf', '📬', 'Follow-up reminders', 'notify.followups', 'enum', 'When an application has had no news for a while. (Turn the reminder itself off under How I apply.)', { opts: LOUD }),
       S('nh', '🩺', 'Problems on your computer', 'notify.health', 'enum', 'For example Claude logged out or the disk nearly full.', { opts: LOUD }),
       S('nw', '📊', 'Weekly summary', 'notify.weekly', 'enum', 'Monday morning: what was found, prepared and applied that week.', { opts: [...LOUD, ['off', 'Off', 'Do not send it']] }),
+      S('nd', '🗞', 'Search digest', 'notify.digest', 'enum', 'How auto-search reports what it prepared. Autopilot uses one quiet message a day.', {
+        opts: [['per_search', 'After each search', 'A message when a search has good matches'], ['daily', 'Once a day', 'One quiet message after quiet hours; auto-apply countdowns and sends arrive silently']],
+      }),
       S('qe', '🌙', 'Quiet hours', 'quiet_hours.enabled', 'bool', 'ON: messages still arrive in these hours, but silently, and auto-search waits until morning.'),
       S('qf', '🌒', 'Starts at', 'quiet_hours.from', 'time', 'When quiet hours begin (your computer\'s clock).'),
       S('qt', '🌅', 'Ends at', 'quiet_hours.to', 'time', 'When quiet hours end.'),
@@ -134,7 +137,7 @@ export function settingsRoot(s: Settings, companies: number): Page {
     `🎯 <b>What I look for</b>\n${note(esc(short(s.filters.titles.join(', ') || 'No job titles yet', 60)))}`,
     `📨 <b>How I apply</b>\n${note(s.apply.mode === 'auto' ? `Auto-apply at ${s.apply.auto_min_score}+ · skip below ${s.apply.min_match_score}` : `You approve every application · skip below ${s.apply.min_match_score}`)}`,
     `🔭 <b>Auto-search</b>\n${note(s.discovery.enabled ? `On, every ${s.discovery.interval_hours} h · ${companies} compan${companies === 1 ? 'y' : 'ies'} watched` : 'Off')}`,
-    `🔔 <b>Notifications</b>\n${note(`${Object.values(s.notify).filter(v => v === 'loud').length} kinds ring · quiet hours ${s.quiet_hours.enabled ? `${s.quiet_hours.from}–${s.quiet_hours.to}` : 'off'}`)}`,
+    `🔔 <b>Notifications</b>\n${note(`${Object.values(s.notify).filter(v => v === 'loud').length} kinds ring${s.notify.digest === 'daily' ? ' · one daily digest' : ''} · quiet hours ${s.quiet_hours.enabled ? `${s.quiet_hours.from}–${s.quiet_hours.to}` : 'off'}`)}`,
     `${practiceOn(s) ? '🧪' : '🚀'} <b>Practice mode</b>\n${note(practiceOn(s) ? 'On: applications are prepared but never sent' : 'Off: approved applications are really sent')}`,
   ]
   return {
@@ -149,11 +152,30 @@ export function settingsRoot(s: Settings, companies: number): Page {
   }
 }
 
+// ---- Autopilot (v4 AP1): one choice for the settings that make JobAgent run on its own. Practice mode is never touched (rule 13). ----
+export const AUTOPILOT = {
+  on: { discovery: { enabled: true }, apply: { mode: 'auto' }, notify: { digest: 'daily' } },
+  off: { apply: { mode: 'review' }, notify: { digest: 'per_search' } }, // "I review each one": v2's behaviour; auto-search stays as it was
+} as const
+export const autopilotOn = (s: Settings) => s.discovery.enabled && s.apply.mode === 'auto' && s.notify.digest === 'daily'
+export const autopilotText = (s: Settings) => [
+  '🤖 <b>Autopilot</b>: I search on my own, prepare the good matches and send the strong ones after a short countdown you can cancel. You get one quiet digest a day; only things that need you ring.',
+  note(`Odd forms, unusual questions and private answers still wait for you. At most ${s.apply.daily_max} a day.${practiceOn(s) ? ' Practice mode stays on: nothing is really sent until you turn it off.' : ''}`),
+  '', '👀 <b>I review each one</b>: nothing is sent until you tap Approve.',
+].join('\n')
+export const autopilotRows = (s: Settings, prefix: string): Btn[][] => [
+  [{ text: `${autopilotOn(s) ? '✅ ' : ''}🤖 Autopilot`, data: `${prefix}:on`, style: 'success' }, { text: `${autopilotOn(s) ? '' : '✅ '}👀 I review each one`, data: `${prefix}:off` }],
+]
+
 export function categoryPage(key: string, s: Settings): Page {
   const c = CATS[key]
   const body = c.items.map(spec => `${spec.emoji} <b>${spec.label}</b>: ${esc(valueText(spec, s))}`)
   const btns: Btn[] = c.items.map(spec => ({ text: `${spec.emoji} ${spec.label}`, data: `s:${spec.id}` }))
   const extra: Btn[][] = key === 'auto' ? [[{ text: '🏢 Companies I watch', data: 'C:list' }], ...(s.discovery.enabled ? [[{ text: '🔎 Search now', data: 'd:run' }]] : [])] : []
+  if (key === 'apply') return {
+    text: [heading(c.emoji, c.title), note(c.blurb), '', autopilotText(s), '', ...body].join('\n'),
+    rows: [...autopilotRows(s, 'ap'), ...pairs(btns), nav('m:settings')],
+  }
   return {
     text: [heading(c.emoji, c.title), note(c.blurb), '', ...body].join('\n'),
     rows: [...pairs(btns), ...extra, nav('m:settings')],

@@ -7,7 +7,7 @@ import { ago, parseList, parseNumber, splitMsg, until, type Page } from '../src/
 import * as OB from '../src/onboarding'
 import * as P from '../src/pages'
 import * as ST from '../src/settings'
-import { DEFAULT_SETTINGS, SETTINGS_FILE, SettingsSchema, getPath, inWindow, loadSettings, writeJson, type Settings } from '../src/state'
+import { DEFAULT_SETTINGS, SETTINGS_FILE, SettingsSchema, getPath, inWindow, loadSettings, trySettingsUpdate, writeJson, type Settings } from '../src/state'
 
 const S = (): Settings => structuredClone(DEFAULT_SETTINGS)
 const datas = (p: Page) => p.rows.flat().filter(b => !b.url).map(b => b.data ?? 'noop')
@@ -97,6 +97,30 @@ describe('settings catalog', () => {
     expect(agg.text).toContain("jobgether ⚠️ <i>reposts other companies' jobs</i>")
     expect(datas(agg)).toContain('C:r:jobgether') // a Remove button: never removed silently
     expect(ST.companiesPage(['acme']).text).not.toContain('reposts')
+  })
+  test('autopilot: one choice at the end of setup and in How I apply, writing exactly its settings', () => {
+    const s = { ...S(), onboarded: true, filters: { ...S().filters, titles: ['Data Analyst'] } }
+    const done = OB.obPage({ step: 'done', picks: [], locs: [] }, s)
+    fits(done)
+    expect(datas(done)).toEqual(expect.arrayContaining(['o:ap:on', 'o:ap:off', 'm:home']))
+    expect(done.text).toContain('Nothing is sent until you approve')
+    const apply = ST.categoryPage('apply', s)
+    fits(apply)
+    expect(datas(apply).slice(0, 2)).toEqual(['ap:on', 'ap:off'])
+    expect(apply.text).toContain('Practice mode stays on')
+    const flat = (o: any, p = ''): Record<string, string> => Object.assign({}, ...Object.entries(o).map(([k, v]) => v && typeof v === 'object' && !Array.isArray(v) ? flat(v, `${p}${k}.`) : { [`${p}${k}`]: JSON.stringify(v) }))
+    const changed = (a: any, b: any) => Object.keys(flat(b)).filter(k => flat(a)[k] !== flat(b)[k]).sort()
+    writeJson(SETTINGS_FILE, { ...DEFAULT_SETTINGS, discovery: { ...DEFAULT_SETTINGS.discovery, enabled: false } })
+    const before = loadSettings()
+    expect(trySettingsUpdate(ST.AUTOPILOT.on).ok).toBe(true)
+    const on = loadSettings()
+    expect(changed(before, on)).toEqual(['apply.mode', 'discovery.enabled', 'notify.digest'])
+    expect(ST.autopilotOn(on) && on.dry_run).toBe(true) // practice mode untouched
+    expect(OB.obPage({ step: 'done', picks: [], locs: [] }, on).text).toContain('Strong matches go out after a short countdown')
+    expect(trySettingsUpdate(ST.AUTOPILOT.off).ok).toBe(true)
+    expect(changed(on, loadSettings())).toEqual(['apply.mode', 'notify.digest']) // auto-search stays as it was
+    expect(ST.autopilotOn(loadSettings())).toBe(false)
+    writeJson(SETTINGS_FILE, DEFAULT_SETTINGS)
   })
   test('filtered out: reasons grouped, the 10 newest, and a way to look at one anyway', () => {
     const now = Date.parse('2026-11-25T15:00:00Z'), at = (h: number) => new Date(now - h * 3600_000).toISOString()

@@ -809,6 +809,14 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
         const i = OB.EEO_ORDER.indexOf(st)
         return nextAfterSave(i < OB.EEO_ORDER.length - 1 ? OB.EEO_ORDER[i + 1] : 'done')
       }
+      case 'ap': {
+        if (arg !== 'on' && arg !== 'off') return undefined
+        const r = trySettingsUpdate(ST.AUTOPILOT[arg])
+        if (!r.ok) return `Could not change it: ${r.error}`
+        refresh()
+        toast.text = arg === 'on' ? '🤖 Autopilot is on' : '👀 You review each one'
+        return OB.obPage(ob, loadSettings())
+      }
       case 'auto': {
         trySettingsUpdate({ discovery: { enabled: true } })
         refresh()
@@ -1008,6 +1016,13 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
     if ((m = /^r:(ok|ch|sk|nv|nx|cx|rv|ss|ea|or|fl|df|hv):([0-9a-f]{8})(?::(\d{1,3}))?$/.exec(data))) return review.press(m[1], m[2], chat, msg, m[3])
 
     if (data === 'ap:resume') { review.resumeAuto(); toast.text = '▶ Auto-apply resumed'; return P.home(homeCtx()) }
+    if (data === 'ap:on' || data === 'ap:off') { // Settings → How I apply
+      const r = trySettingsUpdate(ST.AUTOPILOT[data === 'ap:on' ? 'on' : 'off'])
+      if (!r.ok) return `Could not change it: ${r.error}`
+      refresh()
+      toast.text = data === 'ap:on' ? '🤖 Autopilot is on' : '👀 You review each one'
+      return ST.categoryPage('apply', loadSettings())
+    }
 
     // Filtered out: what auto-search skipped, and a way to have one read in full anyway (like a link the user sent)
     if (data === 'fo:list') return P.filteredPage(readScreened(), loadSettings().filters.country)

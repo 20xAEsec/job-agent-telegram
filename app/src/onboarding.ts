@@ -2,6 +2,7 @@
 // except reading the resume. Renderers are pure; bot.ts does the saving.
 import { join } from 'path'
 import { esc, heading, label, money, nav, note, pairs, quote, short, stepLine, type Btn, type Page } from './kit'
+import { autopilotRows, autopilotText } from './settings'
 import { DATA, readJson, writeJson, type Settings } from './state'
 
 export type Summary = {
@@ -207,14 +208,17 @@ export function obPage(o: Ob, s: Settings, fields: Record<string, string> = {}):
           '<b>How it works</b>',
           '1️⃣ Send me a link to a job posting (on your phone: open the job, tap <b>Share</b>, then Telegram), or turn on <b>Auto-search</b> and I\'ll find jobs myself.',
           '2️⃣ I read it, score the fit, tailor your resume and fill in the form. You can watch each step live.',
-          '3️⃣ You get a review with every answer and file. <b>Nothing is sent until you approve.</b>', '',
+          s.apply.mode === 'auto'
+            ? '3️⃣ Strong matches go out after a short countdown you can cancel. The rest wait for your review, with every answer and file.'
+            : '3️⃣ You get a review with every answer and file. <b>Nothing is sent until you approve.</b>', '',
+          '<b>How much should I do on my own?</b>', autopilotText(s), '',
           quote(`🎯 ${esc(short(s.filters.titles.join(', '), 80))}\n📍 ${esc(short(s.filters.locations.join(', ') || 'Anywhere', 60))} · ${label(s.filters.remote)}${s.filters.min_salary ? `\n💵 ${money(s.filters.min_salary, s.filters.currency)}+ per year` : ''}`),
           `🧪 ${note('Practice mode is on: approving runs a practice application. Turn it off in Settings when you are ready.')}`,
           `💻 ${note('I only work while JobAgent is open on your computer. If I stop answering, it was closed.')}`,
           ...(s.filters.titles.length ? ['', `🔎 <b>I'm running your first search now.</b> ${note('The best few matches get prepared for you; watch the card below.')}`] : []),
           ...(s.discovery.enabled ? ['', `🔭 <b>Auto-search is on.</b> ${note(`I look again every ${s.discovery.interval_hours} h.`)}`] : []),
         ].join('\n'),
-        rows: [...(s.discovery.enabled ? [] : [[{ text: '🔭 Turn on Auto-search', data: 'o:auto', style: 'success' as const }]]), [{ text: '🏠 Go to Home', data: 'm:home' }]],
+        rows: [...autopilotRows(s, 'o:ap'), ...(s.discovery.enabled ? [] : [[{ text: '🔭 Turn on Auto-search', data: 'o:auto' }]]), [{ text: '🏠 Go to Home', data: 'm:home' }]],
       }
   }
   return { text: 'Setup', rows: [nav()] }

@@ -73,7 +73,8 @@ export const DEFAULT_SETTINGS = {
     related_jobs: 'few' as 'off' | 'few' | 'more' }, // jobs with a title you did not list, per day: off, 4 or 12 (agent/jobagent/discover/tiers.py CAPS)
   quiet_hours: { enabled: true, from: '23:00', to: '07:00' },
   // Per kind of message: 'loud' rings, 'silent' arrives without a sound, 'off' is not sent (weekly only).
-  notify: { reviews: 'loud', search: 'loud', followups: 'loud', health: 'loud', weekly: 'silent' } as Record<NotifyKind, Loudness>,
+  // digest 'daily' (Autopilot): one quiet message a day instead of one per search; auto-apply countdowns and sends arrive silently.
+  notify: { reviews: 'loud', search: 'loud', followups: 'loud', health: 'loud', weekly: 'silent', digest: 'per_search' } as Record<NotifyKind, Loudness> & { digest: 'per_search' | 'daily' },
 }
 export type NotifyKind = 'reviews' | 'search' | 'followups' | 'health' | 'weekly'
 export type Loudness = 'loud' | 'silent' | 'off'
@@ -143,7 +144,7 @@ export const SettingsSchema = z.object({
   quiet_hours: z.object({ enabled: z.boolean(), from: hhmm, to: hhmm }).strict(),
   notify: z.object({
     reviews: z.enum(['loud', 'silent']), search: z.enum(['loud', 'silent']), followups: z.enum(['loud', 'silent']),
-    health: z.enum(['loud', 'silent']), weekly: z.enum(['loud', 'silent', 'off']),
+    health: z.enum(['loud', 'silent']), weekly: z.enum(['loud', 'silent', 'off']), digest: z.enum(['per_search', 'daily']),
   }).strict(),
 }).strict()
 

@@ -214,7 +214,7 @@ export function createReview(d: Deps) {
     if (st === 'DRY_RUN_DONE') say(`${heading('🧪', 'Practice run done')}\n${name(id)}\n${note('Everything worked up to the Submit button. Nothing was sent.')}\n\nWhen you're ready for real applications, turn practice mode off in Settings, then tap Apply for real.`, false,
       [[{ text: '🚀 Apply for real', data: `j:go:${code(id)}`, style: 'success' }, { text: '🧾 Practice receipt', data: `j:rc:${code(id)}` }], [{ text: '📋 Jobs', data: 'J:a:0' }, { text: '🏠 Home', data: 'm:home' }]])
     else if (st === 'SUBMITTED') {
-      say(`${heading('🎉', 'Application sent')}\n${name(id)}\n${note('Look out for a confirmation email from the company. Your receipt is under Jobs → Applied.')}`, true, [[{ text: '🧾 Receipt', data: `j:rc:${code(id)}` }]])
+      say(`${heading('🎉', 'Application sent')}\n${name(id)}\n${note('Look out for a confirmation email from the company. Your receipt is under Jobs → Applied.')}`, loadSettings().notify.digest !== 'daily', [[{ text: '🧾 Receipt', data: `j:rc:${code(id)}` }]]) // Autopilot: the digest tells it
       const shot = join(jobDir(id), 'screenshots', 'submitted.png'), to = d.to()
       if (to != null && existsSync(shot)) void d.api.sendPhoto(to, new InputFile(shot), { caption: '🧾 The confirmation page', disable_notification: true }).catch(e => log(`receipt shot failed: ${e}`))
     }
@@ -350,7 +350,7 @@ export function createReview(d: Deps) {
     if (digest && !(s.apply.mode === 'auto' && why === null)) { d.refresh(); return 'review ready: it goes into the review queue and the search digest. Stop now.' }
     await sendPreviews(id, rv)
     if (s.apply.mode === 'auto' && why === null) {
-      const m = await d.api.sendMessage(to, autoText(rv, Date.now() + s.apply.auto_grace_seconds * 1000, practice), { ...OPTS, disable_notification: d.silent() || s.notify.reviews !== 'loud' })
+      const m = await d.api.sendMessage(to, autoText(rv, Date.now() + s.apply.auto_grace_seconds * 1000, practice), { ...OPTS, disable_notification: d.silent() || s.notify.reviews !== 'loud' || s.notify.digest === 'daily' })
       const { at, rows } = startAuto(id, rv, m.message_id)
       await d.api.editMessageText(to, m.message_id, autoText(rv, at, practice), { ...OPTS, reply_markup: kb(rows) }).catch(() => {})
       d.refresh()
