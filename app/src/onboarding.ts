@@ -11,7 +11,7 @@ export type Summary = {
 }
 export type ObStep =
   | 'welcome' | 'resume' | 'reading' | 'profile' | 'fix'
-  | 'titles' | 'level' | 'locations' | 'remote' | 'salary'
+  | 'titles' | 'level' | 'locations' | 'remote' | 'salary' | 'expect'
   | 'auth' | 'sponsor' | 'start' | 'relocate'
   | 'eeo' | 'eeo_gender' | 'eeo_race' | 'eeo_veteran' | 'eeo_disability' | 'done'
 export type Ob = {
@@ -27,7 +27,7 @@ export const saveOb = (o: Ob) => writeJson(FILE, o)
 const SECTION: Partial<Record<ObStep, [number, string]>> = {
   resume: [1, 'Your resume'], reading: [1, 'Your resume'], profile: [1, 'Your resume'], fix: [1, 'Your resume'],
   titles: [2, 'The roles you want'], level: [2, 'The roles you want'],
-  locations: [3, 'Location and pay'], remote: [3, 'Location and pay'], salary: [3, 'Location and pay'],
+  locations: [3, 'Location and pay'], remote: [3, 'Location and pay'], salary: [3, 'Location and pay'], expect: [3, 'Location and pay'],
   auth: [4, 'Work eligibility'], sponsor: [4, 'Work eligibility'], start: [4, 'Work eligibility'], relocate: [4, 'Work eligibility'],
   eeo: [5, 'Optional questions'], eeo_gender: [5, 'Optional questions'], eeo_race: [5, 'Optional questions'], eeo_veteran: [5, 'Optional questions'], eeo_disability: [5, 'Optional questions'],
 }
@@ -159,6 +159,20 @@ export function obPage(o: Ob, s: Settings, fields: Record<string, string> = {}):
         [back('remote'), { text: 'No minimum →', data: 'o:sa:0' }],
       ])
     }
+    // v4 AP4: the most common private question with no saved answer. Saved as `salary_expectation` (sensitive); never guessed.
+    case 'expect': {
+      const lo = s.filters.min_salary
+      return t([
+        heading('💬', 'When a form asks your expected salary, what should I say?'), '',
+        'Many applications ask it. With an answer saved, I fill it in; otherwise I ask you each time.', '',
+        `🔒 ${note('Private: stored on your computer only.')}`,
+      ], [
+        ...(lo ? [[{ text: `💵 My minimum (${money(lo, s.filters.currency)})`, data: 'o:ex:min' }]] : []),
+        [{ text: '⌨️ A number I type', data: 'o:add:expect' }],
+        [{ text: '🙋 Ask me each time', data: 'o:ex:ask' }],
+        [back('salary')],
+      ])
+    }
     case 'auth': {
       const c = o.country || sum?.country || 'your country'
       return t([
@@ -168,7 +182,7 @@ export function obPage(o: Ob, s: Settings, fields: Record<string, string> = {}):
       ], [
         [{ text: 'Yes', data: 'o:au:yes', style: 'success' }, { text: 'No', data: 'o:au:no' }],
         [{ text: '🌍 A different country', data: 'o:add:country' }],
-        [back('salary')],
+        [back('expect')],
       ])
     }
     case 'sponsor':
@@ -229,6 +243,7 @@ export const obPrompt = (what: 'title' | 'loc' | 'salary' | 'country' | 'start' 
     title: ['🎯 Add a job title', 'Send a job title. Several? Separate them with commas.\n\n' + note('For example: Data Analyst, Analytics Engineer')],
     loc: ['📍 Add a place', 'Send a city, region or country. Several? Separate them with commas.\n\n' + note('For example: Austin, TX or Germany')],
     salary: ['💵 Minimum salary', 'Send a yearly amount, like <code>95000</code> or <code>95k</code>.'],
+    expect: ['💬 Expected salary', 'Send the yearly amount to give when a form asks your expected salary, like <code>120000</code> or <code>120k</code>.'],
     country: ['🌍 Which country?', 'Send the country you want to work in, for example <code>Canada</code>.'],
     start: ['🗓 When could you start?', 'Send it in your own words, for example <code>after March 1</code> or <code>3 weeks</code>.'],
   }

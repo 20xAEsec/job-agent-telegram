@@ -98,6 +98,17 @@ describe('settings catalog', () => {
     expect(datas(agg)).toContain('C:r:jobgether') // a Remove button: never removed silently
     expect(ST.companiesPage(['acme']).text).not.toContain('reposts')
   })
+  test('setup asks the expected salary once, right after the minimum', () => {
+    const s = { ...S(), filters: { ...S().filters, min_salary: 120000 } }
+    const p = OB.obPage({ step: 'expect', picks: [], locs: [] }, s)
+    fits(p)
+    expect(p.text).toContain('When a form asks your expected salary')
+    expect(datas(p)).toEqual(['o:ex:min', 'o:add:expect', 'o:ex:ask', 'o:go:salary'])
+    expect(p.rows[0][0].text).toContain('$120')
+    expect(datas(OB.obPage({ step: 'expect', picks: [], locs: [] }, S()))).not.toContain('o:ex:min') // no minimum: nothing to offer
+    expect(datas(OB.obPage({ step: 'auth', picks: [], locs: [] }, s))).toContain('o:go:expect')
+    fits(OB.obPrompt('expect'))
+  })
   test('autopilot: one choice at the end of setup and in How I apply, writing exactly its settings', () => {
     const s = { ...S(), onboarded: true, filters: { ...S().filters, titles: ['Data Analyst'] } }
     const done = OB.obPage({ step: 'done', picks: [], locs: [] }, s)

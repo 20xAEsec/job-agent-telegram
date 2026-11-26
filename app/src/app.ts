@@ -34,6 +34,7 @@ const DISC_FILE = join(DATA, 'discovery.json')
 const FOLLOW_FILE = join(DATA, 'followups.json')
 const WEEK_FILE = join(DATA, 'weekly.json')
 const DAILY_FILE = join(DATA, 'daily.json') // when the daily digest last went out
+const EXPECT_KEY = 'salary_expectation', EXPECT_Q = 'What are your salary expectations? (expected yearly salary)' // v4 AP4, a private saved answer
 const UPKEEP_FILE = join(DATA, 'upkeep.json') // the last `jobagent maintain` counts
 const TIP_FILE = join(DATA, 'suggestion.json')
 // One suggestion on Home from the user's own decisions, until they apply or dismiss it.
@@ -801,6 +802,12 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
         const n = parseInt(arg, 10)
         trySettingsUpdate({ filters: { min_salary: n > 0 ? n : null } })
         if (n > 0) void saveAnswer('salary_expectation_min', 'Minimum yearly salary you would accept', String(n), true)
+        return nextAfterSave('expect')
+      }
+      case 'ex': { // expected salary: my minimum, or ask each time (a typed number comes through `capture`)
+        if (arg === 'min' && s.filters.min_salary) void saveAnswer(EXPECT_KEY, EXPECT_Q, String(s.filters.min_salary), true)
+        else if (arg === 'ask') saveQ = saveQ.then(() => run(['profile', 'answer', 'delete', EXPECT_KEY]).then(() => {})) // an older answer must not be used
+        else return undefined
         return nextAfterSave('auth')
       }
       case 'au': {
@@ -1498,6 +1505,11 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
         if (n === null || n < 0) { pending = p; return fail('Please send an amount, like 95000 or 95k.') }
         trySettingsUpdate({ filters: { min_salary: n || null } })
         if (n) void saveAnswer('salary_expectation_min', 'Minimum yearly salary you would accept', String(n), true)
+        ob.step = 'expect'
+      } else if (p.what === 'expect') {
+        const n = parseNumber(text)
+        if (n === null || n <= 0) { pending = p; return fail('Please send an amount, like 120000 or 120k.') }
+        void saveAnswer(EXPECT_KEY, EXPECT_Q, String(n), true)
         ob.step = 'auth'
       } else if (p.what === 'start') { void saveAnswer('start_availability', 'When can you start?', short(text.trim(), 100), false); ob.step = 'relocate' }
       OB.saveOb(ob)
@@ -1625,7 +1637,7 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
       return
     }
     if (!s.onboarded) { // mid-setup, typed text answers the step on screen; it never starts a Claude chat
-      const ob = OB.loadOb(), what = ({ titles: 'title', locations: 'loc', salary: 'salary', start: 'start' } as Record<string, string>)[ob.step]
+      const ob = OB.loadOb(), what = ({ titles: 'title', locations: 'loc', salary: 'salary', expect: 'expect', start: 'start' } as Record<string, string>)[ob.step]
       if (what && ob.msg) { pending = { kind: 'ob', what, chat: ctx.chat.id, msg: ob.msg, at: Date.now() }; if (await capture(ctx, text)) return }
       return void ctx.reply(note(ob.step === 'resume' ? 'Please send your resume as a file: tap 📎, then File, and pick the PDF or Word document.'
         : ob.step === 'reading' ? "I'm still reading your resume. This takes about a minute." : 'Use the buttons above to continue the setup.'), OPTS)
