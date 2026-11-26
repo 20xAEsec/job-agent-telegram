@@ -149,7 +149,8 @@ What is kept out: the log copy Claude reads has emails, tokens and your profile 
 ```
 app/      Bun + TypeScript: the Telegram bot, screens, live cards, setup wizard, review gate, and the Claude task runner
 agent/    Python (uv): job store, Greenhouse / Lever / Ashby adapters, resume tailoring, form filling (Playwright), discovery, the submit choke point
-.claude/  Claude's skills, the sandboxed job-analyst subagent, and the permission rules for headless tasks
+prompts/  the tool-less Claude calls the job pipeline makes (one judgment each, with a JSON schema; code checks every answer)
+.claude/  Claude's skills for chat, auto-search, interview prep and repairs, and the permission rules for those headless tasks
 ```
 
 - The app runs each piece of work as a headless `claude -p` task (`app/src/agent.ts`) with `--output-format stream-json`. Every tool call streams back and becomes the plain-words line on the live card (`app/src/activity.ts`). Usage-limit events re-queue the task until the limit resets. The queue lives in `data/tasks.json` and survives restarts.

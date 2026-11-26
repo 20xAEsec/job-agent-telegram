@@ -1,0 +1,36 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["not_a_resume", "contact", "summary", "experience", "skills", "education", "card"],
+  "properties": {
+    "not_a_resume": {"type": "boolean"},
+    "contact": {
+      "type": "object", "additionalProperties": false,
+      "required": ["full_name", "email", "phone", "location", "linkedin", "portfolio"],
+      "properties": {
+        "full_name": {"type": "string"}, "email": {"type": "string"}, "phone": {"type": "string"},
+        "location": {"type": "string"}, "linkedin": {"type": "string"}, "portfolio": {"type": "string"}
+      }
+    },
+    "summary": {"type": "string"},
+    "experience": {"type": "array", "items": {"type": "string"}},
+    "skills": {
+      "type": "object", "additionalProperties": false, "required": ["languages", "tools"],
+      "properties": {"languages": {"type": "string"}, "tools": {"type": "string"}}
+    },
+    "education": {"type": "array", "items": {"type": "string"}},
+    "card": {
+      "type": "object", "additionalProperties": false,
+      "required": ["name", "headline", "years", "level", "location", "country", "skills", "suggested_titles", "related_titles"],
+      "properties": {
+        "name": {"type": "string"}, "headline": {"type": "string"},
+        "years": {"type": ["integer", "null"], "minimum": 0, "maximum": 60},
+        "level": {"type": "string", "enum": ["intern", "entry", "mid", "senior", "staff", "lead", "manager", "director"]},
+        "location": {"type": "string"}, "country": {"type": "string"},
+        "skills": {"type": "array", "maxItems": 10, "items": {"type": "string"}},
+        "suggested_titles": {"type": "array", "maxItems": 6, "items": {"type": "string"}},
+        "related_titles": {"type": "array", "maxItems": 6, "items": {"type": "string"}}
+      }
+    }
+  }
+}

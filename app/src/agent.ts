@@ -7,6 +7,7 @@ import { createInterface } from 'readline'
 import { rmSync } from 'fs'
 import { join } from 'path'
 import { describe } from './activity'
+import { authText, LIMIT_RE, usageOf } from './llm'
 import { killHelpers, killTree } from './runner'
 import { DATA, ROOT, loadSettings, log, logError, readJson, writeJson } from './state'
 
@@ -24,6 +25,10 @@ export type Outcome = {
   text?: string; result?: string; resets_at?: number; denials: string[]
 }
 type Exec = (args: string[], env: Record<string, string>, onLine: (l: string) => void) => { pid?: number; done: Promise<{ code: number; stderr: string }> }
+// The app runs these itself (v4): code steps plus tool-less Claude calls. Chat, repair, prep and discover stay Claude sessions.
+export type CodeKind = 'job' | 'resume' | 'revise' | 'followup'
+export const CODE_KINDS = new Set<Kind>(['job', 'resume', 'revise', 'followup'] satisfies CodeKind[])
+export type CodeLive = { doing: (text: string) => void; pid: (pid?: number) => void; cancelled: () => boolean }
 
 const FILE = join(DATA, 'tasks.json')
 const CHAT_FILE = join(DATA, 'chat.json')
@@ -42,20 +47,17 @@ const TOOLS: Record<Lane, string> = {
 // What the agent is asked to do. CLAUDE.md maps the task kind to a skill.
 export function promptFor(t: Task): string {
   const p = t.payload
-  const what: Record<Kind, string> = {
-    job: p.url ? (p.source === 'discovery' ? 'Auto-search found this job. Run the intake-job skill for it (New link, with --source discovery).' : 'The user sent a job link. Run the intake-job skill for it.')
-      : `Continue job ${t.job_id} (mode "${p.mode}"). Run the intake-job skill, section Continue.`,
-    resume: 'The user uploaded their resume (already imported). Run the read-resume skill.',
-    revise: `The user wants a change to the prepared application for job ${t.job_id}. Run the revise-application skill.`,
+  const what: Record<Exclude<Kind, CodeKind>, string> = { // CODE_KINDS never reach Claude as a session
     discover: 'Time to find new companies to watch. Run the discover-jobs skill.',
     repair: `The user asked you to look into a problem with JobAgent itself (${p.trigger}). Run the repair-app skill.`,
     chat: 'A message from the user in Telegram. Answer it (see CLAUDE.md, Chat).',
-    followup: `The user wants a follow-up email for job ${t.job_id}. Run the followup-email skill.`,
     prep: `The user has an interview for job ${t.job_id}. Run the interview-prep skill.`,
   }
+  if (CODE_KINDS.has(t.kind)) throw new Error(`a ${t.kind} task runs in code, not in a Claude session`)
+  const kind = t.kind as Exclude<Kind, CodeKind>
   return [
     `JobAgent task: ${t.kind} (task id ${t.id})`,
-    what[t.kind],
+    what[kind],
     ...(t.interrupted ? ['This task was interrupted by a restart: check what is already done (jobagent job get) and continue from there. Never submit.'] : []),
     JSON.stringify({ ...(t.job_id ? { job_id: t.job_id } : {}), ...p }),
   ].join('\n')
@@ -81,6 +83,7 @@ export type AgentDeps = {
   onFinish: (task: Task, o: Outcome) => void | Promise<void>
   onUsage: (u: Usage) => void
   canRunBackground?: () => boolean // false while the user's Claude limit is nearly used up: only their own work runs
+  code?: (t: Task, live: CodeLive) => Promise<Outcome> // CODE_KINDS run here (pipeline.ts) instead of in a Claude session
   exec?: Exec
   now?: () => number
 }
@@ -133,12 +136,33 @@ export function createAgent(d: AgentDeps) {
     return c.id && now() - (c.at ?? 0) < CHAT_IDLE_MS ? c.id : undefined
   }
 
+  // A job, resume, revise or followup task: the app's pipeline in code, with tool-less Claude calls (no agentic session).
+  async function runCode(lane: Lane, t: Task, L: Live & { pid?: number; cancelled?: boolean }) {
+    let o: Outcome
+    try {
+      if (!d.code) throw new Error('no code runner for this kind of task')
+      o = await d.code(t, { doing: x => { L.doing = x; L.steps++; d.onLive(lane, L) }, pid: p => { L.pid = p }, cancelled: () => !!L.cancelled })
+    } catch (e) {
+      logError(`task ${t.id} failed`, e)
+      o = { kind: 'error', text: 'Something went wrong on my side.', denials: [] }
+    }
+    if (L.cancelled) o = { kind: 'cancelled', denials: [] }
+    if (o.kind === 'limit') queue.unshift({ ...t, not_before: (o.resets_at ?? now() + 3600_000) + 60_000, interrupted: true })
+    delete live[lane]
+    log(`task ${t.id} ${t.kind} -> ${o.kind} (code, ${L.steps} steps, ${Math.round((now() - L.started) / 1000)}s)${o.kind === 'error' ? ` [${o.text ?? ''}]` : ''}`)
+    persist()
+    d.onLive(lane, null)
+    try { await d.onFinish(t, o) } catch (e) { logError('onFinish failed', e) }
+    pump()
+  }
+
   async function run(lane: Lane, t: Task) {
     const s = loadSettings()
     const L: Live & { pid?: number; cancelled?: boolean; timedOut?: boolean; idle?: boolean } = { task: t, started: now(), doing: null, steps: 0 }
     live[lane] = L
     persist()
     d.onLive(lane, L)
+    if (CODE_KINDS.has(t.kind)) return runCode(lane, t, L)
     const mcp = join(DATA, 'run', `mcp-${t.id}.json`)
     const b = d.bridge()
     writeJson(mcp, { mcpServers: { jobbot: { command: process.execPath, args: ['run', join(ROOT, 'app', 'src', 'mcp.ts')], env: { JOBBOT_BRIDGE: b.url, JOBBOT_SECRET: b.secret, JOBBOT_TASK: t.id } } } })
@@ -166,10 +190,9 @@ export function createAgent(d: AgentDeps) {
           } else if (c.type === 'text' && !m.parent_tool_use_id && c.text?.trim()) lastText = c.text
         }
       } else if (m.type === 'rate_limit_event') {
-        const r = m.rate_limit_info ?? {}, w = r.unifiedWindows ?? {}
-        const resets = typeof r.resetsAt === 'number' ? r.resetsAt * 1000 : undefined
-        if (r.status === 'rejected') limited = resets ?? now() + 3600_000
-        d.onUsage({ five_hour: w.five_hour?.utilization, seven_day: w.seven_day?.utilization, resets_at: resets, limited: r.status === 'rejected', at: now() })
+        const u = usageOf(m, now())
+        if (u.limitedUntil) limited = u.limitedUntil
+        d.onUsage(u.usage)
       } else if (m.type === 'result') result = m
     }
     const h = exec(args, { JOBBOT_TASK: t.id }, onLine)
@@ -192,12 +215,12 @@ export function createAgent(d: AgentDeps) {
       o = { kind: 'retrying', text: 'Claude went quiet for several minutes, so I restarted it.', denials }
     } else if (L.idle) o = { kind: 'timeout', denials }
     else if (L.timedOut) o = { kind: 'timeout', denials }
-    else if (limited || (result?.is_error && /usage limit|rate limit|limit reached/i.test(errText))) {
+    else if (limited || (result?.is_error && LIMIT_RE.test(errText))) {
       const at = limited ?? now() + 3600_000
       queue.unshift({ ...t, not_before: at + 60_000, interrupted: L.steps > 0 })
       o = { kind: 'limit', resets_at: at, denials }
-    } else if (/not logged in|please run \/login|invalid api key|authenticat|oauth/i.test(errText) || code === -1 && /ENOENT/i.test(stderr)) {
-      o = { kind: 'auth', text: /ENOENT/i.test(stderr) ? 'Claude Code is not installed on this computer.' : 'Claude is not logged in on this computer.', denials }
+    } else if (authText(errText, code)) {
+      o = { kind: 'auth', text: authText(errText, code)!, denials }
     } else if (result && !result.is_error) {
       if (lane === 'chat' && session) writeJson(CHAT_FILE, { id: session, at: now() })
       o = { kind: 'done', result: String(result.result ?? lastText ?? ''), denials }

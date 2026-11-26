@@ -1,0 +1,15 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["edits", "reorder"],
+  "properties": {
+    "edits": {"type": "array", "maxItems": 12, "items": {
+      "type": "object", "additionalProperties": false, "required": ["uid", "new_text", "reason"],
+      "properties": {"uid": {"type": "integer"}, "new_text": {"type": "string"}, "reason": {"type": "string"}}
+    }},
+    "reorder": {"type": "array", "items": {
+      "type": "object", "additionalProperties": false, "required": ["section", "uids"],
+      "properties": {"section": {"type": "string"}, "uids": {"type": "array", "items": {"type": "integer"}}}
+    }}
+  }
+}

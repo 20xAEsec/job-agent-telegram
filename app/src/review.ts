@@ -13,7 +13,7 @@ import { log, logError, loadSettings, practiceOn, readJson, trySettingsUpdate, w
 export type Answer = { fid: string; label: string; value: string; source: string; sensitive: boolean; required: boolean }
 export type Review = {
   job_id: string; plan_hash: string; ats: string; company: string; role: string; location: string; salary: string; score: number | null
-  reasons: string[]; dealbreakers: string[]; answers: Answer[]; unusual: string[]; generated_sensitive: string[]; files: string[]
+  reasons: string[]; dealbreakers: string[]; answers: Answer[]; unusual: string[]; generated_sensitive: string[]; files: string[]; injection_suspected?: boolean
   breakdown?: Breakdown; must_haves?: MustHave[]; coverage?: { before?: number; after?: number; missing?: string[] }
   resume: { edits: number; reorders: number; fallback: boolean; verified: boolean; ats?: boolean; versions_used?: number; versions_total?: number }; screenshots: string[]; url: string
   changes?: { old: string; new: string; reason: string }[]; cover_letter?: string; previews?: string[]
@@ -130,6 +130,7 @@ export function autoGate(rv: Review, s: Settings): string | null {
   if (rv.ats === 'generic') return 'unfamiliar form types always need your review'
   if (rv.unusual.length) return 'the form has unusual fields'
   if (rv.generated_sensitive.length) return 'a private answer was drafted rather than given by you'
+  if (rv.injection_suspected) return 'the posting contained text that tried to give me instructions'
   return null
 }
 
@@ -455,6 +456,8 @@ export function createReview(d: Deps) {
       row.value = value
       row.source = 'user'
       writeJson(planFile, plan)
+      const mine = join(jobDir(id), 'answers.json') // the user's own answers win when the plan is built again (plan build)
+      writeJson(mine, { ...readJson<Record<string, unknown>>(mine, {}), [fid]: value })
       return null
     })
     void d.api.editMessageText(chat, msg, updatingPage(rv, 'Updating your answer').text, OPTS).catch(() => {})

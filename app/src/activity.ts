@@ -35,15 +35,10 @@ const FILES: [RegExp, string | null][] = [
   [/repair\/[^/]+\/work\//, 'Changing the code'],
   [/repair\/[^/]+\/logs\.txt$/, 'Reading the logs'],
   [/repair\/[^/]+\/report\.json$/, 'Writing up the fix'],
-  [/tailor_plan\.json$/, 'Rewording resume lines to match the job'],
-  [/cover_letter\.md$/, 'Writing your cover letter'],
-  [/plan\.json$/, 'Deciding what goes in each form field'],
-  [/analysis\.json$/, 'Writing down the job analysis'],
-  [/answers\.json$/, 'Recording your answers'],
-  [/profile_draft\.md$/, 'Drafting your profile from the resume'],
+  [/company\.json$/, 'Writing down what I found about the company'],
+  [/analysis\.json$/, 'Reading the job analysis'],
   [/profile\.md$/, 'Reading your profile'],
   [/resume_text\.txt$/, 'Reading your resume'],
-  [/resume_bank\.json$/, 'Collecting every line from your resume versions'],
   [/resumes[\\/][^\\/]+\.txt$/, 'Reading your other resume versions'],
   [/posting\.md$/, 'Reading the job posting'],
   [/fields\.json$/, 'Reading the form fields'],
@@ -52,15 +47,9 @@ const FILES: [RegExp, string | null][] = [
   [/SKILL\.md$/, null],
 ]
 
-const SKILLS: Record<string, string> = {
-  'intake-job': 'Starting on the job',
-  'tailor-documents': 'Tailoring your resume',
-  'prepare-review': 'Preparing the application',
-  'revise-application': 'Making the change you asked for',
+const SKILLS: Record<string, string> = { // job, resume, revise and followup work runs in the app's own code (pipeline.ts)
   'discover-jobs': 'Looking for new jobs',
-  'read-resume': 'Reading your resume',
   'repair-app': 'Looking into the problem',
-  'followup-email': 'Writing your follow-up email',
   'interview-prep': 'Building your interview prep',
   'company-researcher': 'Reading about the company',
 }
@@ -80,7 +69,7 @@ export function describe(name: string, input: Record<string, any> = {}): string 
     for (const [re, text] of FILES) if (re.test(p)) return text
     return name === 'Read' ? 'Reading notes' : 'Writing notes'
   }
-  if (name === 'Task' || name === 'Agent') return 'Reading the posting with a sandboxed reader'
+  if (name === 'Task' || name === 'Agent') return 'Reading about the company' // the only subagent left: company-researcher (prep)
   if (name === 'Skill') return SKILLS[String(input.skill ?? input.command ?? '')] ?? null
   if (name === 'WebSearch') return `Searching the web: ${clip(String(input.query ?? ''))}`
   if (name === 'Glob' || name === 'Grep') return 'Looking through your files'

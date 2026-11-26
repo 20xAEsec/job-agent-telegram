@@ -11,19 +11,6 @@ export const AGENT_BUTTONS: Record<string, string> = {
 }
 export const TONES: Record<string, string> = { info: 'ℹ️', success: '✅', warn: '⚠️', error: '❌' }
 
-const Q = {
-  type: 'object',
-  properties: {
-    qid: { type: 'string' }, text: { type: 'string' },
-    kind: { type: 'string', enum: ['choice', 'multi', 'yesno', 'text', 'number', 'date'] },
-    options: { type: 'array', items: { type: 'string' } },
-    sensitive: { type: 'boolean' }, save_key: { type: 'string' },
-    default_save: { type: 'string', enum: ['global', 'job', 'no'] }, why: { type: 'string' },
-    fid: { type: 'string', description: 'The fields.json fid this answer fills (hidden from the user). The app writes the answer into answers.json for you.' },
-  },
-  required: ['qid', 'text', 'kind'],
-}
-
 export const TOOLS: ToolDef[] = [
   {
     name: 'tg_send',
@@ -55,44 +42,12 @@ export const TOOLS: ToolDef[] = [
       },
     },
   },
-  {
-    name: 'tg_ask',
-    description:
-      'Ask the user questions with a Telegram form (buttons and typed answers). The app tells the user to answer under Open Questions. Returns at once; when the user confirms, the app saves the answers ' +
-      '(to profile.md for questions with a save_key and save on, to data/jobs/<job_id>/answers.json for questions with a fid) and starts a new task to continue the job. ' +
-      'So after tg_ask, set the job to NEEDS_ANSWERS and stop. kind: choice | multi | yesno | text | number | date. Sensitive questions need a save_key. save_key is reusable, like work_auth_us.',
-    inputSchema: {
-      type: 'object',
-      properties: { batch_id: { type: 'string' }, job_id: { type: 'string' }, title: { type: 'string', description: '"Company · Role"' }, questions: { type: 'array', items: Q } },
-      required: ['batch_id', 'questions'],
-    },
-  },
-  {
-    name: 'tg_review',
-    description:
-      'Send the review card for a job whose review.json is fresh (status FILLED_DRY after `jobagent fill --dry-run` and `jobagent review build`). ' +
-      'The app shows every answer, attaches the files and owns Approve / Change / Skip. You can never approve. A change request arrives later as a revise task.',
-    inputSchema: { type: 'object', properties: { job_id: { type: 'string' } }, required: ['job_id'] },
-  },
   { name: 'settings_get', description: 'Return the current settings.', inputSchema: { type: 'object', properties: {} } },
   {
     name: 'settings_update',
     description: 'Chat tasks only, and only when the user asked for the change in their own words. Deep-merges a patch into settings (validated). Cannot pair, finish setup or turn practice mode off.',
     inputSchema: { type: 'object', properties: { patch: { type: 'object' } }, required: ['patch'] },
   },
-  {
-    name: 'profile_ready',
-    description: 'Resume tasks only: report what you read from the resume, after `jobagent profile write-draft` succeeded. The app shows it to the user to confirm.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        name: { type: 'string' }, headline: { type: 'string', description: 'Latest job title, e.g. "Data Analyst at Acme"' },
-        years: { type: ['number', 'null'] }, level: { type: 'string', enum: ['intern', 'entry', 'mid', 'senior', 'staff', 'lead', 'manager', 'director'] },
-        location: { type: 'string' }, country: { type: 'string' }, email: { type: 'string' }, phone: { type: 'string' },
-        skills: { type: 'array', items: { type: 'string' } }, suggested_titles: { type: 'array', items: { type: 'string' }, description: '3 to 6 job titles this person would search for' },
-        related_titles: { type: 'array', items: { type: 'string' }, description: 'Optional: up to 6 other titles for the same kind of work (different names, not seniority variants of suggested_titles). Shown unticked; the user picks.' },
-      },
-      required: ['name', 'headline', 'level', 'skills', 'suggested_titles'],
-    },
-  },
 ]
+// v4: tg_ask, tg_review and profile_ready are gone. Questions, review cards and the resume summary come from the app's own
+// pipeline (pipeline.ts), never from a Claude session.

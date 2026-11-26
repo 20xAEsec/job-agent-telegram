@@ -38,6 +38,12 @@ describe('gate and pairing', () => {
   })
 })
 
+// A fake tool-less `claude` call: every judgment answers {} at once (llm accept is faked in `run`).
+const llmExec = (_a: string[], _in: string, onLine: (l: string) => void) => {
+  onLine(JSON.stringify({ type: 'result', is_error: false, structured_output: {} }))
+  return { pid: undefined, done: Promise.resolve({ code: 0, stderr: '' }) }
+}
+
 function makeApp(answer: (a: string[]) => any = () => undefined) {
   writeJson(join(DATA, 'settings.json'), { ...DEFAULT_SETTINGS, paired_user_id: 42 })
   const calls: { method: string; payload: any }[] = []
@@ -53,7 +59,7 @@ function makeApp(answer: (a: string[]) => any = () => undefined) {
     if (a[0] === 'boards' && a[1] === 'list') return { ok: true, boards: { greenhouse: [] } }
     return { ok: true }
   }
-  const app = createApp({ token: '123:fake', exec, run })
+  const app = createApp({ token: '123:fake', exec, run, llmExec })
   app.bot.api.config.use(async (_prev, method, payload) => {
     calls.push({ method, payload })
     return { ok: true, result: { message_id: calls.length, chat: { id: 42 }, date: 0 } } as any
@@ -65,14 +71,14 @@ describe('tools Claude can call', () => {
   test('settings changes: chat only, never pairing or going live', async () => {
     const { app, release } = makeApp()
     const chat = app.agent.enqueue({ kind: 'chat', title: 'Chat', payload: { text: 'raise my minimum' } }).task
-    const job = app.agent.enqueue({ kind: 'job', title: 'x', payload: { url: 'https://x.test/1' } }).task
+    const job = app.agent.enqueue({ kind: 'prep', job_id: 'greenhouse-acme-1', title: 'x', payload: {} }).task // still a Claude session
     await wait()
     expect((await app.handleTool(chat.id, 'settings_update', { patch: { filters: { min_salary: 120000 } } })).text).toBe('saved')
     expect(loadSettings().filters.min_salary).toBe(120000)
     await expect(app.handleTool(chat.id, 'settings_update', { patch: { dry_run: false } })).rejects.toThrow('practice mode')
     await expect(app.handleTool(chat.id, 'settings_update', { patch: { paired_user_id: 1 } })).rejects.toThrow()
     await expect(app.handleTool(job.id, 'settings_update', { patch: { filters: { min_salary: 1 } } })).rejects.toThrow('only for chat')
-    await expect(app.handleTool(job.id, 'profile_ready', { name: 'x' })).rejects.toThrow('only for resume')
+    for (const gone of ['profile_ready', 'tg_ask', 'tg_review']) await expect(app.handleTool(job.id, gone, {})).rejects.toThrow('unknown tool') // v4: the app's own code does these
     expect((await app.handleTool('no-such-task', 'tg_send', { text: 'hi' })).isError).toBe(true)
     await expect(app.handleTool(job.id, 'tg_send', { text: 'x', buttons: ['r:ok:12345678'] })).rejects.toThrow('unknown button')
     await expect(app.handleTool(job.id, 'tg_send', { text: 'x', files: ['C:\\Windows\\win.ini'] })).rejects.toThrow()
@@ -80,16 +86,26 @@ describe('tools Claude can call', () => {
     await app.stop()
   })
 
-  test('tg_progress draws a live card with the job title and score', async () => {
-    const { app, calls, release } = makeApp()
-    const job = app.agent.enqueue({ kind: 'job', title: 'New job · x.test', payload: { url: 'https://x.test/1' } }).task
-    await wait()
-    await app.handleTool(job.id, 'tg_progress', { job_id: 'greenhouse-acme-1', stage: 'score', title: 'Acme · Data Analyst', detail: '82/100' })
+  test('the job pipeline draws a live card with the job title and score', async () => {
+    const ID = 'greenhouse-acme-1', input = join(DATA, 'run', 'llm', 'card.in.json')
+    writeJson(input, {})
+    let status = 'NEW', hold: (() => void) | null = null
+    const { app, calls } = makeApp(a => {
+      const [c, s] = a
+      if (c === 'job' && s === 'new') return { ok: true, job_id: ID, duplicate: false }
+      if (c === 'job' && s === 'get') return status === 'SCORED' ? new Promise(r => { hold = () => r({ ok: true, status: 'SKIPPED' }) }) : { ok: true, status, files: [] }
+      if (c === 'job' && s === 'set-status') { status = a[3]; return { ok: true } }
+      if (c === 'resolve') return { ok: true, resolved: false }
+      if (c === 'fetch') { status = 'FETCHED'; return { ok: true, ats: 'greenhouse' } }
+      if (c === 'llm') return s === 'input' ? { ok: true, file: input } : { ok: true, score: 82, company: 'Acme', role: 'Data Analyst' }
+      return undefined
+    })
+    app.agent.enqueue({ kind: 'job', title: 'New job · greenhouse.io', payload: { url: 'https://job-boards.greenhouse.io/acme/jobs/1' } })
     await wait(2800)
     const card = calls.filter(c => c.method === 'sendMessage' || c.method === 'editMessageText').map(c => c.payload.text).find(t => t.includes('🏢 Acme · Data Analyst'))
     expect(card).toContain('82/100')
     expect(card).toContain('Checking how well it fits')
-    release()
+    ;(hold as (() => void) | null)?.()
     await app.stop()
   }, 10_000)
 })
@@ -145,7 +161,7 @@ describe('typed input goes to what asked for it', () => {
     let n = 0
     const send = (text: string) => m.app.bot.handleUpdate({ update_id: ++n, message: { message_id: n, date: 0, chat: { id: 42, type: 'private', first_name: 'J' }, from: { id: 42, is_bot: false, first_name: 'J' }, text } } as any)
     const tap = (d: string) => m.app.route({ chat: { id: 42 }, callbackQuery: { message: { message_id: 9 } } } as any, d, {})
-    const jobUrls = () => [m.app.agent.live('work')?.task, ...m.app.agent.queued()].flatMap(t => (t?.kind === 'job' ? [t.payload.url] : []))
+    const jobUrls = () => m.pyCalls.filter(a => a[0] === 'job' && a[1] === 'new').map(a => a[2]) // job tasks run in code: each starts with `job new`
     const ask = (text: string) => F.saveForm(F.newForm('f1', undefined, 'x', F.validateQuestions([{ qid: 'q1', text, kind: 'text' }], false)))
     const open = () => tap(`f:${code('f1')}:open`)
     const answer = () => F.loadForm('f1')!.answers.q1
@@ -166,9 +182,7 @@ describe('typed input goes to what asked for it', () => {
 
   test('asking sends a pointer to Open Questions, with nothing to answer on it', async () => {
     const t = chat()
-    const job = t.app.agent.enqueue({ kind: 'job', title: 'x', payload: { url: JOB } }).task
-    await wait()
-    await t.app.handleTool(job.id, 'tg_ask', { batch_id: 'f1', title: 'Acme · Analyst', questions: [{ qid: 'q1', text: 'Remote?', kind: 'yesno' }] })
+    await t.app.askForm({ batch_id: 'f1', title: 'Acme · Analyst', questions: [{ qid: 'q1', text: 'Remote?', kind: 'yesno' }] })
     const sent = t.calls.find(c => String(c.payload.text).includes('Open Questions'))!
     expect(sent.payload.reply_markup.inline_keyboard.flat().map((b: any) => b.callback_data)).toEqual(['F:list'])
     expect(((await t.tap('F:list')) as any).rows[0][0]).toMatchObject({ text: 'Open · Acme · Analyst', data: `f:${code('f1')}:open` })

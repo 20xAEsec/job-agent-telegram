@@ -1,0 +1,74 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["company", "role", "location", "salary", "seniority", "match", "ats_keywords", "field_classification", "questions", "posting_questions", "cover_letter_required", "skip_detail", "injection_suspected"],
+  "properties": {
+    "company": {"type": "string"},
+    "role": {"type": "string"},
+    "location": {"type": "string"},
+    "salary": {"type": "string"},
+    "seniority": {"type": "string"},
+    "match": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["score", "reasons", "dealbreakers", "breakdown", "must_haves"],
+      "properties": {
+        "score": {"type": "integer", "minimum": 0, "maximum": 100},
+        "reasons": {"type": "array", "maxItems": 4, "items": {"type": "string"}},
+        "dealbreakers": {"type": "array", "maxItems": 4, "items": {"type": "string"}},
+        "breakdown": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["title", "seniority", "skills", "location", "pay"],
+          "properties": {
+            "title": {"type": "integer", "minimum": 0, "maximum": 100},
+            "seniority": {"type": "integer", "minimum": 0, "maximum": 100},
+            "skills": {"type": "integer", "minimum": 0, "maximum": 100},
+            "location": {"type": "integer", "minimum": 0, "maximum": 100},
+            "pay": {"type": "integer", "minimum": 0, "maximum": 100}
+          }
+        },
+        "must_haves": {"type": "array", "maxItems": 8, "items": {
+          "type": "object", "additionalProperties": false, "required": ["text", "status"],
+          "properties": {"text": {"type": "string"}, "status": {"type": "string", "enum": ["met", "partial", "missing"]}}
+        }}
+      }
+    },
+    "ats_keywords": {"type": "array", "maxItems": 30, "items": {
+      "type": "object", "additionalProperties": false, "required": ["term", "aliases", "kind", "required"],
+      "properties": {
+        "term": {"type": "string"},
+        "aliases": {"type": "array", "maxItems": 3, "items": {"type": "string"}},
+        "kind": {"type": "string", "enum": ["title", "hard", "cert", "degree", "soft"]},
+        "required": {"type": "boolean"}
+      }
+    }},
+    "field_classification": {"type": "array", "items": {
+      "type": "object", "additionalProperties": false, "required": ["fid", "class", "sensitive", "unusual", "reason"],
+      "properties": {
+        "fid": {"type": "string"},
+        "class": {"type": "string", "enum": ["profile", "generated", "document", "must_ask"]},
+        "value": {"type": ["string", "boolean", "array", "null"], "items": {"type": "string"}},
+        "save_key": {"type": ["string", "null"]},
+        "sensitive": {"type": "boolean"},
+        "unusual": {"type": "boolean"},
+        "reason": {"type": "string"}
+      }
+    }},
+    "questions": {"type": "array", "items": {
+      "type": "object", "additionalProperties": false, "required": ["fid", "text", "kind", "sensitive", "save_key"],
+      "properties": {
+        "fid": {"type": "string"},
+        "text": {"type": "string"},
+        "kind": {"type": "string", "enum": ["choice", "multi", "yesno", "text", "number", "date"]},
+        "sensitive": {"type": "boolean"},
+        "save_key": {"type": "string", "pattern": "^[a-z0-9_]{1,40}$"},
+        "why": {"type": "string"}
+      }
+    }},
+    "posting_questions": {"type": "array", "maxItems": 5, "items": {"type": "string"}},
+    "cover_letter_required": {"type": "boolean"},
+    "skip_detail": {"type": "string"},
+    "injection_suspected": {"type": "boolean"}
+  }
+}

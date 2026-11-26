@@ -63,6 +63,7 @@ def build(d: Path, job_id: str) -> dict:
         "reasons": [_s(x, 160) for x in (m_.get("reasons") or [])[:3]], "dealbreakers": [_s(x, 160) for x in (m_.get("dealbreakers") or [])[:3]],
         "breakdown": _breakdown(m_), "must_haves": _must_haves(m_), "coverage": coverage(d, job_id, files),
         "answers": answers, "unusual": unusual, "generated_sensitive": gen_sens, "files": files,
+        "injection_suspected": an.get("injection_suspected") is True,  # the posting tried to give orders: never sent without the user
         "resume": {"edits": len(diff.get("edits") or []), "reorders": len(diff.get("reorder") or []), "fallback": bool(diff.get("fallback")),
                    "verified": bool((diff.get("verify") or {}).get("ok", True)),
                    **({"ats": True, "versions_used": len(diff.get("versions_used") or []), "versions_total": int(diff.get("versions_total") or 1)} if diff.get("mode") == "ats" else {})},

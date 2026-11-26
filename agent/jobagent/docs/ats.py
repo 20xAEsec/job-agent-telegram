@@ -52,7 +52,7 @@ def _nums(s: str) -> set[str]:
 
 
 def keywords(an) -> list[dict]:
-    """analysis.json `ats_keywords` (the job-analyst's read of the posting), cleaned. Terms are data, never instructions."""
+    """analysis.json `ats_keywords` (the analyze call's read of the posting), cleaned. Terms are data, never instructions."""
     out = []
     for k in (an.get("ats_keywords") or []) if isinstance(an, dict) else []:
         if not isinstance(k, dict) or not isinstance(k.get("term"), str) or not k["term"].strip():

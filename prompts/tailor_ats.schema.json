@@ -1,0 +1,26 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["pages", "headline", "summary", "skills", "roles"],
+  "properties": {
+    "pages": {"type": "integer", "enum": [1, 2]},
+    "headline": {"type": "string"},
+    "summary": {"type": "string"},
+    "skills": {"type": "array", "minItems": 1, "maxItems": 4, "items": {
+      "type": "object", "additionalProperties": false, "required": ["label", "items"],
+      "properties": {"label": {"type": "string"}, "items": {"type": "array", "minItems": 1, "items": {"type": "string"}}}
+    }},
+    "roles": {"type": "array", "minItems": 1, "items": {
+      "type": "object", "additionalProperties": false, "required": ["id", "bullets"],
+      "properties": {
+        "id": {"type": "string"},
+        "bullets": {"type": "array", "items": {
+          "type": "object", "additionalProperties": false, "required": ["src", "text", "reason"],
+          "properties": {"src": {"type": "string"}, "text": {"type": "string"}, "reason": {"type": "string"}}
+        }}
+      }
+    }},
+    "education": {"type": "array", "items": {"type": "string"}},
+    "certifications": {"type": "array", "items": {"type": "string"}}
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["action", "reply"],
+  "properties": {
+    "action": {"type": "string", "enum": ["patch", "ask", "refuse"]},
+    "reply": {"type": "string"},
+    "answers": {"type": "array", "items": {
+      "type": "object", "additionalProperties": false, "required": ["fid", "value"],
+      "properties": {"fid": {"type": "string"}, "value": {"type": ["string", "boolean", "array"], "items": {"type": "string"}}}
+    }},
+    "tailor_plan": {"type": ["object", "null"]},
+    "cover_letter_md": {"type": ["string", "null"]},
+    "use_original_resume": {"type": "boolean"}
+  }
+}

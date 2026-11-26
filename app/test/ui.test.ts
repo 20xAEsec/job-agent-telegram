@@ -40,8 +40,8 @@ describe('activity lines', () => {
   test('tool calls become plain words', () => {
     expect(act('Bash', { command: 'uv run --project agent jobagent fill greenhouse-acme-1 --dry-run' })).toContain('Filling in the application')
     expect(act('Bash', { command: 'uv run --project agent jobagent tailor x --fallback' })).toBe('Using your original resume unchanged')
-    expect(act('Write', { file_path: 'C:\\x\\data\\jobs\\a\\tailor_plan.json' })).toBe('Rewording resume lines to match the job')
-    expect(act('Write', { file_path: '/x/data/jobs/a/plan.json' })).toBe('Deciding what goes in each form field')
+    expect(act('Write', { file_path: 'C:\\x\\data\\jobs\\a\\company.json' })).toBe('Writing down what I found about the company')
+    expect(act('Read', { file_path: '/x/data/jobs/a/analysis.json' })).toBe('Reading the job analysis')
     expect(act('Bash', { command: 'uv run --project agent jobagent job set-status x READY' })).toBeNull()
     expect(act('mcp__jobbot__tg_send', {})).toBeNull()
   })

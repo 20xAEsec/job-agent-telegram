@@ -8,6 +8,13 @@ from .ats.base import Unexpected, match_option
 from .paths import atomic_write_json
 
 
+PLAIN = {
+    "captcha": 'The form shows an "are you a human" check, which I never solve. Please apply on the site',
+    "login": "The form wants you to log in or create an account, which I never do. Please apply on the site",
+    "unexpected": "The form page was not what I expected, so I stopped before sending anything",
+}
+
+
 def _read(j: Path, name: str):
     try:
         return json.loads((j / name).read_text("utf-8"))
@@ -75,7 +82,7 @@ def fill_job(d: Path, job_id: str, dry_run: bool, prepare=None) -> dict:
     if blocker:
         atomic_write_json(j / "fill_report.json", {"plan_hash": ph, "blocker": blocker})
         if blocker != "closed":
-            store.set_status(d, job_id, "NEEDS_HUMAN", blocker[:100])
+            store.set_status(d, job_id, "NEEDS_HUMAN", PLAIN.get(blocker, PLAIN["unexpected"]))  # the user reads this on the job's card
         return {"ok": False, "code": "closed" if blocker == "closed" else "needs_human", "reason": blocker, "screenshot": str(shot) if shot else None,
                 "error": f"{blocker}: a person has to look at this page"}
     planned = {r["fid"] for r in rows if r["action"] != "skip"}

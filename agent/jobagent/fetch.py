@@ -15,6 +15,7 @@ from .ats.base import Closed, Unexpected
 from .paths import atomic_write_json, atomic_write_text
 
 MAX_CHARS = 30_000
+DOWN = "I couldn't download the posting. The site may be down; try again later."  # shown on the job's card
 UA = {"User-Agent": "Mozilla/5.0 (compatible; JobAgent; personal use)"}
 
 
@@ -172,10 +173,10 @@ def fetch(d: Path, job_id: str) -> dict:
         store.set_status(d, job_id, "FAILED", f"{name} only shows this posting to people who are logged in. Log in under Settings, Job site logins, then tap Try again.")
         return {"ok": False, "code": "needs_login", "error": f"{name} asked for a login; the user must log in (Settings > Job site logins) and retry"}
     except PlaywrightError as e:
-        store.set_status(d, job_id, "FAILED", f"fetch failed: {type(e).__name__}")
+        store.set_status(d, job_id, "FAILED", DOWN)
         return {"ok": False, "code": "fetch_failed", "error": f"could not open the posting ({type(e).__name__}); retry later"}
     except httpx.HTTPError as e:
-        store.set_status(d, job_id, "FAILED", f"fetch failed: {type(e).__name__}")
+        store.set_status(d, job_id, "FAILED", DOWN)
         return {"ok": False, "code": "fetch_failed", "error": f"could not download the posting ({type(e).__name__}); retry later"}
     if not body or not body.strip():
         return {"ok": False, "code": "empty", "error": "the posting has no readable text"}

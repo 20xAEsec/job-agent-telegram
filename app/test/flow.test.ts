@@ -71,17 +71,17 @@ describe('task runner', () => {
     const { exec, calls } = fakeClaude([
       { type: 'system', subtype: 'init', session_id: 's1' },
       tool('Bash', { command: 'uv run --project agent jobagent fetch greenhouse-acme-1' }),
-      tool('Write', { file_path: '/d/data/jobs/x/tailor_plan.json' }),
+      tool('Write', { file_path: '/d/data/jobs/x/company.json' }),
       { type: 'rate_limit_event', rate_limit_info: { status: 'allowed', resetsAt: 2000000000, unifiedWindows: { five_hour: { utilization: 0.3 } } } },
       { type: 'result', is_error: false, result: 'ok', permission_denials: [] },
     ])
     const doing: (string | null)[] = [], usage: number[] = []
     const finished: Outcome[] = []
     const a = createAgent({ bridge: () => ({ url: 'http://x', secret: 's' }), exec, onLive: (_l, live) => { if (live) doing.push(live.doing) }, onFinish: (_t, o) => { finished.push(o) }, onUsage: u => usage.push(u.five_hour!) })
-    a.enqueue({ kind: 'job', title: 'x', payload: { url: 'https://job-boards.greenhouse.io/acme/jobs/1' } })
+    a.enqueue({ kind: 'prep', job_id: 'greenhouse-acme-1', title: 'x', payload: {} })
     for (let i = 0; i < 100 && !finished.length; i++) await wait()
     expect(doing).toContain('Downloading the posting')
-    expect(doing).toContain('Rewording resume lines to match the job')
+    expect(doing).toContain('Writing down what I found about the company')
     expect(usage).toEqual([0.3])
     expect(finished[0].kind).toBe('done')
     expect(calls[0]).toContain('--permission-prompts')
@@ -106,7 +106,7 @@ describe('task runner', () => {
   })
 
   test('a task that was running at shutdown resumes first, marked interrupted', () => {
-    const t: Task = { id: 'aa', kind: 'job', title: 'x', payload: { url: 'u' }, created: 1, tries: 0 }
+    const t: Task = { id: 'aa', kind: 'prep', job_id: 'greenhouse-a-1', title: 'x', payload: {}, created: 1, tries: 0 }
     writeJson(join(DATA, 'tasks.json'), { queue: [], running: [t] })
     const a = createAgent({ bridge: () => ({ url: '', secret: '' }), exec: fakeClaude([]).exec, onLive: () => {}, onFinish: () => {}, onUsage: () => {} })
     expect(a._queue()[0]).toMatchObject({ id: 'aa', interrupted: true })
@@ -228,8 +228,6 @@ describe('upgrade: queue, index and local reads', () => {
     a.enqueue({ kind: 'job', job_id: 'found-1', title: 'found', payload: { url: 'https://x/1', source: 'discovery', parent: 'search-1', tier: 'maybe' } })
     a.enqueue({ kind: 'job', title: 'mine', payload: { url: 'https://x/2' } })
     expect(a.queued().map(t => t.title)).toEqual(['mine', 'found', 'companies'])
-    expect(promptFor(a.queued()[1])).toContain('--source discovery')
-    expect(promptFor(a.queued()[1])).toContain('"tier":"maybe"') // intake-job holds other-title jobs to a higher bar
     writeJson(join(DATA, 'settings.json'), DEFAULT_SETTINGS)
   })
   test('profile.md and boards.json are read without Python', () => {

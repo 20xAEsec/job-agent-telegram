@@ -4,7 +4,9 @@ import { createHash, timingSafeEqual } from 'crypto'
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'fs'
 import { basename, isAbsolute, join, relative } from 'path'
 import { z } from 'zod'
-import { createAgent, type Lane, type Live, type Outcome, type Task, type Usage } from './agent'
+import { createAgent, type CodeLive, type Lane, type Live, type Outcome, type Task, type Usage } from './agent'
+import * as LLM from './llm'
+import { createPipeline } from './pipeline'
 import { startBridge, type ToolResult } from './bridge'
 import { createCards, finalFor, recordStage, typicalMs, type Card, type Final, type JobLine, type Stage } from './cards'
 import * as F from './forms'
@@ -115,7 +117,7 @@ const SummarySchema = z.object({
   related_titles: z.array(z.string().min(1).max(80)).max(8).optional(),
 })
 
-export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeof createAgent>[0]['exec']; onReady?: (bot: string) => void }) {
+export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeof createAgent>[0]['exec']; llmExec?: LLM.LlmExec; onReady?: (bot: string) => void }) {
   const bot = new Bot(o.token)
   const api = bot.api
   const run = o.run ?? runJobagent
@@ -487,10 +489,33 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
     refresh()
   }
 
+  const onUsage = (u: Usage) => { usage = { ...usage, ...u }; if (u.limited && u.resets_at) limitUntil = u.resets_at; writeJson(USAGE_FILE, usage); refresh() }
+  // job, resume, revise and followup tasks: the pipeline in code, Claude asked only for single tool-less judgments (v4)
+  function runCode(t: Task, live: CodeLive): Promise<Outcome> {
+    const pipe = createPipeline({
+      run, live, settings: loadSettings,
+      llm: (name, job, extra = {}) => LLM.call(name, job, extra, {
+        run, exec: o.llmExec, onUsage, onPid: live.pid, cancelled: live.cancelled,
+        model: LLM.MODEL[name] === 'write' ? loadSettings().agent_model : LLM.MODEL[name],
+      }),
+      progress: a => progress(t, a),
+      ask: async a => { await askForm(a) },
+      review: id => review.send(id, !!t.payload.parent),
+      formExists: b => F.loadForm(b) != null,
+      tell: async (kind, id, text, x) => {
+        const j = readJob(id), title = j ? jobTitle(j) : 'Your application'
+        if (kind === 'info') return void (await sendTo(`${heading('ℹ️', esc(title))}\n${esc(text)}`))
+        await sendTo(`${heading('✅', `Your follow-up for ${esc(j?.company || title)}`)}\n<pre>${esc(`Subject: ${x?.subject ?? ''}\n\n${x?.body ?? ''}`)}</pre>\n${note('Send it to the recruiter or hiring manager if you have their email; I never send emails myself.')}`,
+          [[{ text: AGENT_BUTTONS['J:a:0'], data: 'J:a:0' }]])
+      },
+    })
+    if (t.kind === 'resume') return pipe.resume(t, profileReady)
+    return t.kind === 'revise' ? pipe.revise(t) : t.kind === 'followup' ? pipe.followup(t) : pipe.job(t)
+  }
+
   const agent = createAgent({
     bridge: () => ({ url: bridge.url, secret: bridge.secret }),
-    onLive, onFinish, exec: o.exec,
-    onUsage: u => { usage = { ...usage, ...u }; if (u.limited && u.resets_at) limitUntil = u.resets_at; writeJson(USAGE_FILE, usage); refresh() },
+    onLive, onFinish, exec: o.exec, onUsage, code: runCode,
     canRunBackground: () => {
       const stale = (usage.resets_at ?? Infinity) < Date.now() || Date.now() - usage.at > 5 * 3600_000 // that 5-hour window is over
       return stale || (usage.five_hour ?? 0) < 1 - loadSettings().discovery.reserve_pct / 100
@@ -503,6 +528,54 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
     onResult: () => refresh(),
     setPending: p => { pending = p },
   })
+
+  // ---- What both a Claude session (through its tools) and the code pipeline do ----
+  // A job's line on its card. Inputs are checked: from a session they are Claude's words.
+  function progress(t: Task, a: Record<string, any>) {
+    if (a.job_id !== undefined && !JOB_RE.test(String(a.job_id))) throw new Error('bad job_id')
+    if (a.stage !== undefined && !['read', 'score', 'tailor', 'fill', 'review'].includes(a.stage)) throw new Error('stage must be read, score, tailor, fill or review')
+    const key = String(t.payload.parent ?? t.id)
+    cards.update(key, c => {
+      if (a.note && !t.payload.parent) c.note = short(String(a.note), 200)
+      if (!a.job_id) return
+      let line = c.jobs.find(j => j.job_id === a.job_id)
+      if (!line && c.mode === 'job' && c.jobs[0] && !c.jobs[0].job_id) line = Object.assign(c.jobs[0], { job_id: String(a.job_id) })
+      if (!line) { line = { job_id: String(a.job_id), title: String(a.title ?? a.job_id), details: {} }; c.jobs.push(line) }
+      if (a.title) line.title = short(String(a.title), 80)
+      if (a.url && /^https?:\/\//.test(a.url)) line.url = String(a.url)
+      if (a.stage && a.stage !== line.stage) {
+        if (line.stage && line.stage_at) recordStage(line.stage, Date.now() - line.stage_at)
+        line.stage_at = Date.now()
+      }
+      if (a.stage) { line.stage = a.stage as Stage; if (a.detail) line.details[a.stage as Stage] = short(String(a.detail), 40) }
+      if (c.mode === 'job') c.typical_ms ??= typicalMs() ?? undefined
+    }, t.payload.parent ? undefined : () => ({ ...newCard(t), state: 'running', started: Date.now() }))
+    refresh()
+  }
+  // Questions for the user, under Open Questions. The answers start the job again (onFormEvent).
+  async function askForm(a: Record<string, any>) {
+    if (!F.BATCH_RE.test(String(a.batch_id))) throw new Error('batch_id must match [A-Za-z0-9_-]{1,80}')
+    if (a.job_id !== undefined && !JOB_RE.test(String(a.job_id))) throw new Error('bad job_id')
+    if (F.loadForm(String(a.batch_id))?.status === 'open') throw new Error('a form with this batch_id is already open')
+    const f = F.newForm(String(a.batch_id), a.job_id, a.title ? short(String(a.title), 100) : undefined, F.validateQuestions(a.questions, !!a.job_id))
+    const p = P.askPage(f)
+    await sendTo(p.text, p.rows, { kind: 'reviews' })
+    F.saveForm(f)
+    refresh()
+  }
+  // The resume summary card in setup. An error message, or null when it is shown.
+  function profileReady(a: unknown): string | null {
+    const r = SummarySchema.safeParse(a)
+    if (!r.success) return `${r.error.issues[0].path.join('.')}: ${r.error.issues[0].message}`
+    const ob = OB.loadOb()
+    const sum = r.data
+    ob.summary = { name: sum.name, headline: sum.headline, years: sum.years ?? null, level: sum.level, location: sum.location ?? '', country: sum.country ?? '', email: sum.email ?? '', phone: sum.phone ?? '', skills: sum.skills, suggested_titles: sum.suggested_titles, related_titles: sum.related_titles ?? [] }
+    ob.country = ob.country || sum.country || ''
+    OB.saveOb(ob)
+    const s = loadSettings()
+    if (!s.onboarded) trySettingsUpdate({ filters: { experience_level: sum.level, ...(sum.years != null ? { years_experience: sum.years } : {}), ...(!s.filters.country && ob.country ? { country: short(ob.country, 60) } : {}) } })
+    return null
+  }
 
   // ---- Tools (Claude -> app) ----
   const taskById = (id: string) => (['work', 'chat'] as Lane[]).map(l => agent.live(l)?.task).find(t => t?.id === id)
@@ -528,19 +601,6 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
       refresh()
       return ok('saved')
     }
-    if (name === 'profile_ready') {
-      if (t.kind !== 'resume') throw new Error('profile_ready is only for resume tasks')
-      const r = SummarySchema.safeParse(a)
-      if (!r.success) throw new Error(`${r.error.issues[0].path.join('.')}: ${r.error.issues[0].message}`)
-      const ob = OB.loadOb()
-      const sum = r.data
-      ob.summary = { name: sum.name, headline: sum.headline, years: sum.years ?? null, level: sum.level, location: sum.location ?? '', country: sum.country ?? '', email: sum.email ?? '', phone: sum.phone ?? '', skills: sum.skills, suggested_titles: sum.suggested_titles, related_titles: sum.related_titles ?? [] }
-      ob.country = ob.country || sum.country || ''
-      OB.saveOb(ob)
-      const s = loadSettings()
-      if (!s.onboarded) trySettingsUpdate({ filters: { experience_level: sum.level, ...(sum.years != null ? { years_experience: sum.years } : {}), ...(!s.filters.country && ob.country ? { country: short(ob.country, 60) } : {}) } })
-      return ok('shown to the user for confirmation. You are done: stop now.')
-    }
     if (name === 'tg_send') {
       if (a.tone !== undefined && !(a.tone in TONES)) throw new Error('tone must be info, success, warn or error')
       const bad = (a.buttons ?? []).find((b: string) => !(b in AGENT_BUTTONS))
@@ -557,42 +617,10 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
       return ok('sent')
     }
     if (name === 'tg_progress') {
-      if (t.kind === 'chat' || t.kind === 'resume') return ok('ok')
-      if (a.job_id !== undefined && !JOB_RE.test(String(a.job_id))) throw new Error('bad job_id')
-      if (a.stage !== undefined && !['read', 'score', 'tailor', 'fill', 'review'].includes(a.stage)) throw new Error('stage must be read, score, tailor, fill or review')
-      if (t.kind === 'discover') return ok('ok') // finding new companies runs in the background, without a card
-      const key = String(t.payload.parent ?? t.id)
-      cards.update(key, c => {
-        if (a.note && !t.payload.parent) c.note = short(String(a.note), 200)
-        if (!a.job_id) return
-        let line = c.jobs.find(j => j.job_id === a.job_id)
-        if (!line && c.mode === 'job' && c.jobs[0] && !c.jobs[0].job_id) line = Object.assign(c.jobs[0], { job_id: String(a.job_id) })
-        if (!line) { line = { job_id: String(a.job_id), title: String(a.title ?? a.job_id), details: {} }; c.jobs.push(line) }
-        if (a.title) line.title = short(String(a.title), 80)
-        if (a.url && /^https?:\/\//.test(a.url)) line.url = String(a.url)
-        if (a.stage && a.stage !== line.stage) {
-          if (line.stage && line.stage_at) recordStage(line.stage, Date.now() - line.stage_at)
-          line.stage_at = Date.now()
-        }
-        if (a.stage) { line.stage = a.stage as Stage; if (a.detail) line.details[a.stage as Stage] = short(String(a.detail), 40) }
-        if (c.mode === 'job') c.typical_ms ??= typicalMs() ?? undefined
-      }, t.payload.parent ? undefined : () => ({ ...newCard(t), state: 'running', started: Date.now() }))
-      refresh()
+      if (t.kind === 'chat' || t.kind === 'discover') return ok('ok') // discover runs in the background, without a card
+      progress(t, a)
       return ok('ok')
     }
-    if (name === 'tg_ask') {
-      if (!F.BATCH_RE.test(String(a.batch_id))) throw new Error('batch_id must match [A-Za-z0-9_-]{1,80}')
-      if (a.job_id !== undefined && !JOB_RE.test(String(a.job_id))) throw new Error('bad job_id')
-      if (F.loadForm(String(a.batch_id))?.status === 'open') throw new Error('a form with this batch_id is already open')
-      const f = F.newForm(String(a.batch_id), a.job_id, a.title ? short(String(a.title), 100) : undefined, F.validateQuestions(a.questions, !!a.job_id))
-      const p = P.askPage(f)
-      await sendTo(p.text, p.rows, { kind: 'reviews' })
-      F.saveForm(f)
-      spoke.add(t.id)
-      refresh()
-      return ok('form started: the user was told to answer under Open Questions. The answers arrive in a new task once the user confirms. Set the job to NEEDS_ANSWERS now and stop.')
-    }
-    if (name === 'tg_review') { const r = await review.send(String(a.job_id), !!t.payload.parent); spoke.add(t.id); return ok(r) }
     throw new Error(`unknown tool ${name}`)
   }
   const bridge = startBridge(() => TOOLS, handleTool)
@@ -1675,5 +1703,5 @@ ${note(`No notification sounds until ${clock(snoozeUntil)}. Work continues.`)}`,
     }
   }
 
-  return { bot, agent, cards, review, start, handleTool, route, capture, refresh, stop: () => { bridge.stop(); return bot.stop() }, _bridge: bridge }
+  return { bot, agent, cards, review, start, handleTool, route, capture, refresh, askForm, stop: () => { bridge.stop(); return bot.stop() }, _bridge: bridge }
 }

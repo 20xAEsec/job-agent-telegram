@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["answers"],
+  "properties": {
+    "answers": {"type": "array", "maxItems": 8, "items": {
+      "type": "object", "additionalProperties": false, "required": ["question", "answer"],
+      "properties": {"question": {"type": "string"}, "answer": {"type": "string"}, "save_key": {"type": ["string", "null"]}}
+    }}
+  }
+}

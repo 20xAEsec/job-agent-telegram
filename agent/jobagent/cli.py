@@ -3,7 +3,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import accounts, canary, check, errlog, feedback, fetch, fill, log, pair, profile, repair, resolve, resume, review, safety, store, submit, tailor
+from . import accounts, canary, check, errlog, feedback, fetch, fill, formplan, llm, log, pair, profile, repair, resolve, resume, review, safety, store, submit, tailor
 from .discover import ats_api, boards
 from .docs.plan import DocError
 from .paths import default_data_dir
@@ -42,6 +42,14 @@ def _parser() -> argparse.ArgumentParser:
     fl.add_argument("job_id")
     fl.add_argument("--dry-run", action="store_true")
     sub.add_parser("submit").add_argument("job_id")  # channel server only: denied to Claude
+    # The v4 engine (app only, denied to Claude): one tool-less judgment's input file, and the check that writes its answer.
+    ll = sub.add_parser("llm")
+    ll.add_argument("op", choices=["input", "accept"])
+    ll.add_argument("name", choices=llm.NAMES)
+    ll.add_argument("--job")
+    ll.add_argument("--file", help="accept: the answer JSON")
+    ll.add_argument("--extra", default="{}", help="a small JSON object (tier, errors, the change request)")
+    sub.add_parser("plan").add_subparsers(dest="sub", required=True).add_parser("build").add_argument("job_id")
     rp = sub.add_parser("repair")  # start/test/prepare: Claude. publish/discard: the app only (publish is denied to Claude)
     rp.add_argument("op", choices=["start", "test", "prepare", "publish", "discard"])
     rp.add_argument("repair_id")
@@ -136,6 +144,13 @@ def _dispatch(a) -> dict:
         return fill.fill_job(d, a.job_id, a.dry_run)
     if a.cmd == "submit":
         return submit.run(d, a.job_id)
+    if a.cmd == "llm":
+        extra = json.loads(a.extra or "{}")
+        if not isinstance(extra, dict):
+            return {"ok": False, "code": "bad_extra", "error": "--extra must be a JSON object"}
+        return llm.build_input(d, a.name, a.job, extra) if a.op == "input" else llm.accept(d, a.name, a.job, a.file or "", extra)
+    if a.cmd == "plan":
+        return formplan.build(d, a.job_id)
     if a.cmd == "repair":
         return repair.run(d, a.op, a.repair_id)
     if a.cmd == "login":
