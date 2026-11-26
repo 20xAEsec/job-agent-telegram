@@ -2,147 +2,396 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>JobAgent Dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>JobAgent</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23000'/%3E%3Cpath d='M6 20c5-9 15-9 20 0' stroke='%2335c8f0' stroke-width='2.4' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='16' cy='13' r='2.4' fill='%239dffd6'/%3E%3C/svg%3E">
 <style>
-:root {
-  --glass-tint: 6, 18, 48;
-  --glass-teal: 0, 180, 216;
-  --glass-edge: 130, 214, 240;
-  --glass-blur: 16px;
-  --glass-radius: 14px;
-  --glass-lift: inset 0 1px 0 rgba(var(--glass-edge), 0.16);
-  --glass-drop: 0 12px 40px rgba(0, 0, 0, 0.45);
-  --glass-inner: inset 0 0 0 1px rgba(var(--glass-teal), 0.05);
-  --ink: #e6f1ff; --ink-2: #9fb6d6; --ink-3: #6f86a8;
-  --good: #34d399; --warn: #fbbf24; --bad: #f87171;
-  --ease: cubic-bezier(0.16, 1, 0.3, 1);
-  color-scheme: dark;
+/* ===== Theme: one palette, two consumers (the scene reads these back at boot) ===== */
+:root{
+  --col-core:#ffffff; --col-inner:#c8f4ff; --col-mid:#35c8f0; --col-outer:#0d3f6b; --col-spark:#e6fbff; --col-accent:#9dffd6;
+  --bg:#000; --ink:#eaf7ff; --ink-dim:#9fb9c9; --ink-faint:#6c8797;
+  --panel:rgba(3,11,20,.76); --panel-solid:rgba(3,10,18,.95); --well:rgba(2,9,16,.55); --well-hi:rgba(200,244,255,.07);
+  --hairline:rgba(200,244,255,.11); --hairline-hi:rgba(200,244,255,.26);
+  --good:#9dffd6; --warn:#fcd38a; --bad:#ff8fa3;
+  --step--2:.6875rem; --step--1:.8125rem; --step-0:.9375rem; --step-1:1.0625rem; --step-2:1.375rem; --step-3:1.875rem;
+  --radius:18px; --radius-s:12px; --ease:cubic-bezier(.22,1,.36,1); --side:252px;
+  --font:"Segoe UI Variable Text","Segoe UI",Inter,ui-sans-serif,system-ui,-apple-system,Roboto,sans-serif;
+  --font-d:"Segoe UI Variable Display","Segoe UI",Inter,ui-sans-serif,system-ui,-apple-system,sans-serif;
+  color-scheme:dark;
 }
-* { box-sizing: border-box; }
-html, body { margin: 0; min-height: 100%; }
-body {
-  font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--ink);
-  background: #020817;
-  background-image:
-    radial-gradient(1200px 600px at 85% -10%, rgba(0, 180, 216, 0.16), transparent 60%),
-    radial-gradient(900px 700px at -10% 110%, rgba(56, 89, 180, 0.20), transparent 60%),
-    linear-gradient(180deg, #030b22, #020817 60%);
-  background-attachment: fixed;
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+html,body{margin:0;min-height:100%}
+body{font:400 var(--step-0)/1.55 var(--font);color:var(--ink);background:var(--bg);overflow-x:hidden;
+  background-image:radial-gradient(1100px 620px at 78% -8%,rgba(53,200,240,.13),transparent 62%),radial-gradient(900px 700px at -6% 108%,rgba(13,63,107,.42),transparent 60%)}
+html[data-scene=ready] body{background-image:none}
+button,input,select,textarea{font:inherit;color:inherit}
+a{color:var(--col-inner)}
+::selection{background:rgba(53,200,240,.35)}
+
+/* ===== Layer stack ===== */
+#bg{position:fixed;top:0;left:0;width:100vw;height:100vh;height:100lvh;display:block;z-index:0}
+#scrim{position:fixed;inset:0;z-index:1;pointer-events:none;
+  background:radial-gradient(120% 80% at 50% 42%,transparent 38%,rgba(0,0,0,.55) 100%),linear-gradient(180deg,rgba(0,0,0,.35) 0%,transparent 22%,transparent 70%,rgba(0,0,0,.5) 100%)}
+.app{position:relative;z-index:2;display:grid;grid-template-columns:var(--side) minmax(0,1fr);min-height:100vh}
+.skip{position:fixed;left:16px;top:-60px;z-index:50;padding:10px 16px;border-radius:999px;background:var(--panel-solid);border:1px solid var(--hairline-hi);color:var(--ink);text-decoration:none;transition:top .3s var(--ease)}
+.skip:focus{top:16px}
+
+/* ===== Surfaces ===== */
+.panel{background:var(--panel);backdrop-filter:blur(22px) saturate(1.4);-webkit-backdrop-filter:blur(22px) saturate(1.4);border:1px solid var(--hairline);border-radius:var(--radius);
+  box-shadow:0 0 70px rgba(53,200,240,.07),inset 0 1px 0 rgba(255,255,255,.055),0 24px 60px rgba(0,0,0,.42)}
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){.panel,.side,.drawer,.modal__box,.toast{background:var(--panel-solid)}}
+.pad{padding:clamp(1.1rem,2vw,1.6rem)}
+.well{background:var(--well);border:1px solid rgba(200,244,255,.08);border-radius:var(--radius-s)}
+.kicker{font-size:var(--step--2);letter-spacing:.28em;text-transform:uppercase;color:var(--col-mid);font-weight:600}
+.title{font:250 clamp(1.7rem,2.6vw,2.35rem)/1.1 var(--font-d);letter-spacing:-.02em;margin:4px 0 0;
+  background:linear-gradient(180deg,#fff 0%,#e3f7ff 50%,#93b9cc 100%);-webkit-background-clip:text;background-clip:text;color:transparent;
+  filter:drop-shadow(0 0 22px rgba(53,200,240,.28)) drop-shadow(0 2px 10px rgba(0,0,0,.8))}
+.hair{height:1px;width:112px;margin-top:12px;background:linear-gradient(90deg,rgba(53,200,240,.8),transparent)}
+h2.h{font:600 var(--step--1)/1.2 var(--font);letter-spacing:.16em;text-transform:uppercase;color:var(--ink-dim);margin:0 0 14px;display:flex;align-items:center;gap:10px}
+h2.h .n{color:var(--ink);letter-spacing:0;font-variant-numeric:tabular-nums}
+h3.h3{font:500 var(--step-1)/1.3 var(--font);margin:0}
+.muted{color:var(--ink-dim)} .faint{color:var(--ink-faint);font-size:var(--step--1)} .small{font-size:var(--step--1)}
+.num{font-variant-numeric:tabular-nums}
+p{margin:.4em 0}
+
+/* ===== Controls ===== */
+.btn{position:relative;overflow:hidden;display:inline-flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;border-radius:999px;padding:9px 18px;
+  font-size:var(--step--1);font-weight:500;white-space:nowrap;text-decoration:none;color:var(--ink);
+  border:1px solid rgba(200,244,255,.2);background:linear-gradient(90deg,rgba(3,12,26,.6),rgba(10,30,52,.55),rgba(3,12,26,.6));
+  transition:transform .35s var(--ease),box-shadow .35s var(--ease),border-color .35s var(--ease),opacity .2s}
+.btn::after{content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(105deg,transparent 35%,rgba(200,244,255,.2) 50%,transparent 65%);transform:translateX(-120%);transition:transform .9s var(--ease)}
+.btn:hover,.btn:focus-visible{transform:translateY(-1px);border-color:rgba(200,244,255,.38);box-shadow:0 0 28px rgba(53,200,240,.18)}
+.btn:hover::after,.btn:focus-visible::after{transform:translateX(120%)}
+.btn--solid{border-color:rgba(157,255,214,.55);background:linear-gradient(180deg,rgba(53,200,240,.32),rgba(13,63,107,.42));box-shadow:0 0 26px rgba(53,200,240,.22),inset 0 1px 0 rgba(255,255,255,.12)}
+.btn--solid:hover{box-shadow:0 0 40px rgba(53,200,240,.36),inset 0 1px 0 rgba(255,255,255,.12)}
+.btn--danger{border-color:rgba(255,143,163,.45)}
+.btn--danger:hover{box-shadow:0 0 28px rgba(255,143,163,.2);border-color:rgba(255,143,163,.7)}
+.btn--ghost{background:transparent;border-color:transparent;padding:7px 12px}
+.btn--ghost:hover{background:rgba(200,244,255,.06);border-color:var(--hairline)}
+.btn--sm{padding:6px 13px;font-size:var(--step--2)}
+.btn[disabled],.btn[aria-busy=true]{opacity:.5;cursor:default;transform:none}
+.btn[aria-busy=true]::before{content:"";width:12px;height:12px;border-radius:50%;border:1.5px solid currentColor;border-right-color:transparent;animation:spin .8s linear infinite}
+:focus-visible{outline:2px solid rgba(53,200,240,.95);outline-offset:3px;border-radius:8px}
+.input{width:100%;padding:10px 14px;border-radius:12px;border:1px solid rgba(200,244,255,.14);background:rgba(0,6,12,.5);color:var(--ink);transition:border-color .25s,box-shadow .25s}
+.input::placeholder{color:var(--ink-faint)}
+.input:focus{outline:none;border-color:rgba(53,200,240,.7);box-shadow:0 0 0 3px rgba(53,200,240,.16),0 0 24px rgba(53,200,240,.12)}
+textarea.input{resize:vertical;min-height:72px;line-height:1.5}
+select.input{appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--ink-dim) 50%),linear-gradient(135deg,var(--ink-dim) 50%,transparent 50%);background-position:calc(100% - 18px) 55%,calc(100% - 13px) 55%;background-size:5px 5px;background-repeat:no-repeat;padding-right:36px}
+select.input option{background:#02101c}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.row--end{justify-content:flex-end}
+.grow{flex:1 1 auto;min-width:0}
+.pill{display:inline-flex;align-items:center;gap:7px;font-size:var(--step--2);padding:4px 11px;border-radius:999px;border:1px solid var(--hairline);color:var(--ink-dim);background:rgba(0,0,0,.25);white-space:nowrap}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--ink-faint);flex:none}
+.dot--on{background:var(--good);box-shadow:0 0 10px var(--good)} .dot--warn{background:var(--warn);box-shadow:0 0 10px var(--warn)} .dot--live{background:var(--col-mid);box-shadow:0 0 12px var(--col-mid);animation:pulse 1.8s ease-in-out infinite}
+.score{display:inline-flex;align-items:center;font-variant-numeric:tabular-nums;font-weight:600;font-size:var(--step--2);padding:2px 9px;border-radius:999px}
+.s-hi{color:var(--good);background:rgba(157,255,214,.1)} .s-mid{color:var(--warn);background:rgba(252,211,138,.1)} .s-lo{color:var(--bad);background:rgba(255,143,163,.1)}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip-t{cursor:pointer;padding:6px 13px;border-radius:999px;border:1px solid rgba(200,244,255,.14);background:rgba(0,0,0,.22);font-size:var(--step--1);color:var(--ink-dim);transition:all .25s var(--ease)}
+.chip-t:hover{border-color:rgba(200,244,255,.32);color:var(--ink)}
+.chip-t[aria-pressed=true],.chip-t[aria-checked=true]{color:#fff;border-color:rgba(53,200,240,.75);background:rgba(53,200,240,.16);box-shadow:0 0 18px rgba(53,200,240,.18)}
+.seg{display:inline-flex;padding:3px;border-radius:999px;border:1px solid rgba(200,244,255,.12);background:rgba(2,9,16,.72);flex-wrap:wrap}
+.seg button{cursor:pointer;border:0;background:transparent;padding:6px 14px;border-radius:999px;font-size:var(--step--1);color:var(--ink-dim);transition:all .25s var(--ease)}
+.seg button[aria-checked=true]{background:rgba(53,200,240,.2);color:#fff;box-shadow:inset 0 0 0 1px rgba(53,200,240,.6)}
+.opts{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px}
+.opt{cursor:pointer;text-align:left;padding:11px 14px;border-radius:12px;border:1px solid rgba(200,244,255,.1);background:rgba(0,0,0,.22);transition:all .25s var(--ease)}
+.opt b{display:block;font-weight:500;font-size:var(--step--1);color:var(--ink)} .opt span{display:block;font-size:var(--step--2);color:var(--ink-faint);margin-top:2px;line-height:1.45}
+.opt:hover{border-color:rgba(200,244,255,.26)}
+.opt[aria-checked=true]{border-color:rgba(53,200,240,.7);background:rgba(53,200,240,.1);box-shadow:0 0 22px rgba(53,200,240,.14)}
+.switch{cursor:pointer;position:relative;width:46px;height:26px;border-radius:999px;border:1px solid rgba(200,244,255,.2);background:rgba(0,0,0,.4);flex:none;transition:all .3s var(--ease)}
+.switch span{position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:var(--ink-faint);transition:all .3s var(--ease)}
+.switch[aria-checked=true]{background:rgba(53,200,240,.3);border-color:rgba(53,200,240,.8);box-shadow:0 0 18px rgba(53,200,240,.25)}
+.switch[aria-checked=true] span{left:23px;background:#fff;box-shadow:0 0 10px rgba(200,244,255,.8)}
+.tags{display:flex;flex-wrap:wrap;gap:7px;align-items:center;padding:7px;border-radius:12px;border:1px solid rgba(200,244,255,.12);background:rgba(0,6,12,.45)}
+.tag{display:inline-flex;align-items:center;gap:4px;padding:4px 6px 4px 11px;border-radius:999px;background:rgba(53,200,240,.12);border:1px solid rgba(53,200,240,.3);font-size:var(--step--1)}
+.tag button{cursor:pointer;border:0;background:transparent;color:var(--ink-dim);width:20px;height:20px;border-radius:50%;line-height:1}
+.tag button:hover{background:rgba(255,255,255,.1);color:#fff}
+.input--tag{flex:1 1 160px;width:auto;border:0;background:transparent;padding:5px 6px;box-shadow:none!important}
+.track{height:7px;border-radius:99px;background:rgba(200,244,255,.08);overflow:hidden}
+.fill{height:100%;border-radius:99px;background:linear-gradient(90deg,rgba(13,63,107,.9),var(--col-mid) 70%,var(--col-inner));box-shadow:0 0 12px rgba(53,200,240,.45);transform-origin:left}
+.fresh .fill{animation:grow 1.1s var(--ease) both}
+.bar{display:grid;grid-template-columns:120px 1fr 64px;gap:12px;align-items:center;margin:9px 0}
+.bar .num{text-align:right}
+
+/* ===== Sidebar ===== */
+.side{position:sticky;top:0;height:100vh;display:flex;flex-direction:column;gap:18px;padding:26px 16px 18px;border-right:1px solid var(--hairline);
+  background:linear-gradient(180deg,rgba(2,10,20,.72),rgba(1,6,12,.62));backdrop-filter:blur(22px) saturate(1.4);-webkit-backdrop-filter:blur(22px) saturate(1.4)}
+.brand{display:flex;align-items:center;gap:12px;padding:0 8px}
+.brand__mark{width:34px;height:34px;border-radius:11px;display:grid;place-items:center;background:radial-gradient(circle at 50% 70%,rgba(53,200,240,.45),rgba(13,63,107,.35) 60%,transparent 70%),#020a12;border:1px solid rgba(53,200,240,.35);box-shadow:0 0 24px rgba(53,200,240,.25)}
+.brand__name{font:300 1.15rem/1 var(--font-d);letter-spacing:.06em}
+.brand__sub{font-size:var(--step--2);color:var(--ink-faint);letter-spacing:.08em;margin-top:3px}
+.nav{display:flex;flex-direction:column;gap:3px}
+.nav a{position:relative;display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:12px;color:var(--ink-dim);text-decoration:none;font-size:var(--step-0);transition:all .3s var(--ease)}
+.nav a svg{width:19px;height:19px;flex:none;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;opacity:.85}
+.nav a:hover{color:var(--ink);background:rgba(200,244,255,.045)}
+.nav a[aria-current=page]{color:#fff;background:linear-gradient(90deg,rgba(53,200,240,.16),rgba(53,200,240,.02));box-shadow:inset 0 0 0 1px rgba(53,200,240,.2)}
+.nav a[aria-current=page]::before{content:"";position:absolute;left:-16px;top:9px;bottom:9px;width:3px;border-radius:0 3px 3px 0;background:var(--col-mid);box-shadow:0 0 14px var(--col-mid)}
+.nav .badge{margin-left:auto;min-width:22px;height:20px;padding:0 7px;border-radius:999px;display:grid;place-items:center;font-size:.7rem;font-weight:600;color:#00131f;background:var(--col-accent);box-shadow:0 0 14px rgba(157,255,214,.45)}
+.nav .badge--warn{background:var(--warn);box-shadow:0 0 14px rgba(252,211,138,.4)}
+.side__foot{margin-top:auto;display:flex;flex-direction:column;gap:10px}
+.status-card{padding:12px 14px;border-radius:14px;background:rgba(0,0,0,.28);border:1px solid var(--hairline)}
+.status-card .row{gap:8px}
+
+/* ===== Main column ===== */
+.main-col{min-width:0;padding:30px clamp(16px,3vw,44px) 80px}
+.top{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;flex-wrap:wrap;margin-bottom:26px}
+.linkbox{display:flex;gap:8px;align-items:center;width:min(520px,100%);padding:6px 6px 6px 16px;border-radius:999px}
+.linkbox .input{border:0;background:transparent;padding:8px 4px;box-shadow:none!important}
+.linkbox svg{width:17px;height:17px;stroke:var(--col-mid);fill:none;stroke-width:1.7;flex:none}
+main:focus{outline:none}
+.stack{display:flex;flex-direction:column;gap:18px}
+.grid{display:grid;gap:18px}
+.g2{grid-template-columns:repeat(auto-fit,minmax(min(380px,100%),1fr))}
+.g3{grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr))}
+.g-side{grid-template-columns:minmax(0,1.55fr) minmax(300px,1fr);align-items:start}
+.empty{padding:28px 10px;text-align:center;color:var(--ink-faint)}
+.empty b{display:block;font:300 var(--step-2) var(--font-d);color:var(--ink-dim);margin-bottom:6px}
+
+/* Overview */
+.hero{display:flex;gap:24px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:clamp(1.3rem,2.4vw,2rem)}
+.hero__now{font:250 clamp(1.35rem,2.2vw,1.9rem)/1.2 var(--font-d);letter-spacing:-.015em;margin:6px 0}
+.hero__meta{color:var(--ink-dim);font-size:var(--step--1)}
+.tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}
+.tile{display:block;text-align:left;padding:18px;border-radius:16px;text-decoration:none;color:var(--ink);cursor:pointer;transition:transform .35s var(--ease),border-color .35s,box-shadow .35s}
+.tile:hover{transform:translateY(-2px);border-color:rgba(53,200,240,.3);box-shadow:0 18px 50px rgba(0,0,0,.5),0 0 26px rgba(53,200,240,.13)}
+.tile__n{font:200 2.5rem/1 var(--font-d);font-variant-numeric:tabular-nums}
+.tile--hot .tile__n{color:#fff;text-shadow:0 0 24px rgba(53,200,240,.7)}
+.tile__l{color:var(--ink-dim);font-size:var(--step--1);margin-top:8px}
+.banner{display:flex;gap:14px;align-items:center;flex-wrap:wrap;padding:14px 18px;border-radius:16px;border:1px solid rgba(53,200,240,.3);background:linear-gradient(90deg,rgba(9,44,66,.86),rgba(3,11,20,.82))}
+.banner--warn{border-color:rgba(252,211,138,.35);background:linear-gradient(90deg,rgba(54,40,14,.86),rgba(3,11,20,.82))}
+.banner__body{flex:1 1 280px;min-width:0}
+.banner__t{font-weight:600}
+.feed{display:flex;flex-direction:column;gap:10px}
+.card{padding:14px 16px}
+.card__top{display:flex;gap:10px;align-items:center}
+.card__t{font-weight:500;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.card__t button,.linkbtn{all:unset;cursor:pointer} .card__t button:hover,.linkbtn:hover{color:#fff;text-decoration:underline;text-decoration-color:var(--hairline-hi)}
+.card__t button:focus-visible,.linkbtn:focus-visible{outline:2px solid rgba(53,200,240,.95);outline-offset:3px;border-radius:4px}
+.card__doing{color:var(--ink-dim);font-size:var(--step--1);margin-top:6px}
+.card__final{margin-top:8px;font-size:var(--step--1)}
+.card .row{margin-top:10px}
+.lines{margin-top:8px;display:flex;flex-direction:column;gap:6px}
+.line{display:flex;gap:10px;font-size:var(--step--1);align-items:baseline}
+.line span:first-child{flex:none;width:20px;text-align:center}
+.steps{display:flex;align-items:center;margin-top:12px;gap:0}
+.step{display:flex;flex-direction:column;align-items:center;gap:6px;flex:1;position:relative;font-size:.68rem;color:var(--ink-faint);letter-spacing:.04em}
+.step::before{content:"";position:absolute;top:6px;left:-50%;right:50%;height:1px;background:rgba(200,244,255,.14)}
+.step:first-child::before{display:none}
+.step i{position:relative;z-index:1;width:13px;height:13px;border-radius:50%;border:1px solid rgba(200,244,255,.25);background:#000}
+.step--done{color:var(--ink-dim)} .step--done i{background:var(--col-mid);border-color:var(--col-mid);box-shadow:0 0 10px rgba(53,200,240,.6)}
+.step--done::before,.step--now::before{background:rgba(53,200,240,.6)}
+.step--now{color:#fff} .step--now i{border-color:var(--col-accent);box-shadow:0 0 0 4px rgba(157,255,214,.12),0 0 14px rgba(157,255,214,.6);animation:pulse 1.8s ease-in-out infinite}
+.step em{font-style:normal;color:var(--col-accent);font-size:.66rem}
+.meter{display:flex;flex-direction:column;gap:7px}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:10px 16px;align-items:baseline}
+.kv dt{color:var(--ink-faint);font-size:var(--step--1)} .kv dd{margin:0}
+
+/* Review */
+.rv{display:grid;grid-template-columns:300px minmax(0,1fr);gap:18px;align-items:start}
+.rv-list{display:flex;flex-direction:column;gap:8px;position:sticky;top:20px}
+.rv-item{display:block;width:100%;text-align:left;cursor:pointer;padding:13px 14px;color:var(--ink);background:var(--panel-solid);transition:all .3s var(--ease)}
+.rv-item:hover{border-color:rgba(200,244,255,.24)}
+.rv-item[aria-current=true]{border-color:rgba(53,200,240,.65);background:linear-gradient(rgba(53,200,240,.1),rgba(53,200,240,.1)),var(--panel-solid);box-shadow:0 0 26px rgba(53,200,240,.14)}
+.rv-head{display:flex;gap:20px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.ring{--v:0;--c:var(--col-mid);width:86px;height:86px;border-radius:50%;display:grid;place-items:center;flex:none;
+  background:radial-gradient(closest-side,#020b14 79%,transparent 80% 100%),conic-gradient(var(--c) calc(var(--v)*1%),rgba(200,244,255,.08) 0);box-shadow:0 0 30px rgba(53,200,240,.15)}
+.ring b{font:250 1.7rem/1 var(--font-d);font-variant-numeric:tabular-nums}
+.ring small{display:block;font-size:.62rem;color:var(--ink-faint);text-align:center;letter-spacing:.1em}
+.sec{padding-top:18px;margin-top:18px;border-top:1px solid var(--hairline)}
+.sec:first-child{padding-top:0;margin-top:0;border-top:0}
+.sec h4{margin:0 0 10px;font-size:var(--step--2);letter-spacing:.18em;text-transform:uppercase;color:var(--ink-dim);font-weight:600}
+.ans{display:grid;grid-template-columns:22px minmax(0,38%) 1fr auto;gap:10px;align-items:start;padding:9px 0;border-bottom:1px solid rgba(200,244,255,.06)}
+.ans:last-child{border-bottom:0}
+.ans__v{word-break:break-word}
+.ans form{grid-column:2/-1;display:flex;gap:8px;flex-wrap:wrap}
+.chg{padding:11px 13px;margin:8px 0;border-radius:12px;background:var(--well)}
+.chg del{color:var(--ink-faint);text-decoration-color:rgba(255,143,163,.6)} .chg ins{text-decoration:none;color:var(--ink);display:block;margin-top:5px}
+.shots{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px}
+.shots img{width:100%;border-radius:12px;border:1px solid var(--hairline);display:block;cursor:zoom-in;background:#04101a;min-height:120px}
+.acts{position:sticky;bottom:14px;z-index:3;display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:12px;margin-top:18px;border-radius:999px}
+.acts.panel{background:var(--panel-solid)}
+.file{display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border-radius:12px;background:var(--well);border:1px solid rgba(200,244,255,.08);cursor:pointer;color:var(--ink);font-size:var(--step--1)}
+.file:hover{border-color:rgba(53,200,240,.4)}
+.warnbox{padding:11px 14px;border-radius:12px;border:1px solid rgba(252,211,138,.3);background:rgba(252,211,138,.06);color:#ffe6bd;font-size:var(--step--1);margin:8px 0}
+
+/* Jobs */
+.toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:16px}
+.board{display:grid;grid-template-columns:repeat(6,minmax(210px,1fr));gap:14px;overflow-x:auto;padding-bottom:10px;scrollbar-width:thin}
+.col{padding:14px;min-height:200px}
+.col h2{font-size:var(--step--2);letter-spacing:.18em;text-transform:uppercase;font-weight:600;color:var(--ink-dim);margin:0 0 12px;display:flex;justify-content:space-between}
+.col h2 b{color:var(--ink)}
+.job{display:block;width:100%;text-align:left;padding:12px;margin:0 0 9px;color:var(--ink);cursor:pointer;transition:all .3s var(--ease)}
+.job:hover{transform:translateY(-1px);border-color:rgba(53,200,240,.3)}
+.job .co{font-weight:500} .job .ro{color:var(--ink-dim);font-size:var(--step--1);margin:2px 0 8px}
+.job .meta{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:var(--step--2);color:var(--ink-faint)}
+.table{width:100%;border-collapse:collapse}
+.table th{font-size:var(--step--2);letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint);font-weight:600;text-align:left;padding:10px 12px;border-bottom:1px solid var(--hairline)}
+.table td{padding:12px;border-bottom:1px solid rgba(200,244,255,.05);vertical-align:middle}
+.table tbody tr{cursor:pointer;transition:background .2s}
+.table tbody tr:hover{background:rgba(53,200,240,.05)}
+.table .co{font-weight:500}
+
+/* Questions & forms */
+.q{padding:16px 0;border-top:1px solid var(--hairline)}
+.q:first-of-type{border-top:0}
+.q__t{font-weight:500;margin-bottom:4px}
+.q__why{color:var(--ink-faint);font-size:var(--step--1);margin-bottom:10px}
+.lock{display:inline-flex;gap:5px;align-items:center;font-size:var(--step--2);color:var(--col-accent);border:1px solid rgba(157,255,214,.3);border-radius:999px;padding:1px 8px;margin-left:6px;vertical-align:middle}
+.check{display:inline-flex;gap:8px;align-items:center;cursor:pointer;font-size:var(--step--1);color:var(--ink-dim);margin-top:10px}
+.check input{accent-color:var(--col-mid);width:16px;height:16px}
+
+/* Settings */
+.set-layout{display:grid;grid-template-columns:200px minmax(0,1fr);gap:20px;align-items:start}
+.subnav{position:sticky;top:20px;display:flex;flex-direction:column;gap:2px;padding:10px}
+.subnav a{padding:8px 12px;border-radius:10px;color:var(--ink-dim);text-decoration:none;font-size:var(--step--1)}
+.subnav a:hover{color:#fff;background:rgba(200,244,255,.05)}
+.set{display:grid;grid-template-columns:minmax(0,1fr);gap:12px;padding:18px 0;border-top:1px solid rgba(200,244,255,.07)}
+.set:first-of-type{border-top:0;padding-top:4px}
+.set__head{display:flex;gap:16px;align-items:flex-start;justify-content:space-between}
+.set__label{font-weight:500}
+.set__what{color:var(--ink-faint);font-size:var(--step--1);max-width:70ch;margin-top:2px}
+.set__now{font-size:var(--step--1);color:var(--col-inner);text-align:right;max-width:40%;flex:none}
+.int{display:flex;gap:10px;align-items:center;margin-bottom:10px}
+.int .input{width:180px}
+.anchor{scroll-margin-top:20px}
+
+/* Drawer, modal, toast */
+.dscrim{position:fixed;inset:0;z-index:20;background:rgba(0,4,8,.55);opacity:0;pointer-events:none;transition:opacity .45s var(--ease)}
+.dscrim.on{opacity:1;pointer-events:auto}
+.drawer{position:fixed;z-index:21;top:0;right:0;height:100%;width:min(660px,100%);overflow-y:auto;padding:30px 30px 0;border-radius:0;border-width:0 0 0 1px;transform:translateX(104%);transition:transform .6s var(--ease)}
+.drawer.on{transform:none}
+.drawer .acts{bottom:16px;margin-bottom:20px}
+.modal{position:fixed;inset:0;z-index:40;display:grid;place-items:center;padding:16px;background:rgba(0,4,8,.6);opacity:0;pointer-events:none;transition:opacity .35s var(--ease)}
+.modal.on{opacity:1;pointer-events:auto}
+.modal__box{width:min(520px,100%);padding:26px;transform:translateY(12px) scale(.98);transition:transform .45s var(--ease)}
+.modal.on .modal__box{transform:none}
+.modal__box h3{font:300 var(--step-2)/1.25 var(--font-d);margin:0 0 10px}
+.toast{position:fixed;z-index:60;left:50%;bottom:26px;max-width:min(560px,calc(100% - 32px));transform:translate(-50%,24px);opacity:0;padding:12px 20px;border-radius:999px;transition:all .45s var(--ease);pointer-events:none;font-size:var(--step--1);text-align:center}
+.toast.on{opacity:1;transform:translate(-50%,0)}
+.toast--bad{border-color:rgba(255,143,163,.5)}
+.lightbox{position:fixed;inset:0;z-index:45;background:rgba(0,0,0,.86);display:grid;place-items:center;padding:24px;cursor:zoom-out}
+.lightbox img{max-width:100%;max-height:100%;border-radius:12px}
+
+/* Entrances: only on a fresh view, never on the live refresh */
+.fresh .rise{animation:rise .85s var(--ease) both;animation-delay:calc(var(--i,0) * 70ms)}
+@keyframes rise{from{opacity:0;translate:0 14px}to{opacity:1;translate:0 0}}
+@keyframes grow{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  *,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}
 }
-/* ---- primitives ---- */
-.glass-card {
-  background: linear-gradient(180deg, rgba(10, 26, 60, 0.60), rgba(3, 12, 34, 0.66));
-  border: 1px solid rgba(var(--glass-teal), 0.14);
-  backdrop-filter: blur(var(--glass-blur)); -webkit-backdrop-filter: blur(var(--glass-blur));
-  border-radius: var(--glass-radius);
-  box-shadow: var(--glass-drop), var(--glass-lift), var(--glass-inner);
+
+/* ===== Narrow screens: the sidebar becomes a top bar ===== */
+@media (max-width:1100px){
+  .tiles{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .g-side{grid-template-columns:minmax(0,1fr)}
+  .rv{grid-template-columns:minmax(0,1fr)}
+  .rv-list{position:static;flex-direction:row;overflow-x:auto;padding-bottom:4px}
+  .rv-item{min-width:230px}
+  .set-layout{grid-template-columns:minmax(0,1fr)}
+  .subnav{position:static;flex-direction:row;overflow-x:auto}
 }
-button.glass-card { transition: transform .35s var(--ease), border-color .35s var(--ease), box-shadow .35s var(--ease); }
-button.glass-card:hover { transform: translateY(-2px); border-color: rgba(var(--glass-teal), 0.30); box-shadow: 0 18px 52px rgba(0,0,0,.5), 0 0 26px rgba(var(--glass-teal), .14), var(--glass-lift); }
-.btn { position: relative; overflow: hidden; font: inherit; color: var(--ink); cursor: pointer; border-radius: 999px; padding: 9px 18px;
-  border: 1px solid rgba(var(--glass-teal), .35); background: linear-gradient(90deg, rgba(4,12,32,.55), rgba(10,26,58,.5), rgba(4,12,32,.55));
-  box-shadow: 0 0 22px rgba(var(--glass-teal), .12); transition: transform .35s var(--ease), box-shadow .35s var(--ease); }
-.btn::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(105deg, transparent 35%, rgba(144,224,239,.22) 50%, transparent 65%);
-  transform: translateX(-120%); transition: transform .9s var(--ease); }
-.btn:hover, .btn:focus-visible { transform: translateY(-2px); box-shadow: 0 0 36px rgba(var(--glass-teal), .22); }
-.btn:hover::after, .btn:focus-visible::after { transform: translateX(120%); }
-.btn-primary { border-color: rgba(52, 211, 153, .55); box-shadow: 0 0 22px rgba(52, 211, 153, .18); }
-.btn-quiet { border-color: rgba(159, 182, 214, .25); box-shadow: none; }
-.btn[disabled] { opacity: .5; cursor: default; transform: none; }
-:focus-visible { outline: 2px solid rgba(var(--glass-teal), .9); outline-offset: 3px; }
-.kicker { font-size: .7rem; letter-spacing: .32em; text-transform: uppercase; color: rgb(var(--glass-teal)); }
-.title { font-size: clamp(1.6rem, 3.6vw, 2.4rem); font-weight: 200; letter-spacing: .2em; margin: 2px 0 0; text-transform: uppercase;
-  background: linear-gradient(180deg, #fff 0%, #e6f1ff 45%, #9fb6d6 100%); -webkit-background-clip: text; background-clip: text; color: transparent;
-  filter: drop-shadow(0 0 18px rgba(0,180,216,.35)) drop-shadow(0 2px 10px rgba(0,0,0,.8)); }
-.hair { height: 1px; width: 112px; background: linear-gradient(90deg, transparent, rgba(var(--glass-teal), .7), transparent); margin: 10px 0 0; }
-.muted { color: var(--ink-2); } .faint { color: var(--ink-3); font-size: 12px; }
-.pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 3px 10px; border-radius: 999px; border: 1px solid rgba(159,182,214,.25); color: var(--ink-2); }
-.score { font-variant-numeric: tabular-nums; font-weight: 600; font-size: 12px; padding: 2px 8px; border-radius: 999px; }
-.s-hi { color: var(--good); background: rgba(52,211,153,.12); } .s-mid { color: var(--warn); background: rgba(251,191,36,.12); } .s-lo { color: var(--bad); background: rgba(248,113,113,.12); }
-/* ---- layout ---- */
-.wrap { max-width: 1500px; margin: 0 auto; padding: 32px 24px 64px; }
-header { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
-nav { display: flex; gap: 8px; } nav .btn[aria-current="page"] { border-color: rgba(var(--glass-teal), .8); color: #fff; }
-.board { display: grid; grid-template-columns: repeat(6, minmax(220px, 1fr)); gap: 14px; overflow-x: auto; padding-bottom: 8px; }
-.col { padding: 14px; min-height: 240px; }
-.col h2 { font-size: 12px; letter-spacing: .18em; text-transform: uppercase; font-weight: 600; color: var(--ink-2); margin: 0 0 12px; display: flex; justify-content: space-between; }
-.col h2 b { color: var(--ink); font-weight: 600; }
-.job { display: block; width: 100%; text-align: left; padding: 12px; margin: 0 0 10px; color: var(--ink); font: inherit; cursor: pointer; }
-.job .co { font-weight: 600; } .job .ro { color: var(--ink-2); font-size: 13px; margin: 2px 0 8px; }
-.job .meta { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-3); }
-.empty { color: var(--ink-3); font-size: 13px; padding: 10px 2px; }
-.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
-.panel { padding: 20px; }
-.panel h3 { margin: 0 0 14px; font-size: 13px; letter-spacing: .16em; text-transform: uppercase; color: var(--ink-2); font-weight: 600; }
-.row { display: grid; grid-template-columns: 110px 1fr 48px; align-items: center; gap: 12px; margin: 8px 0; }
-.track { height: 8px; border-radius: 99px; background: rgba(159,182,214,.12); overflow: hidden; }
-.fill { height: 100%; border-radius: 99px; background: linear-gradient(90deg, rgba(var(--glass-teal), .6), rgb(var(--glass-teal))); transform-origin: left; animation: grow .9s var(--ease) both; }
-.num { text-align: right; font-variant-numeric: tabular-nums; }
-/* ---- drawer ---- */
-.scrim { position: fixed; inset: 0; background: rgba(2, 8, 23, .6); opacity: 0; pointer-events: none; transition: opacity .4s var(--ease); }
-.scrim.on { opacity: 1; pointer-events: auto; }
-.drawer { position: fixed; top: 0; right: 0; height: 100%; width: min(620px, 100%); overflow-y: auto; padding: 28px; border-radius: 0;
-  transform: translateX(104%); transition: transform .5s var(--ease); }
-.drawer.on { transform: none; }
-.drawer h4 { margin: 22px 0 10px; font-size: 12px; letter-spacing: .16em; text-transform: uppercase; color: var(--ink-2); font-weight: 600; }
-.drawer ul { margin: 0; padding-left: 18px; } .drawer li { margin: 4px 0; }
-.chg { padding: 10px 12px; margin: 8px 0; border-radius: 10px; background: rgba(159,182,214,.06); }
-.chg del { color: var(--ink-3); } .chg ins { text-decoration: none; color: var(--ink); display: block; margin-top: 4px; }
-.ans { display: grid; grid-template-columns: 40% 1fr; gap: 10px; padding: 7px 0; border-bottom: 1px solid rgba(159,182,214,.08); }
-.shots img { width: 100%; border-radius: 10px; margin: 6px 0; border: 1px solid rgba(159,182,214,.15); }
-.acts { display: flex; gap: 10px; margin-top: 18px; position: sticky; bottom: -28px; padding: 22px 0 14px; background: linear-gradient(180deg, rgba(3,12,34,0), rgba(3,12,34,.98) 22px); }
-.toast { position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 20px); opacity: 0; padding: 10px 18px; transition: all .4s var(--ease); pointer-events: none; }
-.toast.on { opacity: 1; transform: translate(-50%, 0); }
-.close { position: absolute; top: 16px; right: 16px; }
-/* ---- entrances ---- */
-.rise { animation: rise .8s var(--ease) both; animation-delay: calc(var(--i, 0) * 60ms); }
-@keyframes rise { from { opacity: 0; translate: 0 12px; } to { opacity: 1; translate: 0 0; } }
-@keyframes grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
-@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
-@media (max-width: 760px) {
-  .wrap { padding: 20px 16px 48px; }
-  .board { grid-template-columns: 1fr; overflow: visible; }
-  .col { min-height: 0; }
-  .drawer { padding: 20px 16px; }
-  .acts { bottom: -20px; } .acts .btn { padding: 9px 14px; } .acts .lbl { display: none; }
-  .row { grid-template-columns: 90px 1fr 40px; }
+@media (max-width:900px){
+  .app{grid-template-columns:minmax(0,1fr)}
+  .side{position:sticky;z-index:5;height:auto;flex-direction:row;align-items:center;gap:10px;padding:10px 16px;border-right:0;border-bottom:1px solid var(--hairline)}
+  .brand__sub,.side__foot{display:none}
+  .brand{padding:0}
+  .nav{flex-direction:row;overflow-x:auto;scrollbar-width:none;flex:1;min-width:0}
+  .nav::-webkit-scrollbar{display:none}
+  .nav a{padding:8px 11px;flex:none}
+  .nav a span.lbl{display:none}
+  .nav a[aria-current=page] span.lbl{display:inline}
+  .nav a[aria-current=page]::before{display:none}
+  .nav a:not([aria-current=page]) .badge{position:absolute;top:1px;right:0;min-width:17px;height:17px;padding:0 4px;font-size:.62rem}
+  .main-col{padding:20px 16px 90px}
+  .drawer{padding:20px 16px 0}
+}
+@media (max-width:560px){
+  .tiles{gap:10px} .tile{padding:14px} .tile__n{font-size:2rem}
+  .ans{grid-template-columns:22px minmax(0,1fr) auto}
+  .ans .ans__l{grid-column:2/4} .ans .ans__v{grid-column:2/3}
+  .bar{grid-template-columns:90px 1fr 52px}
+  .acts{border-radius:20px;position:static}
+  .set__head{flex-direction:column;gap:6px} .set__now{text-align:left;max-width:none}
+  .table .hide-s{display:none}
 }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <header class="rise">
-    <div>
-      <div class="kicker">JobAgent</div>
-      <h1 class="title" id="pageTitle">Pipeline</h1>
-      <div class="hair"></div>
+<canvas id="bg" aria-hidden="true"></canvas>
+<div id="scrim"></div>
+<a class="skip" href="#main">Skip to content</a>
+<div class="app">
+  <aside class="side" aria-label="JobAgent">
+    <div class="brand">
+      <div class="brand__mark" aria-hidden="true"><svg viewBox="0 0 32 32" width="22" height="22"><path d="M6 20c5-9 15-9 20 0" stroke="#35c8f0" stroke-width="2.4" fill="none" stroke-linecap="round"/><circle cx="16" cy="13" r="2.4" fill="#9dffd6"/></svg></div>
+      <div><div class="brand__name">JobAgent</div><div class="brand__sub">Your job search, on autopilot</div></div>
     </div>
-    <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap">
-      <span class="pill" id="mode"></span>
-      <span class="pill" id="health"></span>
-      <nav aria-label="Sections">
-        <button class="btn" data-view="pipeline" aria-current="page">Pipeline</button>
-        <button class="btn" data-view="insights">Insights</button>
-        <button class="btn" data-view="health">Health</button>
-      </nav>
-    </div>
-  </header>
-  <main id="view"></main>
+    <nav class="nav" id="nav" aria-label="Sections"></nav>
+    <div class="side__foot" id="sideFoot"></div>
+  </aside>
+  <div class="main-col">
+    <header class="top">
+      <div><div class="kicker" id="kicker">JobAgent</div><h1 class="title" id="pageTitle">Overview</h1><div class="hair"></div></div>
+      <form class="linkbox panel" id="linkForm" autocomplete="off">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 0 0-6.4-6.4l-1 1M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1-1" stroke-linecap="round"/></svg>
+        <label for="linkIn" class="skip" style="position:absolute;left:-9999px">Job link</label>
+        <input class="input" id="linkIn" name="url" placeholder="Paste a job link to apply…" inputmode="url">
+        <button class="btn btn--solid btn--sm" type="submit">Start</button>
+      </form>
+    </header>
+    <main id="main" tabindex="-1"></main>
+  </div>
 </div>
-<div class="scrim" id="scrim"></div>
-<aside class="drawer glass-card" id="drawer" role="dialog" aria-modal="true" aria-labelledby="dTitle" tabindex="-1"></aside>
-<div class="toast glass-card" id="toast" role="status" aria-live="polite"></div>
+<div class="dscrim" id="dscrim"></div>
+<aside class="drawer panel" id="drawer" role="dialog" aria-modal="true" aria-labelledby="dTitle" tabindex="-1"></aside>
+<div class="modal" id="modal" role="dialog" aria-modal="true" aria-labelledby="mTitle"><div class="modal__box panel" id="modalBox"></div></div>
+<div class="toast panel" id="toast" role="status" aria-live="polite"></div>
+<input type="file" id="fileIn" accept=".pdf,.docx" hidden>
+
 <script>
 'use strict'
-const $ = s => document.querySelector(s)
+// ===================================================================================================================
+// JobAgent desktop front end. Everything the Telegram screens do, laid out for a big screen. The page holds no data:
+// it signs in, then asks the API. Buttons that mirror a Telegram button send its code ("tap"); typed input has its own
+// call. Private answers never reach the page: they show as 🔒 and can be replaced, never read.
+// ===================================================================================================================
+const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)]
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
 const scoreCls = n => n == null ? '' : n >= 80 ? 's-hi' : n >= 60 ? 's-mid' : 's-lo'
-const ago = iso => { const m = Math.round((Date.now() - Date.parse(iso)) / 60000); return !isFinite(m) ? '' : m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago` }
-let state = null, view = 'pipeline', openId = null
+const scoreTag = n => n == null ? '' : `<span class="score ${scoreCls(n)}">${n}</span>`
+const ms = t => typeof t === 'number' ? t : Date.parse(t)
+const ago = t => { const m = Math.round((Date.now() - ms(t)) / 60000); return !isFinite(m) ? '' : m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago` }
+const until = t => { const m = Math.round((ms(t) - Date.now()) / 60000); return !isFinite(m) ? '' : m <= 0 ? 'any moment' : m < 60 ? `in ${m} min` : m < 1440 ? `in ${Math.round(m / 60)} h` : `in ${Math.round(m / 1440)} d` }
+const dur = d => { const s = Math.max(0, Math.round(d / 1000)); return s < 60 ? `${s} s` : s < 3600 ? `${Math.floor(s / 60)} min` : `${Math.floor(s / 3600)} h ${Math.floor(s % 3600 / 60)} min` }
+const clock = t => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+const plural = (n, one, many = one + 's') => `${n} ${n === 1 ? one : many}`
+const ICON = {
+  overview: '<path d="M4 4h7v7H4zM13 4h7v4h-7zM13 10h7v10h-7zM4 13h7v7H4z"/>',
+  review: '<rect x="3.5" y="3.5" width="17" height="17" rx="5"/><path d="m8.5 12.2 2.4 2.4 4.6-5.2"/>',
+  jobs: '<rect x="3" y="7" width="18" height="13" rx="2.5"/><path d="M8.5 7V5.6c0-.9.7-1.6 1.6-1.6h3.8c.9 0 1.6.7 1.6 1.6V7M3 12.5h18"/>',
+  questions: '<circle cx="12" cy="12" r="8.6"/><path d="M9.6 9.4a2.5 2.5 0 1 1 3.4 2.4c-.6.3-1 .8-1 1.5v.5M12 16.9v.1"/>',
+  profile: '<circle cx="12" cy="8.2" r="3.8"/><path d="M4.5 20c1.4-3.4 4.2-5 7.5-5s6.1 1.6 7.5 5"/>',
+  settings: '<path d="M4 6.5h9M17 6.5h3M4 12h3M11 12h9M4 17.5h11M19 17.5h1"/><circle cx="15" cy="6.5" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="17.5" r="2"/>',
+  insights: '<path d="M5.5 19v-7M11.5 19V5M17.5 19v-9.5M3.5 19h17"/>',
+  health: '<path d="M3 12.5h4l2.2-5 4 10.5 2.2-5.5H21"/>',
+}
+const VIEWS = {
+  overview: { title: 'Overview', kicker: 'What is happening' },
+  review: { title: 'Review', kicker: 'Waiting for your OK' },
+  jobs: { title: 'Jobs', kicker: 'Every job and application' },
+  questions: { title: 'Questions', kicker: 'Only you can answer these' },
+  profile: { title: 'Profile', kicker: 'What I apply with' },
+  settings: { title: 'Settings', kicker: 'What I look for and how I apply' },
+  insights: { title: 'Insights', kicker: 'Where applications go' },
+  health: { title: 'Health', kicker: 'This computer' },
+}
+let S = null, L = null, view = 'overview', param = '', openId = null, SET = {}, FORMS = [], PROFILE = null, LOGINS = null, REVIEW = null
 
-// Phone (Telegram Mini App): Telegram puts signed launch data in the URL fragment. Trade it for a session token, kept only
-// for this tab, then remove it from the address bar. On the computer the cookie from the Telegram link is used instead.
+// ---- Sign-in (phone: Telegram Mini App data in the URL fragment, traded for a session token) and the API ----
 let session = ''
 try { session = sessionStorage.getItem('jd-session') || '' } catch {}
 async function signIn() {
@@ -156,119 +405,843 @@ async function signIn() {
   try { sessionStorage.setItem('jd-session', session) } catch {}
 }
 const authHeaders = () => (session ? { 'x-session': session } : {})
-async function loadImages(root) {
-  for (const img of root.querySelectorAll('img[data-src]')) {
-    try { const r = await fetch(img.dataset.src, { headers: authHeaders() }); if (r.ok) img.src = URL.createObjectURL(await r.blob()) } catch {}
-  }
-}
 async function api(path, body) {
   const r = await fetch(path, body ? { method: 'POST', headers: { 'content-type': 'application/json', ...authHeaders() }, body: JSON.stringify(body) } : { headers: authHeaders() })
-  const x = await r.json().catch(() => ({ error: 'The app did not answer.' }))
+  const x = await r.json().catch(() => ({ error: 'JobAgent did not answer. Is it still running?' }))
   if (!r.ok) throw new Error(x.error || 'Something went wrong.')
   return x
 }
-function toast(t) { const el = $('#toast'); el.textContent = t; el.classList.add('on'); clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove('on'), 3200) }
-
-function header() {
-  $('#mode').innerHTML = state.practice ? '🧪 Practice mode' : '🟢 Live: approvals are sent'
-  const h = state.health, bad = h ? h.checks.filter(c => !c.ok && c.required).length : 0
-  $('#health').innerHTML = !h ? '🩺 Not checked yet' : bad ? `🩺 ${bad} problem${bad > 1 ? 's' : ''}` : '🩺 All good'
+const call = (op, body = {}) => api('/api/do', { op, ...body })
+async function blobOf(url) { const r = await fetch(url, { headers: authHeaders() }); if (!r.ok) throw new Error('Could not open that file.'); return r.blob() }
+async function loadImages(root) {
+  for (const img of $$('img[data-src]', root)) { try { img.src = URL.createObjectURL(await blobOf(img.dataset.src)) } catch {} }
+}
+async function openFile(url, name) {
+  try {
+    const b = await blobOf(url), u = URL.createObjectURL(b)
+    if (/\.pdf$/i.test(name) && window.open(u, '_blank', 'noopener')) return
+    const a = document.createElement('a'); a.href = u; a.download = name; document.body.append(a); a.click(); a.remove()
+  } catch (e) { toast(e.message, true) }
 }
 
-function pipeline() {
-  const by = Object.fromEntries(state.columns.map(c => [c, []]))
-  for (const j of state.jobs) by[j.column].push(j)
-  return `<div class="board">${state.columns.map((c, i) => `
-    <section class="col glass-card rise" style="--i:${i}" aria-label="${esc(c)}">
-      <h2>${esc(c)} <b>${by[c].length}</b></h2>
-      ${by[c].length ? by[c].slice(0, 60).map(j => `
-        <button class="job glass-card" data-job="${esc(j.id)}">
-          <div class="co">${esc(j.company || 'Unknown company')}</div>
-          <div class="ro">${esc(j.role || j.id)}</div>
-          <div class="meta"><span>${esc(j.status)}</span>${j.score != null ? `<span class="score ${scoreCls(j.score)}">${j.score}</span>` : ''}</div>
-        </button>`).join('') : '<div class="empty">Nothing here.</div>'}
-    </section>`).join('')}</div>`
+// ---- Feedback: toast, confirm/ask modal ----
+function toast(t, bad = false) { const el = $('#toast'); el.textContent = t; el.classList.toggle('toast--bad', bad); el.classList.add('on'); clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove('on'), bad ? 5200 : 3400) }
+function ask({ title, body = '', ok = 'OK', danger = false, input = null }) {
+  return new Promise(done => {
+    const m = $('#modal'), box = $('#modalBox'), back = document.activeElement
+    box.innerHTML = `<h3 id="mTitle">${esc(title)}</h3>${body ? `<div class="muted small">${body}</div>` : ''}
+      ${input ? `<textarea class="input" id="mIn" rows="${input.rows || 3}" placeholder="${esc(input.placeholder || '')}" style="margin-top:14px">${esc(input.value || '')}</textarea>` : ''}
+      <div class="row row--end" style="margin-top:20px"><button class="btn btn--ghost" data-m="no">Cancel</button><button class="btn ${danger ? 'btn--danger' : 'btn--solid'}" data-m="ok">${esc(ok)}</button></div>`
+    m.classList.add('on')
+    const close = v => { m.classList.remove('on'); m.onclick = null; document.removeEventListener('keydown', key, true); back?.focus?.(); done(v) }
+    const key = e => { if (e.key === 'Escape') { e.stopPropagation(); close(null) } }
+    document.addEventListener('keydown', key, true)
+    m.onclick = e => { const b = e.target.closest('[data-m]'); if (e.target === m) close(null); else if (b) close(b.dataset.m === 'ok' ? (input ? $('#mIn').value.trim() : true) : null) }
+    setTimeout(() => (input ? $('#mIn') : box.querySelector('[data-m=ok]')).focus(), 60)
+  })
+}
+async function busy(btn, f) {
+  if (btn) { if (btn.getAttribute('aria-busy') === 'true') return; btn.setAttribute('aria-busy', 'true') }
+  try { return await f() } catch (e) { toast(e.message, true) } finally { btn?.removeAttribute('aria-busy') }
+}
+async function tap(data, btn, say) {
+  return busy(btn, async () => { const r = await call('tap', { data }); toast(say || r.text || 'Done'); await refresh(true) })
 }
 
-function bars(rows, max) { return rows.map(([l, n, of]) => `<div class="row"><span class="muted">${esc(l)}</span><div class="track"><div class="fill" style="width:${max ? Math.max(2, n / max * 100) : 0}%"></div></div><span class="num">${n}${of ? `<span class="faint"> ${of}</span>` : ''}</span></div>`).join('') }
-function insights() {
-  const a = state.insights.all, w = state.insights.week, pct = (x, y) => y ? Math.round(x / y * 100) + '%' : ''
-  const bands = state.insights.bands.filter(b => b.n)
-  return `<div class="grid2">
-    <section class="panel glass-card rise" style="--i:0"><h3>All time</h3>${bars([['Found', a.found], ['Prepared', a.prepared, pct(a.prepared, a.found)], ['Applied', a.applied, pct(a.applied, a.prepared)], ['Replies', a.replied, pct(a.replied, a.applied)], ['Interviews', a.interview, pct(a.interview, a.applied)], ['Offers', a.offer]], a.found)}</section>
-    <section class="panel glass-card rise" style="--i:1"><h3>This week</h3>${bars([['Found', w.found], ['Prepared', w.prepared], ['Applied', w.applied], ['Interviews', w.interview]], Math.max(1, w.found))}</section>
-    <section class="panel glass-card rise" style="--i:2"><h3>Interviews by match score</h3>${bands.length ? bars(bands.map(b => [b.name, b.interviews, `of ${b.n}`]), Math.max(...bands.map(b => b.n))) : '<p class="muted">Mark results on applied jobs (in Telegram, Jobs → Applied) and this fills in.</p>'}</section>
+// ---- Shell: nav, side footer, header ----
+function needs() { return L?.needs ?? { reviews: S.jobs.filter(j => j.status_code === 'AWAITING_APPROVAL').length, kits: 0, forms: 0, other: 0, total: 0 } }
+function shell() {
+  const n = needs(), hp = S.health ? S.health.checks.filter(c => !c.ok && c.required).length : 0
+  const badge = { review: n.reviews, questions: n.forms, jobs: n.kits + n.other, health: hp }
+  $('#nav').innerHTML = Object.entries(VIEWS).map(([k, v]) => `<a href="#/${k}" ${k === view ? 'aria-current="page"' : ''}><svg viewBox="0 0 24 24" aria-hidden="true">${ICON[k]}</svg><span class="lbl">${v.title}</span>${badge[k] ? `<span class="badge ${k === 'health' ? 'badge--warn' : ''}" aria-label="${badge[k]} waiting">${badge[k]}</span>` : ''}</a>`).join('')
+  const on = L ? L.agent_on : true
+  $('#sideFoot').innerHTML = `
+    <div class="status-card">
+      <div class="row"><span class="dot ${!on ? 'dot--warn' : L?.work ? 'dot--live' : 'dot--on'}"></span><span class="small">${!on ? 'Paused' : L?.work ? 'Working' : 'Running · idle'}</span></div>
+      <div class="row" style="margin-top:6px"><span class="dot ${S.practice ? 'dot--warn' : 'dot--on'}"></span><span class="small">${S.practice ? 'Practice mode: nothing is sent' : 'Live: approvals are sent'}</span></div>
+    </div>
+    ${L ? `<div class="row"><button class="btn btn--sm grow" data-tap="${on ? 'H:pause' : 'H:resume'}">${on ? 'Pause' : 'Resume'}</button><button class="btn btn--sm grow" data-tap="d:run" ${L.searching || !L.discovery ? 'disabled' : ''}>${L.searching ? 'Searching…' : 'Search now'}</button></div>` : ''}`
+  $('#pageTitle').textContent = VIEWS[view].title
+  $('#kicker').textContent = VIEWS[view].kicker
+  document.title = `${n.total ? `(${n.total}) ` : ''}${VIEWS[view].title} · JobAgent`
+}
+
+// ---- Overview ----
+const STAGES = [['read', 'Read'], ['score', 'Score'], ['tailor', 'Tailor'], ['fill', 'Fill'], ['review', 'Review']]
+function stepper(line, running) {
+  const at = line.stage ? STAGES.findIndex(s => s[0] === line.stage) : -1
+  return `<div class="steps" aria-label="Progress">${STAGES.map(([k, l], i) => {
+    const st = i < at || (i === at && (!running || k === 'review')) || (i === at && line.final) ? 'done' : i === at ? 'now' : ''
+    return `<div class="step ${st ? 'step--' + st : ''}"><i></i>${l}${line.details?.[k] ? `<em>${esc(line.details[k])}</em>` : ''}</div>`
+  }).join('')}</div>`
+}
+const btns = (list = [], ctx = '') => list.map(b => `<button class="btn btn--sm ${b.style === 'success' ? 'btn--solid' : b.style === 'danger' ? 'btn--danger' : ''}" data-${/^(r:rv|j:kit|j:rc|F:list)/.test(b.data) ? 'nav' : 'tap'}="${esc(b.data)}" ${ctx}>${esc(b.text)}</button>`).join('')
+function cardHtml(c, i) {
+  const live = c.state === 'running', now = Date.now(), job = c.jobs[0]
+  const chip = live ? `<span class="pill"><span class="dot dot--live"></span>${c.started ? dur(now - c.started) : 'Working'}</span>`
+    : c.state === 'queued' ? `<span class="pill">In line${c.position ? ` · #${c.position}` : ''}</span>`
+    : c.state === 'paused' ? '<span class="pill"><span class="dot dot--warn"></span>Paused</span>'
+    : c.state === 'waiting' ? `<span class="pill"><span class="dot dot--warn"></span>Waiting${c.wait_until ? ` until ${clock(c.wait_until)}` : ''}</span>`
+    : c.ended ? `<span class="faint">${ago(c.ended)}</span>` : ''
+  const title = c.mode === 'job' && job?.job_id ? `<button data-job="${esc(job.job_id)}">${esc(job.title || c.title)}</button>` : esc(c.mode === 'job' && job?.title ? job.title : c.title)
+  const lines = c.mode === 'multi' ? `<div class="lines">${c.jobs.slice(0, 8).map(l => `<div class="line"><span>${l.final ? esc(l.final.emoji) : l.job_id === c.active ? '⏳' : '·'}</span><span><button class="linkbtn" data-job="${esc(l.job_id)}">${esc(l.title)}</button>${l.final ? ` <span class="faint">· ${esc(l.final.text)}</span>` : l.stage ? ` <span class="faint">· ${esc(STAGES.find(s => s[0] === l.stage)?.[1] || '')}</span>` : ''}${l.final?.buttons?.length ? `<span class="row" style="margin-top:6px">${btns(l.final.buttons, `data-id="${esc(l.job_id)}"`)}</span>` : ''}</span></div>`).join('')}${c.jobs.length > 8 ? `<div class="faint">+${c.jobs.length - 8} more</div>` : ''}</div>` : ''
+  const fin = c.final && c.state === 'ended' ? `<div class="card__final">${esc(c.final.emoji)} ${esc(c.final.text)}</div>` : ''
+  const acts = [...(c.state === 'ended' ? c.final?.buttons ?? [] : []), ...(c.state !== 'ended' ? [{ text: '✋ Stop', data: `x:${c.key}` }] : [])]
+  return `<article class="card well rise" style="--i:${i}">
+    <div class="card__top"><span aria-hidden="true">${esc(c.icon)}</span><div class="card__t">${title}</div>${chip}</div>
+    ${live && c.doing ? `<div class="card__doing">${esc(c.doing)}${c.steps ? ` · step ${c.steps}` : ''}</div>` : ''}
+    ${c.note ? `<div class="faint" style="margin-top:6px">${esc(c.note)}</div>` : ''}
+    ${c.mode === 'job' && job && (job.stage || live) ? stepper(job, live) : ''}${lines}${fin}
+    ${acts.length ? `<div class="row">${btns(acts, c.mode === 'job' && job?.job_id ? `data-id="${esc(job.job_id)}"` : '')}</div>` : ''}
+  </article>`
+}
+function banners() {
+  if (!L) return ''
+  const out = []
+  if (!L.onboarded) out.push(`<div class="banner banner--warn rise"><div class="banner__body"><div class="banner__t">Setup isn't finished</div><div class="muted small">Send your resume and pick what you are looking for in Telegram. Everything else works here.</div></div></div>`)
+  for (const c of L.codes) out.push(`<form class="banner rise" data-code="${esc(c.id)}"><div class="banner__body"><div class="banner__t">🔐 Verification code needed</div><div class="muted small">${esc(c.title)}: the company emailed you a security code. Paste it within 10 minutes.</div></div><input class="input" name="v" placeholder="Code" style="width:150px" autocomplete="one-time-code"><button class="btn btn--solid">Send code</button></form>`)
+  if (L.resume?.step === 'profile' && L.resume.summary) { const s = L.resume.summary; out.push(`<div class="banner rise"><div class="banner__body"><div class="banner__t">📄 I read your new resume</div><div class="muted small">${esc(s.name)} · ${esc(s.headline)}${s.skills?.length ? ` · ${esc(s.skills.slice(0, 6).join(', '))}` : ''}</div></div><button class="btn btn--solid" data-do="resume_ok">Looks right</button><a class="btn" href="#/profile">Fix details</a></div>`) }
+  else if (L.resume?.step === 'reading') out.push(`<div class="banner rise"><div class="banner__body"><div class="banner__t">📄 Reading your new resume…</div><div class="muted small">${esc(L.resume.doing || 'This takes about a minute.')}</div></div></div>`)
+  else if (L.resume?.error) out.push(`<div class="banner banner--warn rise"><div class="banner__body"><div class="banner__t">That resume didn't work</div><div class="muted small">${esc(L.resume.error)}</div></div><a class="btn" href="#/profile">Try another file</a></div>`)
+  for (const f of L.fixes) out.push(`<div class="banner rise"><div class="banner__body"><div class="banner__t">🔧 A fix is ready to share</div><div class="muted small">${esc(f.summary)} <span class="faint">(${f.files} files, +${f.added} −${f.removed}, from ${esc(f.login)})</span></div></div><button class="btn btn--solid" data-tap="fix:ok:${esc(f.id)}" data-confirm="Share this fix on GitHub as a pull request from your account? Your profile, answers and job details are not included.">Open the pull request</button><button class="btn" data-tap="fix:no:${esc(f.id)}">Not now</button></div>`)
+  if (L.problems.length) out.push(`<div class="banner banner--warn rise"><div class="banner__body"><div class="banner__t">🩺 Something on this computer needs attention</div><div class="muted small">${esc(L.problems[0])}${L.problems.length > 1 ? ` <span class="faint">(+${L.problems.length - 1} more)</span>` : ''}</div></div><a class="btn" href="#/health">Health</a></div>`)
+  if (L.tip) out.push(`<div class="banner rise"><div class="banner__body"><div class="banner__t">💡 A suggestion from your own decisions</div><div class="muted small">${esc(L.tip.text)}</div></div><button class="btn btn--solid" data-tap="sg:ms:${L.tip.min}">Set it to ${L.tip.min}</button><button class="btn btn--ghost" data-tap="sg:no:${L.tip.min}">No thanks</button></div>`)
+  if (L.updates) out.push(`<div class="banner rise"><div class="banner__body"><div class="banner__t">⬆️ An update for JobAgent is available</div><div class="muted small">${plural(L.updates, 'change')} since your copy. In the JobAgent folder run <code>git pull</code>, then restart JobAgent. I never update myself.</div></div></div>`)
+  return out.join('')
+}
+function overview() {
+  const n = needs(), w = S.insights.week, on = L ? L.agent_on : true
+  const now = !L ? 'Live status needs a JobAgent restart' : !on ? 'Paused' : L.limited_until && L.limited_until > Date.now() ? `Waiting for Claude's usage limit (until ${clock(L.limited_until)})` : L.work ? (L.work.doing || 'Working') : 'Idle'
+  const meta = L?.work ? `${esc(L.work.title || '')}${L.work.started ? ` · ${dur(Date.now() - L.work.started)}` : ''}${L.work.steps ? ` · ${plural(L.work.steps, 'step')}` : ''}${L.queued ? ` · +${L.queued} waiting` : ''}`
+    : !on ? 'I finish the current step, then wait. Links you send wait in line.' : 'Paste a job link above, or let auto-search find jobs.'
+  const tile = (k, label, href, i) => `<a class="tile panel rise ${n[k] ? 'tile--hot' : ''}" style="--i:${i}" href="${href}"><div class="tile__n">${n[k] ?? 0}</div><div class="tile__l">${label}</div></a>`
+  const cards = (L?.cards ?? [])
+  return `<div class="stack">
+    ${banners()}
+    <section class="panel hero rise" aria-label="Now">
+      <div class="grow"><div class="kicker">Now</div><div class="hero__now">${esc(now)}</div><div class="hero__meta">${meta}</div></div>
+      ${L ? `<div class="row">
+        <button class="btn btn--solid" data-tap="d:run" ${L.searching || !L.discovery || !L.onboarded ? 'disabled' : ''} title="${L.discovery ? '' : 'Turn on Auto-search in Settings'}">${L.searching ? 'Searching…' : 'Search now'}</button>
+        <button class="btn" data-tap="${on ? 'H:pause' : 'H:resume'}">${on ? 'Pause' : 'Resume'}</button>
+        <button class="btn btn--danger" data-do="stop" data-confirm="Stop everything now? I stop what I am doing and pause. Nothing is sent.">Stop everything</button>
+      </div>` : ''}
+    </section>
+    <div class="tiles">${tile('reviews', 'Applications to review', '#/review', 0)}${tile('kits', 'To apply yourself', '#/jobs/kit', 1)}${tile('forms', 'Question forms', '#/questions', 2)}${tile('other', 'Stuck jobs', '#/jobs/needs', 3)}</div>
+    <div class="grid g-side">
+      <section class="panel pad rise" style="--i:2"><h2 class="h">Activity <span class="n">${cards.filter(c => c.state !== 'ended').length || ''}</span></h2>
+        <div class="feed">${cards.length ? cards.map(cardHtml).join('') : '<div class="empty"><b>Nothing yet</b>Paste a job link above to see me work.</div>'}</div></section>
+      <div class="stack">
+        <section class="panel pad rise" style="--i:3"><h2 class="h">This week</h2>
+          ${bars([['Found', w.found], ['Prepared', w.prepared], ['Applied', w.applied], ['Interviews', w.interview]], Math.max(1, w.found))}</section>
+        <section class="panel pad rise" style="--i:4"><h2 class="h">Engine</h2><dl class="kv">
+          <dt>Auto-search</dt><dd>${!L ? '—' : L.discovery ? (L.searching ? 'Searching now' : L.next_search ? `On · next ${until(L.next_search)}` : 'On · running soon') : 'Off <a href="#/settings/auto" class="small">turn on</a>'}</dd>
+          <dt>Claude usage</dt><dd>${L?.usage != null ? `<div class="meter"><div class="track"><div class="fill" style="width:${Math.round(L.usage * 100)}%"></div></div><span class="faint">${Math.round(L.usage * 100)}% of your 5-hour limit</span></div>` : '<span class="faint">Not measured yet</span>'}</dd>
+          <dt>Mode</dt><dd>${S.practice ? '🧪 Practice: approvals are never sent' : '🚀 Live: approved applications are sent'} <a href="#/settings/practice" class="small">change</a></dd>
+        </dl></section>
+      </div>
+    </div>
   </div>`
 }
-function health() {
-  const h = state.health
-  if (!h) return '<section class="panel glass-card rise"><p class="muted">The first check runs a few seconds after JobAgent starts.</p></section>'
-  return `<section class="panel glass-card rise"><h3>Checked ${esc(ago(new Date(h.at).toISOString()))}</h3>${h.checks.map((c, i) => `<div class="ans rise" style="--i:${i}"><span>${c.ok ? '✅' : c.required ? '❌' : '⚠️'} ${esc(c.name)}</span><span class="muted">${esc(c.detail)}</span></div>`).join('')}</section>`
-}
 
-function render() {
-  header()
-  $('#pageTitle').textContent = { pipeline: 'Pipeline', insights: 'Insights', health: 'Health' }[view]
-  document.querySelectorAll('nav .btn').forEach(b => b.setAttribute('aria-current', b.dataset.view === view ? 'page' : 'false'))
-  $('#view').innerHTML = view === 'pipeline' ? pipeline() : view === 'insights' ? insights() : health()
-}
-
+// ---- Review ----
+const queue = () => S.jobs.filter(j => j.status_code === 'AWAITING_APPROVAL').sort((a, b) => (b.score ?? -1) - (a.score ?? -1))
 const PARTS = { title: 'Title', seniority: 'Level', skills: 'Skills', location: 'Place', pay: 'Pay' }
 const MUST = { met: '✅', partial: '🟡', missing: '❌' }
+const SRC = { profile: '👤', generated: '✍️', user: '💬', document: '📎' }
+function bars(rows, max) { return rows.map(([l, n, of]) => `<div class="bar"><span class="muted small">${esc(l)}</span><div class="track"><div class="fill" style="width:${max ? Math.max(2, n / max * 100) : 0}%"></div></div><span class="num small">${n}${of ? `<span class="faint"> ${esc(of)}</span>` : ''}</span></div>`).join('') }
+function reviewList(q, sel) {
+  return q.map((j, i) => `<button class="rv-item well rise" style="--i:${i}" data-rv="${esc(j.id)}" aria-current="${j.id === sel}"><div class="row"><b class="grow" style="font-weight:500">${esc(j.company || 'Unknown company')}</b>${scoreTag(j.score)}</div><div class="muted small">${esc(j.role)}</div>${j.location ? `<div class="faint">${esc(j.location)}</div>` : ''}</button>`).join('')
+}
+async function reviewView(fresh) {
+  const q = queue()
+  if (!q.length) { REVIEW = null; return `<section class="panel pad rise"><div class="empty"><b>Nothing to review</b>Applications I prepare show up here. You approve each one before anything is sent.</div></section>` }
+  const sel = q.some(j => j.id === param) ? param : q[0].id
+  if (fresh || REVIEW?.id !== sel) { try { REVIEW = await api(`/api/job/${encodeURIComponent(sel)}`) } catch (e) { return `<section class="panel pad">${esc(e.message)}</section>` } }
+  return `<div class="rv"><div class="rv-list" id="rvList" aria-label="Review queue">${reviewList(q, sel)}</div><div id="rvDetail">${REVIEW.review ? reviewDetail(REVIEW) : `<section class="panel pad"><div class="empty"><b>This one moved on</b>${esc(REVIEW.status)}</div></section>`}</div></div>`
+}
+function scoreParts(j) {
+  const parts = Object.entries(PARTS).filter(([k]) => typeof j.breakdown?.[k] === 'number')
+  return parts.length ? bars(parts.map(([k, l]) => [l, j.breakdown[k]]), 100) : ''
+}
+function answersHtml(j) {
+  return j.answers.map((a, i) => `<div class="ans" id="ans-${i}"><span aria-hidden="true">${a.private ? '🔒' : SRC[a.source] || '👤'}</span><span class="ans__l muted small">${esc(a.label)}${a.required ? ' <span class="faint">*</span>' : ''}</span>
+    <span class="ans__v">${a.private ? '<span class="faint">Private: hidden here</span>' : esc(a.value) || '<span class="faint">blank</span>'}</span>
+    ${j.review && a.editable && a.fid ? `<button class="btn btn--ghost btn--sm" data-edit="${i}" aria-label="Change ${esc(a.label)}">Change</button>` : '<span></span>'}</div>`).join('')
+}
+function reviewDetail(j) {
+  const rv = j.review, r = rv.resume || {}, c = j.code
+  const cov = rv.coverage, miss = cov?.missing || []
+  const resumeLine = r.fallback ? 'Your original resume, unchanged (tailoring did not pass the layout check).'
+    : r.ats ? `Rebuilt for hiring software${(r.versions_total || 1) > 1 ? ` from ${r.versions_used} of your ${r.versions_total} versions` : ''}, ${plural(r.edits || 0, 'line')} reworded${r.verified ? ', reads back cleanly ✓' : ' · not verified'}.`
+    : `${r.edits ? plural(r.edits, 'line') + ' reworded' : 'Unchanged'}${r.reorders ? `, ${plural(r.reorders, 'section')} reordered` : ''}${r.verified ? ', layout checked ✓' : ' · layout not verified'}.`
+  return `<article class="panel pad rise" aria-labelledby="rvTitle">
+    <div class="rv-head"><div class="grow"><div class="kicker">${S.practice ? 'Practice run' : 'Ready to send'}</div>
+      <h2 id="rvTitle" style="font:300 var(--step-3)/1.15 var(--font-d);margin:6px 0 4px">${esc(j.company || 'Unknown company')}</h2>
+      <div class="muted">${esc(j.role)}${j.location ? ` · ${esc(j.location)}` : ''}${j.salary ? ` · ${esc(j.salary)}` : ''}</div></div>
+      ${j.score != null ? `<div class="ring" style="--v:${j.score};--c:${j.score >= 80 ? 'var(--good)' : j.score >= 60 ? 'var(--warn)' : 'var(--bad)'}"><div><b>${j.score}</b><small>MATCH</small></div></div>` : ''}</div>
+    <div class="grid g2" style="margin-top:20px">
+      <div>
+        ${scoreParts(j) ? `<div class="sec"><h4>Score parts</h4>${scoreParts(j)}</div>` : ''}
+        ${j.must_haves.length ? `<div class="sec"><h4>They require</h4><div class="chips">${j.must_haves.map(m => `<span class="pill">${MUST[m.status]} ${esc(m.text)}</span>`).join('')}</div></div>` : ''}
+        ${j.reasons.length ? `<div class="sec"><h4>Why it fits</h4><ul style="margin:0;padding-left:18px">${j.reasons.map(x => `<li>${esc(x)}</li>`).join('')}</ul></div>` : ''}
+        ${j.dealbreakers.length ? `<div class="warnbox">⚠️ Heads up: ${esc(j.dealbreakers.join('; '))}</div>` : ''}
+        ${rv.unusual?.length ? `<div class="warnbox">⚠️ Unusual fields, left blank and never filled automatically: ${esc(rv.unusual.join(', '))}</div>` : ''}
+      </div>
+      <div>
+        ${cov?.after != null ? `<div class="sec"><h4>Keywords on your resume</h4><div class="row"><span class="tile__n" style="font-size:2rem">${cov.after}%</span><span class="faint">from ${cov.before}%</span></div>
+          ${miss.length ? `<p class="faint">Missing: tap one you really have and I rework the resume to mention it.</p><div class="chips">${miss.map((m, i) => `<button class="chip-t" data-tap="r:hv:${c}:${i}" data-confirm="Do you really have “${esc(m)}”? I add it to your profile as a confirmed skill and rework the resume. Only pick what is true." data-ok="Yes, I have it">＋ ${esc(m)}</button>`).join('')}</div>` : ''}</div>` : ''}
+        <div class="sec"><h4>Resume</h4><p class="small muted">${esc(resumeLine)}</p>
+          ${j.files.length ? `<div class="row">${j.files.map(f => `<button class="file" data-file="${esc(f)}" data-id="${esc(j.id)}">📎 ${esc(f)}</button>`).join('')}</div>` : ''}</div>
+      </div>
+    </div>
+    ${j.images.filter(f => f !== 'submitted.png').length ? `<div class="sec"><h4>Preview</h4><div class="shots">${j.images.filter(f => f !== 'submitted.png').map(f => `<img alt="${f === 'resume.png' ? 'Your resume for this job, page 1' : 'The filled-in form'}" data-src="/api/job/${encodeURIComponent(j.id)}/img/${f}">`).join('')}</div></div>` : ''}
+    <div class="sec"><h4>What I filled in (${j.answers.length})</h4><div class="faint" style="margin-bottom:6px">👤 from your profile · 💬 you told me · ✍️ drafted by me · 📎 file · 🔒 private</div>${answersHtml(j)}</div>
+    ${j.changes.length ? `<div class="sec"><h4>What I changed on your resume (${j.changes.length})</h4>${j.changes.map(x => `<div class="chg"><del>${esc(x.old)}</del><ins>${esc(x.new)}</ins>${x.reason ? `<div class="faint">${esc(x.reason)}</div>` : ''}</div>`).join('')}</div>` : ''}
+    ${rv.cover_letter ? `<div class="sec"><h4>Cover letter</h4><div class="chg" style="white-space:pre-wrap">${esc(rv.cover_letter)}</div></div>` : ''}
+    <div class="acts panel">
+      <button class="btn btn--solid" data-approve="${esc(j.id)}">${S.practice ? '✅ Approve (practice)' : '✅ Approve & send'}</button>
+      <button class="btn" data-change="${esc(j.id)}">💬 Ask for a change</button>
+      ${r.fallback ? '' : `<button class="btn" data-tap="r:or:${c}" data-say="Switching to your original resume. A fresh review follows.">📄 Use my original</button>`}
+      <span class="grow"></span>
+      <button class="btn btn--ghost" data-tap="r:sk:${c}" data-next="1">⏭ Skip</button>
+      <button class="btn btn--danger btn--sm" data-tap="r:nx:${c}" data-next="1" data-confirm="I skip this job and every future job at ${esc(j.company)}. Undo under Settings → What I look for → Companies to avoid." data-ok="Never this company">🚫 Never this company</button>
+      ${j.url ? `<a class="btn btn--ghost" href="${esc(j.url)}" target="_blank" rel="noopener noreferrer">🔗 Posting</a>` : ''}
+    </div>
+    <p class="faint" style="text-align:center;margin-top:-4px">${S.practice ? '🧪 Practice mode is on: approving records a practice run and sends nothing.' : '🚀 Approving sends this application to the employer.'}</p>
+  </article>`
+}
+
+// ---- Jobs ----
+const GROUPS = {
+  all: ['All', () => true],
+  needs: ['Needs you', j => ['NEEDS_ANSWERS', 'AWAITING_APPROVAL', 'KIT_READY', 'NEEDS_HUMAN', 'FAILED'].includes(j.status_code)],
+  kit: ['Apply yourself', j => j.status_code === 'KIT_READY'],
+  doing: ['In progress', j => ['NEW', 'FETCHED', 'SCORED', 'READY', 'FILLED_DRY', 'APPROVED', 'SUBMITTING'].includes(j.status_code)],
+  sent: ['Applied', j => ['SUBMITTED', 'APPLIED_SELF', 'DRY_RUN_DONE'].includes(j.status_code)],
+  closed: ['Closed', j => ['SKIPPED', 'CLOSED'].includes(j.status_code)],
+}
+let jobsMode = 'list', jobsQuery = ''
+try { jobsMode = localStorage.getItem('jd-jobs-mode') || 'list' } catch {}
+function jobsBody() {
+  const g = GROUPS[param] ? param : 'all', q = jobsQuery.toLowerCase()
+  const list = S.jobs.filter(GROUPS[g][1]).filter(j => !q || `${j.company} ${j.role} ${j.location} ${j.status}`.toLowerCase().includes(q))
+  if (!list.length) return `<section class="panel pad"><div class="empty"><b>No jobs here</b>${S.jobs.length ? 'Try another filter.' : 'Paste a job link above, or turn on Auto-search.'}</div></section>`
+  if (jobsMode === 'board') {
+    const by = Object.fromEntries(S.columns.map(c => [c, []]))
+    for (const j of list) by[j.column]?.push(j)
+    return `<div class="board">${S.columns.map((c, i) => `<section class="col panel rise" style="--i:${i}" aria-label="${esc(c)}"><h2>${esc(c)} <b>${by[c].length}</b></h2>
+      ${by[c].length ? by[c].slice(0, 80).map(j => `<button class="job well" data-job="${esc(j.id)}"><div class="co">${esc(j.company || 'Unknown company')}</div><div class="ro">${esc(j.role || j.id)}</div><div class="meta"><span>${esc(j.status)}</span>${scoreTag(j.score)}</div></button>`).join('') : '<div class="faint">Nothing here.</div>'}</section>`).join('')}</div>`
+  }
+  return `<section class="panel rise" style="overflow:hidden"><table class="table"><thead><tr><th>Job</th><th>Status</th><th>Match</th><th class="hide-s">Where</th><th class="hide-s">Updated</th></tr></thead><tbody>
+    ${list.slice(0, 400).map(j => `<tr data-job="${esc(j.id)}" tabindex="0"><td><div class="co">${esc(j.company || 'Unknown company')}</div><div class="faint">${esc(j.role || j.id)}</div></td><td class="small">${esc(j.status)}</td><td>${scoreTag(j.score)}</td><td class="small muted hide-s">${esc(j.location || '')}</td><td class="faint hide-s">${esc(ago(j.updated_at))}</td></tr>`).join('')}
+  </tbody></table></section>`
+}
+function jobsView() {
+  const g = GROUPS[param] ? param : 'all'
+  return `<div class="toolbar">
+      <div class="seg" role="radiogroup" aria-label="Filter">${Object.entries(GROUPS).map(([k, [l, f]]) => `<button role="radio" aria-checked="${k === g}" data-group="${k}">${l} <span class="faint">${S.jobs.filter(f).length}</span></button>`).join('')}</div>
+      <span class="grow"></span>
+      <input class="input" id="jobsQ" placeholder="Search jobs…" value="${esc(jobsQuery)}" style="width:220px" aria-label="Search jobs">
+      <div class="seg" role="radiogroup" aria-label="Layout"><button role="radio" aria-checked="${jobsMode === 'list'}" data-mode="list">List</button><button role="radio" aria-checked="${jobsMode === 'board'}" data-mode="board">Board</button></div>
+      <button class="btn btn--sm" data-export>⬇ Export CSV</button>
+    </div><div id="jobsBody">${jobsBody()}</div>`
+}
+
+// ---- Job drawer ----
 async function openJob(id) {
   let j
-  try { j = await api(`/api/job/${encodeURIComponent(id)}`) } catch (e) { return toast(e.message) }
+  try { j = await api(`/api/job/${encodeURIComponent(id)}`) } catch (e) { return toast(e.message, true) }
   openId = id
-  const d = $('#drawer'), rv = j.review
-  const parts = Object.entries(PARTS).filter(([k]) => typeof j.breakdown[k] === 'number')
+  const d = $('#drawer'), kit = j.kit, back = document.activeElement
   d.innerHTML = `
-    <button class="btn btn-quiet close" id="dClose" aria-label="Close">✕</button>
+    <button class="btn btn--ghost" id="dClose" aria-label="Close" style="position:absolute;top:18px;right:18px">✕</button>
     <div class="kicker">${esc(j.status)}</div>
-    <h2 id="dTitle" style="margin:6px 0 2px; font-weight:300; font-size:1.6rem">${esc(j.company || 'Unknown company')}</h2>
+    <h2 id="dTitle" style="margin:8px 0 4px;font:300 var(--step-3)/1.15 var(--font-d)">${esc(j.company || 'Unknown company')}</h2>
     <div class="muted">${esc(j.role)}${j.location ? ` · ${esc(j.location)}` : ''}${j.salary ? ` · ${esc(j.salary)}` : ''}</div>
-    ${j.score != null ? `<p><span class="score ${scoreCls(j.score)}">Match ${j.score}/100</span></p>` : ''}
-    ${parts.length ? `<h4>Score parts</h4>${bars(parts.map(([k, l]) => [l, j.breakdown[k]]), 100)}` : ''}
-    ${j.must_haves.length ? `<h4>They require</h4><div>${j.must_haves.map(m => `<span class="pill" style="margin:3px">${MUST[m.status]} ${esc(m.text)}</span>`).join('')}</div>` : ''}
-    ${rv && rv.coverage && rv.coverage.after != null ? `<p class="muted">Keywords on your resume: ${rv.coverage.before}% → <b style="color:var(--ink)">${rv.coverage.after}%</b></p>` : ''}
-    ${j.reasons.length ? `<h4>Why it fits</h4><ul>${j.reasons.map(r => `<li>${esc(r)}</li>`).join('')}</ul>` : ''}
-    ${j.dealbreakers.length ? `<p style="color:var(--warn)">⚠️ ${esc(j.dealbreakers.join('; '))}</p>` : ''}
-    ${j.changes.length ? `<h4>What I changed on your resume</h4>${j.changes.map(c => `<div class="chg"><del>${esc(c.old)}</del><ins>${esc(c.new)}</ins>${c.reason ? `<div class="faint">${esc(c.reason)}</div>` : ''}</div>`).join('')}` : ''}
-    ${rv && rv.cover_letter ? `<h4>Cover letter</h4><div class="chg" style="white-space:pre-wrap">${esc(rv.cover_letter)}</div>` : ''}
-    ${j.answers.length ? `<h4>What I filled in</h4>${j.answers.map(a => `<div class="ans"><span class="muted">${esc(a.label)}</span><span>${a.private ? '<span class="faint">🔒 private: see Telegram</span>' : esc(a.value)}</span></div>`).join('')}` : ''}
-    ${j.images.length ? `<h4>Screenshots</h4><div class="shots">${j.images.map(f => `<img alt="${esc(f.replace('.png', ''))} screenshot" data-src="/api/job/${encodeURIComponent(id)}/img/${f}">`).join('')}</div>` : ''}
-    ${j.receipt ? `<h4>Receipt</h4><p class="muted">${j.receipt.practice ? 'Practice run' : 'Sent'} ${esc(ago(j.receipt.at))} · ${j.receipt.answers} answers · ${esc((j.receipt.files || []).join(', '))}</p>` : ''}
-    <h4>History</h4>${j.history.slice().reverse().map(h => `<div class="ans"><span class="faint">${esc(ago(h.at))}</span><span>${esc(h.status)}${h.detail ? ` <span class="muted">· ${esc(h.detail)}</span>` : ''}</span></div>`).join('')}
-    <div class="acts">
-      ${rv ? `<button class="btn btn-primary" id="dOk">${state.practice ? '✅ Approve (practice)' : '✅ Approve &amp; send'}</button><button class="btn btn-quiet" id="dSkip">⏭ Skip</button>` : ''}
-      ${j.url ? `<a class="btn btn-quiet" href="${esc(j.url)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none" aria-label="Open posting">🔗<span class="lbl"> Posting</span></a>` : ''}
-    </div>`
-  d.classList.add('on'); $('#scrim').classList.add('on'); d.focus()
+    <div class="row" style="margin-top:12px">${j.score != null ? `<span class="score ${scoreCls(j.score)}">Match ${j.score}/100</span>` : ''}${j.outcome ? `<span class="pill">Outcome: ${esc(j.outcome)}</span>` : ''}${j.used_pct ? `<span class="pill">⚡ ~${j.used_pct}% of your 5-hour Claude limit</span>` : ''}</div>
+    ${j.actions?.length ? `<div class="row" style="margin-top:16px">${btns(j.actions, `data-id="${esc(j.id)}"`)}</div>` : ''}
+    ${j.history.at(-1)?.detail && ['Needs you', 'Something went wrong', 'Skipped'].includes(j.status) ? `<div class="warnbox">${esc(j.history.at(-1).detail)}</div>` : ''}
+    ${kit ? `<div class="sec" id="kit" style="margin-top:22px"><h4>Your kit to apply yourself</h4><ol class="small muted" style="padding-left:18px"><li>Open the posting.</li><li>Upload the files below.</li><li>Copy my drafted answers.</li><li>Come back and press “I applied”.</li></ol>
+      ${kit.files.length ? `<div class="row">${kit.files.map(f => `<button class="file" data-file="${esc(f)}" data-id="${esc(j.id)}">📎 ${esc(f)}</button>`).join('')}</div>` : ''}
+      ${kit.answers.map((a, i) => `<div class="chg"><div class="row"><b class="grow small">${esc(a.question)}</b><button class="btn btn--sm" data-copy="${i}">Copy</button></div><div style="white-space:pre-wrap;margin-top:6px">${esc(a.answer)}</div></div>`).join('')}
+      <p class="faint">Private answers (work authorization, salary…) are not drafted: answer those on the site.</p></div>` : ''}
+    ${scoreParts(j) ? `<div class="sec" style="margin-top:22px"><h4>Score parts</h4>${scoreParts(j)}</div>` : ''}
+    ${j.must_haves.length ? `<div class="sec"><h4>They require</h4><div class="chips">${j.must_haves.map(m => `<span class="pill">${MUST[m.status]} ${esc(m.text)}</span>`).join('')}</div></div>` : ''}
+    ${j.reasons.length ? `<div class="sec"><h4>Why it fits</h4><ul style="margin:0;padding-left:18px">${j.reasons.map(r => `<li>${esc(r)}</li>`).join('')}</ul></div>` : ''}
+    ${j.dealbreakers.length ? `<div class="warnbox">⚠️ ${esc(j.dealbreakers.join('; '))}</div>` : ''}
+    ${!kit && j.files?.length ? `<div class="sec"><h4>Files</h4><div class="row">${j.files.map(f => `<button class="file" data-file="${esc(f)}" data-id="${esc(j.id)}">📎 ${esc(f)}</button>`).join('')}</div></div>` : ''}
+    ${j.changes.length ? `<div class="sec"><h4>What I changed on your resume</h4>${j.changes.map(c => `<div class="chg"><del>${esc(c.old)}</del><ins>${esc(c.new)}</ins>${c.reason ? `<div class="faint">${esc(c.reason)}</div>` : ''}</div>`).join('')}</div>` : ''}
+    ${j.answers.length ? `<div class="sec"><h4>What I filled in</h4>${answersHtml({ ...j, review: null })}</div>` : ''}
+    ${j.images.length ? `<div class="sec"><h4>Screenshots</h4><div class="shots">${j.images.map(f => `<img alt="${esc(f.replace('.png', ''))} screenshot" data-src="/api/job/${encodeURIComponent(id)}/img/${f}">`).join('')}</div></div>` : ''}
+    ${j.receipt ? `<div class="sec" id="receipt"><h4>${j.receipt.practice ? 'Practice receipt' : 'Receipt'}</h4><p class="muted small">${j.receipt.practice ? 'Practice run (nothing was sent)' : 'Sent'} ${esc(ago(j.receipt.at))} · ${plural(j.receipt.answers, 'answer')} · ${esc((j.receipt.files || []).join(', ') || 'no files')}</p></div>` : ''}
+    <div class="sec"><h4>History</h4>${j.history.slice().reverse().map(h => `<div class="ans" style="grid-template-columns:90px 1fr"><span class="faint">${esc(ago(h.at))}</span><span class="small">${esc(h.status)}${h.detail ? ` <span class="muted">· ${esc(h.detail)}</span>` : ''}</span></div>`).join('')}</div>
+    <div class="acts panel">${j.review ? `<a class="btn btn--solid" href="#/review/${encodeURIComponent(j.id)}">👀 Open the review</a>` : ''}${j.url ? `<a class="btn" href="${esc(j.url)}" target="_blank" rel="noopener noreferrer">🔗 Posting</a>` : ''}<span class="grow"></span><button class="btn btn--ghost" id="dClose2">Close</button></div>`
+  d.kit = kit
+  d.classList.add('on'); $('#dscrim').classList.add('on'); d.focus(); d.scrollTop = 0
+  d.back = back
   loadImages(d)
-  $('#dClose').onclick = closeJob
-  if (rv) {
-    $('#dOk').onclick = () => act(id, 'approve', { plan_hash: rv.plan_hash }, state.practice ? 'Approved: running it as practice.' : 'Approved: sending it now.')
-    $('#dSkip').onclick = () => act(id, 'skip', {}, 'Skipped.')
-  }
 }
-async function act(id, what, body, done) {
-  document.querySelectorAll('.acts .btn').forEach(b => b.disabled = true)
-  try { await api(`/api/job/${encodeURIComponent(id)}/${what}`, body); toast(done); closeJob(); await load() }
-  catch (e) { toast(e.message); document.querySelectorAll('.acts .btn').forEach(b => b.disabled = false) }
-}
-function closeJob() { openId = null; $('#drawer').classList.remove('on'); $('#scrim').classList.remove('on') }
+function closeJob() { if (!openId) return; openId = null; $('#drawer').classList.remove('on'); $('#dscrim').classList.remove('on'); $('#drawer').back?.focus?.() }
 
-async function load() {
-  try { state = await api('/api/state') } catch (e) { $('#view').innerHTML = `<section class="panel glass-card"><p>${esc(e.message)}</p></section>`; return }
-  render()
+// ---- Questions ----
+async function questionsView() {
+  try { FORMS = await api('/api/view/forms') } catch (e) { return `<section class="panel pad">${esc(e.message)}</section>` }
+  if (!FORMS.length) return `<section class="panel pad rise"><div class="empty"><b>No questions waiting</b>When an application asks something only you can answer, it appears here.</div></section>`
+  return `<div class="stack">${FORMS.map((f, fi) => `<form class="panel pad rise" style="--i:${fi}" data-form="${fi}">
+    <div class="row"><div class="grow"><div class="kicker">${plural(f.questions.length, 'question')}</div><h3 class="h3" style="margin-top:4px;font-weight:400">${esc(f.title)}</h3></div>${f.job_id ? `<button type="button" class="btn btn--sm" data-job="${esc(f.job_id)}">View job</button>` : ''}</div>
+    <div style="margin-top:8px">${f.questions.map((q, qi) => qHtml(q, fi, qi)).join('')}</div>
+    <div class="row" style="margin-top:14px"><button class="btn btn--solid">Send answers</button>${f.job_id ? `<button type="button" class="btn btn--ghost" data-skipform="${fi}">⏭ Skip this job</button>` : ''}<span class="faint grow" style="text-align:right">🔒 Private answers are saved on this computer only, never guessed.</span></div>
+  </form>`).join('')}</div>`
 }
-document.addEventListener('click', e => {
-  const j = e.target.closest('[data-job]'); if (j) return openJob(j.dataset.job)
-  const v = e.target.closest('[data-view]'); if (v) { view = v.dataset.view; render() }
+function qHtml(q, fi, qi) {
+  const n = `q-${fi}-${qi}`, opts = q.options || [], a = q.answer
+  let ctl
+  if ((q.kind === 'choice' || q.kind === 'yesno') && opts.length <= 8) ctl = `<div class="chips" role="radiogroup" aria-labelledby="${n}">${opts.map((o, i) => `<button type="button" class="chip-t" role="radio" aria-checked="${a === o}" data-pick="${qi}" data-o="${i}">${esc(o)}</button>`).join('')}</div>`
+  else if (q.kind === 'choice' || q.kind === 'yesno') ctl = `<select class="input" data-q="${qi}" aria-labelledby="${n}"><option value="">Choose…</option>${opts.map((o, i) => `<option value="${i}" ${a === o ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`
+  else if (q.kind === 'multi') ctl = `<div class="chips" aria-labelledby="${n}">${opts.map((o, i) => `<button type="button" class="chip-t" aria-pressed="${Array.isArray(a) && a.includes(o)}" data-multi-q="${qi}" data-o="${i}">${esc(o)}</button>`).join('')}</div>`
+  else if (q.kind === 'text') ctl = `<textarea class="input" data-q="${qi}" rows="2" aria-labelledby="${n}" placeholder="${q.sensitive && q.answered ? 'Already answered (private). Leave empty to keep it.' : 'Your answer'}">${esc(a ?? '')}</textarea>`
+  else ctl = `<input class="input" data-q="${qi}" aria-labelledby="${n}" value="${esc(a ?? '')}" ${q.kind === 'number' ? 'inputmode="numeric"' : ''} placeholder="${q.sensitive && q.answered ? 'Already answered (private). Leave empty to keep it.' : q.kind === 'number' ? 'A number, like 95000 or 95k' : 'A date like 2026-12-01, “2 weeks” or “immediately”'}" style="max-width:420px">`
+  return `<div class="q"><div class="q__t" id="${n}">${qi + 1}. ${esc(q.text)}${q.sensitive ? '<span class="lock">🔒 private</span>' : ''}${q.answered ? ' <span class="faint">· answered</span>' : ''}</div>${q.why ? `<div class="q__why">${esc(q.why)}</div>` : ''}${ctl}
+    ${q.can_save ? `<label class="check"><input type="checkbox" data-remember="${qi}" ${q.remember ? 'checked' : ''}> Remember it for next time</label>` : ''}</div>`
+}
+function collectForm(form) {
+  const f = FORMS[+form.dataset.form], answers = {}, remember = {}
+  f.questions.forEach((q, qi) => {
+    const opts = q.options || []
+    if (q.kind === 'multi') { const v = $$(`[data-multi-q="${qi}"][aria-pressed=true]`, form).map(b => opts[+b.dataset.o]); if (v.length) answers[q.qid] = v }
+    else if ((q.kind === 'choice' || q.kind === 'yesno') && opts.length <= 8) { const b = $(`[data-pick="${qi}"][aria-checked=true]`, form); if (b) answers[q.qid] = opts[+b.dataset.o] }
+    else { const el = $(`[data-q="${qi}"]`, form), v = el?.value.trim() ?? ''; if (v) answers[q.qid] = el.tagName === 'SELECT' ? opts[+v] : v }
+    const r = $(`[data-remember="${qi}"]`, form); if (r) remember[q.qid] = r.checked
+  })
+  return { batch: f.batch, answers, remember }
+}
+
+// ---- Profile ----
+async function profileView() {
+  try { PROFILE = await api('/api/view/profile') } catch (e) { return `<section class="panel pad">${esc(e.message)}</section>` }
+  const p = PROFILE, c = p.completeness, r = L?.resume
+  return `<div class="stack">
+    <section class="panel hero rise"><div class="grow"><div class="kicker">Profile</div><div class="hero__now">${esc(p.contact.find(x => x.key === 'full_name')?.value || 'No name yet')}</div>
+      <div class="hero__meta">${c.missing.length ? `Missing: ${esc(c.missing.join(', '))}` : 'I have everything I need.'}</div></div>
+      <div style="width:min(260px,100%)"><div class="row"><span class="tile__n" style="font-size:2.2rem">${c.pct}%</span><span class="faint">complete</span></div><div class="track" style="margin-top:8px"><div class="fill" style="width:${c.pct}%"></div></div></div></section>
+    ${!p.helper ? '<div class="warnbox">The helper on your computer did not answer, so saved answers could not be read. Is setup complete?</div>' : ''}
+    <div class="grid g2">
+      <section class="panel pad rise" style="--i:1"><h2 class="h">Contact details</h2><p class="faint" style="margin-top:-6px">Used on every application. Saved when you leave a field.</p>
+        ${p.contact.map(f => `<label class="small muted" style="display:block;margin:12px 0 5px" for="c-${f.key}">${esc(f.label)}</label><input class="input" id="c-${f.key}" data-contact="${f.key}" value="${esc(f.value)}" data-was="${esc(f.value)}">`).join('')}</section>
+      <div class="stack">
+        <section class="panel pad rise" style="--i:2"><h2 class="h">Resume</h2>
+          <div class="row"><span class="file" style="cursor:default">📄 ${esc(p.resume || 'No resume yet')}</span><button class="btn btn--sm" data-upload="resume">Replace resume</button></div>
+          ${r?.step === 'reading' ? `<p class="muted small">📄 Reading your new resume… ${esc(r.doing || '')}</p>` : r?.step === 'profile' && r.summary ? `<div class="banner" style="margin-top:12px"><div class="banner__body"><div class="banner__t">Is this right?</div><div class="muted small">${esc(r.summary.name)} · ${esc(r.summary.headline)}</div></div><button class="btn btn--solid btn--sm" data-do="resume_ok">Looks right</button></div>` : r?.error ? `<div class="warnbox">${esc(r.error)}</div>` : ''}
+          <h4 class="faint" style="margin:18px 0 8px;letter-spacing:.14em;text-transform:uppercase;font-size:var(--step--2)">Other versions (${p.versions.length} of ${p.versions_max})</h4>
+          <p class="faint" style="margin-top:0">Versions aimed at other kinds of roles. For each job I pick the lines from all of them that fit it best.</p>
+          <div class="chips">${p.versions.map(v => `<span class="tag">${esc(v)}<button aria-label="Remove ${esc(v)}" data-tap="p:rv:rm:${esc(v)}" data-confirm="Remove the resume version “${esc(v)}”?" data-ok="Remove">×</button></span>`).join('')}${p.versions.length < p.versions_max ? '<button class="btn btn--sm" data-upload="version">＋ Add a version</button>' : ''}</div>
+          ${p.skills ? `<p class="faint" style="margin-top:14px">Confirmed skills: ${esc(p.skills)}</p>` : ''}</section>
+        <section class="panel pad rise" style="--i:3"><h2 class="h">Achievements <span class="n">${p.achievements.length}/${p.ach_max}</span></h2>
+          <p class="faint" style="margin-top:-6px">Wins that are not on your resume yet. I may use them when I tailor it, never made bigger.</p>
+          ${p.achievements.map((a, i) => `<div class="ans" style="grid-template-columns:22px 1fr auto"><span class="faint">${i + 1}.</span><span class="small">${esc(a.text)}</span><button class="btn btn--ghost btn--sm" data-tap="p:ach:rm:${esc(a.key)}" data-confirm="Remove this achievement?" data-ok="Remove" aria-label="Remove achievement ${i + 1}">Remove</button></div>`).join('')}
+          ${p.achievements.length < p.ach_max ? `<form data-ach class="stack" style="gap:8px;margin-top:12px"><textarea class="input" name="t" rows="2" placeholder="A result you are proud of, with a number if you have one."></textarea><div><button class="btn btn--sm">Add</button></div></form>` : ''}</section>
+      </div>
+    </div>
+    <section class="panel pad rise" style="--i:4"><div class="row" style="margin-bottom:10px"><h2 class="h grow" style="margin:0">Saved answers <span class="n">${p.answers.length}</span></h2><input class="input" id="ansQ" placeholder="Search, like salary or visa" style="width:240px" aria-label="Search saved answers"></div>
+      <p class="faint" style="margin-top:0">Answers you gave once are reused on every application, so I never ask twice. Private ones stay hidden here; you can replace them.</p>
+      <div id="ansList">${answersList('')}</div></section>
+  </div>`
+}
+function answersList(q) {
+  const l = PROFILE.answers.filter(a => !q || `${a.question} ${a.answer ?? ''}`.toLowerCase().includes(q.toLowerCase()))
+  if (!l.length) return '<div class="empty">No saved answers match.</div>'
+  return l.map(a => `<div class="ans" style="grid-template-columns:minmax(0,45%) 1fr auto" data-akey="${esc(a.key)}"><span class="small muted">${esc(a.question)}</span><span class="ans__v small">${a.sensitive ? '<span class="lock">🔒 private</span>' : esc(a.answer)}</span>
+    <span class="row" style="gap:4px"><button class="btn btn--ghost btn--sm" data-aedit="${esc(a.key)}">Change</button><button class="btn btn--ghost btn--sm" data-tap="a:dd:${a.code}" data-confirm="Delete the saved answer to “${esc(a.question)}”? I ask again next time it comes up." data-ok="Delete">Delete</button></span></div>`).join('')
+}
+
+// ---- Settings ----
+async function settingsView() {
+  let x
+  try { x = await api('/api/view/settings') } catch (e) { return `<section class="panel pad">${esc(e.message)}</section>` }
+  SET = Object.fromEntries(x.cats.flatMap(c => c.items.map(i => [i.id, i]))); SET._x = x
+  const subs = [...x.cats.map(c => [c.key, `${c.emoji} ${c.title}`]), ['practice', '🧪 Practice mode'], ['companies', '🏢 Companies'], ['logins', '🔑 Job site logins'], ['phone', '📱 Phone access']]
+  setTimeout(loadLogins, 0)
+  return `<div class="set-layout"><nav class="subnav panel" aria-label="Settings sections">${subs.map(([k, l]) => `<a href="#/settings/${k}" data-anchor="${k}">${esc(l)}</a>`).join('')}</nav><div class="stack">
+    ${x.cats.map((c, i) => `<section class="panel pad anchor rise" style="--i:${i}" id="set-${c.key}"><h2 class="h">${esc(c.emoji)} ${esc(c.title)}</h2><p class="faint" style="margin-top:-6px">${esc(c.blurb)}</p>${c.items.map(setRow).join('')}
+      ${c.key === 'auto' ? `<div class="row" style="margin-top:6px"><a class="btn btn--sm" href="#/settings/companies">🏢 Companies I watch (${x.companies.length})</a>${SET.ae.value ? '<button class="btn btn--sm" data-tap="d:run">🔎 Search now</button>' : ''}</div>` : ''}</section>`).join('')}
+    <section class="panel pad anchor" id="set-practice">${practiceHtml(x)}</section>
+    <section class="panel pad anchor" id="set-companies">${companiesHtml(x)}</section>
+    <section class="panel pad anchor" id="set-logins"><h2 class="h">🔑 Job site logins</h2><div id="loginsBody"><p class="faint">Checking…</p></div></section>
+    <section class="panel pad anchor" id="set-phone">${phoneHtml(x)}</section>
+  </div></div>`
+}
+function setRow(it) {
+  const head = it.t === 'bool'
+    ? `<button class="switch" role="switch" aria-checked="${!!it.value}" data-set="${it.id}" data-bool aria-label="${esc(it.label)}"><span></span></button>`
+    : `<div class="set__now">${esc(it.text)}</div>`
+  return `<div class="set" id="row-${it.id}"><div class="set__head"><div><div class="set__label">${esc(it.emoji)} ${esc(it.label)}</div><div class="set__what">${esc(it.what)}</div></div>${head}</div>${it.t === 'bool' ? '' : `<div>${ctl(it)}</div>`}</div>`
+}
+function ctl(it) {
+  const id = it.id, v = it.value
+  if (it.t === 'enum') {
+    if (it.opts.some(o => o[2])) return `<div class="opts" role="radiogroup" aria-label="${esc(it.label)}">${it.opts.map((o, i) => `<button class="opt" role="radio" aria-checked="${o[0] === v}" data-set="${id}" data-opt="${i}"><b>${esc(o[1])}</b>${o[2] ? `<span>${esc(o[2])}</span>` : ''}</button>`).join('')}</div>`
+    if (it.opts.length <= 4) return `<div class="seg" role="radiogroup" aria-label="${esc(it.label)}">${it.opts.map((o, i) => `<button role="radio" aria-checked="${o[0] === v}" data-set="${id}" data-opt="${i}">${esc(o[1])}</button>`).join('')}</div>`
+    return `<select class="input" style="max-width:320px" data-set="${id}" data-sel aria-label="${esc(it.label)}">${it.opts.map((o, i) => `<option value="${i}" ${o[0] === v ? 'selected' : ''}>${esc(o[1])}</option>`).join('')}</select>`
+  }
+  if (it.t === 'multi') return `<div class="chips" aria-label="${esc(it.label)}">${it.opts.map((o, i) => `<button class="chip-t" aria-pressed="${(v || []).includes(o[0])}" data-set="${id}" data-multi="${i}">${esc(o[1])}</button>`).join('')}</div>`
+  if (it.t === 'int') return `<div class="int"><input class="input" data-set="${id}" data-int value="${v ?? ''}" inputmode="numeric" placeholder="${esc(it.nullable || 'Type a number')}" aria-label="${esc(it.label)}">${it.unit ? `<span class="faint">${esc(it.unit)}</span>` : ''}</div>
+    <div class="chips">${it.presets.map(([p, l], i) => `<button class="chip-t" aria-pressed="${p === v}" data-set="${id}" data-preset="${i}">${esc(l)}</button>`).join('')}${it.nullable ? `<button class="chip-t" aria-pressed="${v == null}" data-set="${id}" data-null>${esc(it.nullable)}</button>` : ''}</div>`
+  if (it.t === 'time') return `<input type="time" class="input" style="width:160px" data-set="${id}" data-time value="${esc(v || '')}" aria-label="${esc(it.label)}">`
+  const ideas = id === 'rt' ? SET._x.ideas : []
+  return `<div class="tags">${(v || []).map((x, i) => `<span class="tag">${esc(x)}<button aria-label="Remove ${esc(x)}" data-set="${id}" data-rm="${i}">×</button></span>`).join('')}<input class="input input--tag" data-set="${id}" data-add placeholder="${v?.length ? 'Add more…' : `Add… ${it.example ? `like ${esc(it.example)}` : ''}`}" aria-label="Add to ${esc(it.label)}"></div>
+    ${ideas.length ? `<p class="faint" style="margin:10px 0 6px">Seen often in your searches:</p><div class="chips">${ideas.map((x, i) => `<button class="chip-t" data-set="${id}" data-idea="${i}">＋ ${esc(x)}</button>`).join('')}</div>` : ''}`
+}
+function practiceHtml(x) {
+  return `<h2 class="h">${x.practice ? '🧪' : '🚀'} Practice mode is ${x.practice ? 'on' : 'off'}</h2>
+    <p class="muted">In practice mode I do everything (find jobs, tailor your resume, fill the form, show you the review) except press the final Submit button.</p>
+    <p class="${x.practice ? 'faint' : ''}" style="${x.practice ? '' : 'color:var(--warn)'}">${x.practice ? 'Approving an application records it as a practice run. Nothing is sent.' : '⚠️ Approved applications are really sent to employers.'}</p>
+    ${x.forced ? '<p class="faint">Locked on: JobAgent was started with --practice.</p>' : `<div class="row" style="margin-top:10px">${x.practice
+      ? `<button class="btn btn--danger" data-tap="P:yes" data-confirm="From now on, when you approve an application I submit it to the employer for real. It cannot be taken back.<br><br>• You still approve each one (unless you turned on auto-apply)<br>• Every answer and file is shown to you before you approve" data-ok="Yes, go live" data-title="Send real applications?">🚀 Go live: send real applications</button>`
+      : '<button class="btn btn--solid" data-tap="P:on">🧪 Turn practice mode back on</button>'}</div>`}`
+}
+function companiesHtml(x) {
+  return `<h2 class="h">🏢 Companies I watch <span class="n">${x.companies.length}</span></h2>
+    <p class="faint" style="margin-top:-6px">Auto-search checks these companies' job boards (Greenhouse, Lever and Ashby) for new openings.${x.learned ? ` ${x.learned} of them were found from your searches; remove any you don't want and I won't add it again.` : ''}</p>
+    <div class="chips" style="margin:12px 0">${x.companies.length ? x.companies.map(s => `<span class="tag">${esc(s)}<button aria-label="Stop watching ${esc(s)}" data-tap="C:r:${esc(s)}">×</button></span>`).join('') : '<span class="faint">None yet.</span>'}</div>
+    <form class="row" data-company><input class="input grow" name="t" placeholder="Board link or name, like jobs.lever.co/acme or acme" style="flex:1 1 260px"><button class="btn btn--solid">Add company</button></form>`
+}
+function phoneHtml(x) {
+  return `<h2 class="h">📱 Phone access</h2>
+    <p class="muted">Open this dashboard inside Telegram on your phone, through a secure tunnel to this computer. Optional; every visit is checked against your Telegram account.</p>
+    ${x.phone ? `<p>On, through <b>${esc(new URL(x.phone).host)}</b>. In Telegram: Home → 🖥 Dashboard → 📱 Open dashboard.</p><button class="btn btn--danger" data-do="phone" data-null-url>🚫 Turn off phone access</button>`
+      : `${x.windows ? '<p class="faint">On this computer, open the JobAgent folder, then <code>scripts</code>, right-click <code>phone.ps1</code> → Run with PowerShell, and keep that window open. It sets the address itself.</p>' : `<p class="faint">Run <code>cloudflared tunnel --url http://127.0.0.1:${x.port ?? 4777}</code> and keep it open, then paste the https address it prints.</p>`}
+      <form class="row" data-phone><input class="input grow" name="u" placeholder="https://something.trycloudflare.com" style="flex:1 1 260px"><button class="btn">Use this address</button></form>`}`
+}
+async function loadLogins() {
+  const el = $('#loginsBody'); if (!el) return
+  try { LOGINS = await api('/api/view/logins') } catch (e) { el.innerHTML = `<p class="faint">${esc(e.message)}</p>`; return }
+  const x = LOGINS, st = s => !s || s.logged_in === null ? '❔ can\'t check right now' : s.logged_in ? '✅ logged in' : '⚪ not logged in'
+  el.innerHTML = `<p class="faint" style="margin-top:-6px">LinkedIn hides many postings from people who are not logged in. Log in once in my browser window on this computer and I stay logged in. In my window, use email and password: “Sign in with Google” does not work there.</p>
+    ${Object.entries(x.names).map(([k, n]) => `<div class="ans" style="grid-template-columns:1fr auto"><span><b style="font-weight:500">${esc(n)}</b> <span class="muted small">${st(x.sites?.[k])}${x.sites?.[k]?.saved ? ' · password saved' : ''}</span></span>
+      <span class="row" style="gap:6px">${x.retry[k] ? `<button class="btn btn--solid btn--sm" data-tap="L:rt:${k}">🔄 Retry ${plural(x.retry[k], 'job')}</button>` : ''}<button class="btn btn--sm" data-tap="L:in:${k}" data-say="A browser window opened on this computer at the ${esc(n)} login page. Log in there.">🌐 Log in</button>
+      ${x.sites?.[k]?.saved ? `<button class="btn btn--ghost btn--sm" data-tap="L:rm:${k}">🗑 Forget password</button>` : `<button class="btn btn--ghost btn--sm" data-tap="L:pw:${k}" data-say="A small box opened on this computer. Type your ${esc(n)} email and password there.">🔐 Save password</button>`}</span></div>`).join('')}
+    ${x.busy ? '<p class="faint">A login window is open on this computer.</p>' : ''}${!x.sites && !x.busy ? '<p class="faint">Is a JobAgent browser window still open? Close it, then check again.</p>' : ''}
+    <button class="btn btn--ghost btn--sm" data-relogins style="margin-top:8px">🔄 Check again</button>`
+}
+async function saveSetting(id, value) {
+  try { const r = await call('setting', { id, value }); toast(r.text) } catch (e) { toast(e.message, true) }
+  try {
+    const x = await api('/api/view/settings'); SET = Object.fromEntries(x.cats.flatMap(c => c.items.map(i => [i.id, i]))); SET._x = x
+    const row = $(`#row-${id}`); if (row) row.outerHTML = setRow(SET[id])
+  } catch {}
+  refresh(true)
+}
+
+// ---- Insights & health ----
+function insightsView() {
+  const a = S.insights.all, w = S.insights.week, pct = (x, y) => y ? Math.round(x / y * 100) + '%' : ''
+  const bands = S.insights.bands.filter(b => b.n)
+  return `<div class="stack">${L?.tip ? `<div class="banner rise"><div class="banner__body"><div class="banner__t">💡 Suggestion</div><div class="muted small">${esc(L.tip.text)}</div></div><button class="btn btn--solid" data-tap="sg:ms:${L.tip.min}">Set it to ${L.tip.min}</button><button class="btn btn--ghost" data-tap="sg:no:${L.tip.min}">No thanks</button></div>` : ''}
+  <div class="grid g3">
+    <section class="panel pad rise" style="--i:0"><h2 class="h">All time</h2>${bars([['Found', a.found], ['Prepared', a.prepared, pct(a.prepared, a.found)], ['Applied', a.applied, pct(a.applied, a.prepared)], ['Replies', a.replied, pct(a.replied, a.applied)], ['Interviews', a.interview, pct(a.interview, a.applied)], ['Offers', a.offer]], a.found)}</section>
+    <section class="panel pad rise" style="--i:1"><h2 class="h">This week</h2>${bars([['Found', w.found], ['Prepared', w.prepared], ['Applied', w.applied], ['Interviews', w.interview]], Math.max(1, w.found))}</section>
+    <section class="panel pad rise" style="--i:2"><h2 class="h">Interviews by match score</h2>${bands.length ? bars(bands.map(b => [b.name, b.interviews, `of ${b.n}`]), Math.max(...bands.map(b => b.n))) : '<p class="muted">Mark results on applied jobs (open one under Jobs → Applied) and this fills in.</p>'}</section>
+  </div></div>`
+}
+const CHECK = { 'claude login': 'Claude login', claude: 'Claude Code', 'playwright chromium': 'Hidden browser', 'docx->pdf converter': 'Word → PDF', 'data dir writable': 'Saving files', 'disk space': 'Disk space', 'telegram token': 'Telegram', bun: 'Bun', 'python>=3.12': 'Python' }
+function healthView() {
+  const h = S.health
+  return `<div class="stack">${(L?.fixes ?? []).length ? banners() : ''}<div class="grid g-side">
+    <section class="panel pad rise"><div class="row" style="margin-bottom:8px"><h2 class="h grow" style="margin:0">Checks</h2><button class="btn btn--sm" data-tap="m:hc" data-say="Checked.">🔄 Check again</button></div>
+      ${!h ? '<p class="muted">The first check runs a few seconds after JobAgent starts.</p>' : `<p class="faint" style="margin-top:0">Checked ${esc(ago(h.at))}.</p>${h.checks.map((c, i) => `<div class="ans" style="grid-template-columns:26px minmax(0,40%) 1fr"><span>${c.ok ? '✅' : c.required ? '❌' : '⚠️'}</span><span class="small">${esc(CHECK[c.name] || c.name)}</span><span class="small muted">${esc(c.detail)}</span></div>`).join('')}`}
+      ${L?.problems.length ? `<div class="warnbox" style="margin-top:14px">${L.problems.map(esc).join('<br>')}</div>` : ''}</section>
+    <section class="panel pad rise" style="--i:1"><h2 class="h">Something wrong?</h2><p class="muted small">Claude can read JobAgent's own logs, fix the bug in a separate copy and run the tests. You decide whether the fix is shared; nothing leaves this computer without your OK.</p>
+      <button class="btn btn--solid" data-tap="fix:go">🔧 Let Claude look into it</button>
+      ${L?.updates ? `<p class="small" style="margin-top:18px">⬆️ ${plural(L.updates, 'update')} available. In the JobAgent folder run <code>git pull</code>, then restart JobAgent.</p>` : '<p class="faint" style="margin-top:18px">JobAgent is up to date.</p>'}</section>
+  </div></div>`
+}
+
+// ---- Router and live refresh ----
+const RENDER = { overview, review: reviewView, jobs: jobsView, questions: questionsView, profile: profileView, settings: settingsView, insights: insightsView, health: healthView }
+const LIVE_VIEWS = new Set(['overview', 'jobs', 'insights', 'health'])
+let renderSeq = 0
+async function render(fresh) {
+  const seq = ++renderSeq, main = $('#main')
+  shell()
+  if (fresh) { main.classList.remove('fresh'); if (['questions', 'profile', 'settings'].includes(view) || (view === 'review' && queue().length)) main.innerHTML = '<p class="faint" style="padding:20px">Loading…</p>' }
+  const html = await RENDER[view](fresh)
+  if (seq !== renderSeq) return // a newer render started meanwhile
+  if (fresh) { void main.offsetWidth; main.classList.add('fresh') } else main.classList.remove('fresh')
+  main.innerHTML = html
+  loadImages(main)
+  if (fresh && view === 'settings' && param) $(`#set-${param}`)?.scrollIntoView({ block: 'start' })
+}
+function route() {
+  const [v, p] = location.hash.replace(/^#\/?/, '').split('/')
+  const next = VIEWS[v] ? v : 'overview', changed = next !== view
+  view = next; param = decodeURIComponent(p || '')
+  if (changed) { scrollTo(0, 0); window.dispatchEvent(new CustomEvent('jobagent:view', { detail: view })) }
+  closeJob()
+  render(true)
+}
+async function refresh(after) {
+  try { S = await api('/api/state'); L = S.live } catch (e) { if (!S) $('#main').innerHTML = `<section class="panel pad"><p>${esc(e.message)}</p></section>`; return }
+  shell()
+  const typing = document.activeElement?.matches?.('input,textarea,select') && $('#main').contains(document.activeElement)
+  if ($('#modal').classList.contains('on')) return
+  if (LIVE_VIEWS.has(view) && !typing) {
+    if (view === 'jobs') $('#jobsBody') ? ($('#jobsBody').innerHTML = jobsBody()) : render(false)
+    else render(false)
+  } else if (view === 'review') {
+    const q = queue(), list = $('#rvList')
+    if (after || !list || !q.some(j => j.id === (REVIEW?.id))) render(after === 'fresh')
+    else list.innerHTML = reviewList(q, REVIEW.id)
+  } else if (after && !typing && (view === 'profile' || view === 'questions')) render(false)
+  if (openId && after) openJob(openId)
+}
+let pollT = 0
+function poll() {
+  clearTimeout(pollT)
+  const busyNow = L?.work || L?.searching || L?.cards?.some(c => c.state === 'running' || c.state === 'queued') || L?.resume?.step === 'reading'
+  pollT = setTimeout(async () => { if (document.visibilityState === 'visible') await refresh(); poll() }, busyNow ? 4000 : 15000)
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refresh().then(poll) })
+
+// ---- Events (one delegated listener per kind) ----
+document.addEventListener('click', async e => {
+  const t = e.target.closest('button, a, [data-job], [data-rv]')
+  if (!t) return
+  if (t.id === 'dClose' || t.id === 'dClose2') return closeJob()
+  if (t.dataset.tap) {
+    if (t.dataset.confirm && !(await ask({ title: t.dataset.title || t.textContent.trim().replace(/^[^\w]+/, ''), body: t.dataset.confirm, ok: t.dataset.ok || 'Yes', danger: /btn--danger/.test(t.className) || /^P:yes|^r:nx|^a:dd/.test(t.dataset.tap) }))) return
+    const next = t.dataset.next
+    await tap(t.dataset.tap, t, t.dataset.say)
+    if (next && view === 'review') { param = ''; render(true) }
+    if (t.dataset.tap.startsWith('L:')) setTimeout(loadLogins, 1500)
+    if (/^(P:|C:r:)/.test(t.dataset.tap) && view === 'settings') render(false)
+    return
+  }
+  if (t.dataset.nav) {
+    const d = t.dataset.nav, id = t.dataset.id || openId
+    if (d.startsWith('r:rv') && id) { closeJob(); location.hash = `#/review/${encodeURIComponent(id)}` }
+    else if (d === 'F:list') { closeJob(); location.hash = '#/questions' }
+    else if (d.startsWith('j:kit')) { if (!openId && id) await openJob(id); $('#kit')?.scrollIntoView({ behavior: 'smooth' }) }
+    else if (d.startsWith('j:rc')) { if (!openId && id) await openJob(id); $('#receipt')?.scrollIntoView({ behavior: 'smooth' }) }
+    return
+  }
+  if (t.dataset.do) {
+    if (t.dataset.confirm && !(await ask({ title: t.textContent.trim(), body: t.dataset.confirm, ok: 'Yes', danger: true }))) return
+    return busy(t, async () => { const r = await call(t.dataset.do, 'nullUrl' in t.dataset ? { url: null } : {}); toast(r.text); await refresh(true); if (view === 'settings') render(false) })
+  }
+  if (t.dataset.job && !t.closest('.drawer')) return openJob(t.dataset.job)
+  if (t.dataset.rv) { location.hash = `#/review/${encodeURIComponent(t.dataset.rv)}`; return }
+  if (t.dataset.approve) {
+    const id = t.dataset.approve
+    return busy(t, async () => {
+      await api(`/api/job/${encodeURIComponent(id)}/approve`, { plan_hash: REVIEW.review.plan_hash })
+      toast(S.practice ? 'Approved: running it as practice. Nothing is sent.' : 'Approved: sending it now. I will tell you when it is in.')
+      param = ''; await refresh(); render(true)
+    })
+  }
+  if (t.dataset.change) {
+    const text = await ask({ title: 'What should I change?', body: 'For example: make the cover letter shorter · say I can start in 2 weeks · use my original resume.', ok: 'Ask for the change', input: { placeholder: 'Your change', rows: 4 } })
+    if (text) busy(null, async () => { const r = await call('change', { id: t.dataset.change, text }); toast(r.text) })
+    return
+  }
+  if (t.dataset.edit !== undefined && REVIEW) {
+    const a = REVIEW.answers[+t.dataset.edit], row = t.closest('.ans')
+    if (row.querySelector('form')) return
+    row.insertAdjacentHTML('beforeend', `<form data-editform="${esc(a.fid)}"><input class="input grow" name="v" value="${a.private ? '' : esc(a.value)}" placeholder="${a.private ? 'New private answer' : 'New answer'}" aria-label="New answer for ${esc(a.label)}" style="flex:1 1 220px"><button class="btn btn--solid btn--sm">Save</button><button type="button" class="btn btn--ghost btn--sm" data-cancel>Cancel</button></form>`)
+    row.querySelector('input').focus()
+    return
+  }
+  if ('cancel' in t.dataset) { t.closest('form')?.remove(); return }
+  if (t.dataset.file) return openFile(`/api/job/${encodeURIComponent(t.dataset.id)}/file/${encodeURIComponent(t.dataset.file)}`, t.dataset.file)
+  if (t.dataset.copy !== undefined) { const a = $('#drawer').kit?.answers[+t.dataset.copy]; if (a) navigator.clipboard?.writeText(a.answer).then(() => toast('Copied'), () => toast('Copy did not work here: select the text instead.', true)); return }
+  if (t.dataset.group) { location.hash = `#/jobs/${t.dataset.group}`; return }
+  if (t.dataset.mode) { jobsMode = t.dataset.mode; try { localStorage.setItem('jd-jobs-mode', jobsMode) } catch {}; $$('[data-mode]').forEach(b => b.setAttribute('aria-checked', b === t)); $('#jobsBody').innerHTML = jobsBody(); return }
+  if ('export' in t.dataset) return openFile('/api/export', 'jobagent-applications.csv')
+  if (t.dataset.pick !== undefined) { $$(`[data-pick="${t.dataset.pick}"]`, t.closest('form')).forEach(b => b.setAttribute('aria-checked', b === t)); return }
+  if (t.dataset.multiQ !== undefined) { t.setAttribute('aria-pressed', t.getAttribute('aria-pressed') !== 'true'); return }
+  if (t.dataset.skipform !== undefined) {
+    const f = FORMS[+t.dataset.skipform]
+    if (!(await ask({ title: 'Skip this job?', body: 'I stop working on it.', ok: 'Skip it', danger: true }))) return
+    return busy(t, async () => { const r = await call('form', { batch: f.batch, skip: true }); toast(r.text); await refresh(); render(true) })
+  }
+  if (t.dataset.upload) { const fi = $('#fileIn'); fi.dataset.kind = t.dataset.upload; fi.value = ''; fi.click(); return }
+  if (t.dataset.aedit) {
+    const a = PROFILE.answers.find(x => x.key === t.dataset.aedit)
+    const v = await ask({ title: a.question, body: a.sensitive ? 'Private: the current answer stays hidden. Type the new one.' : `Now: <b>${esc(a.answer)}</b>`, ok: 'Save', input: { value: a.sensitive ? '' : a.answer, rows: 2 } })
+    if (v) busy(null, async () => { const r = await call('answer', { key: a.key, value: v }); toast(r.text); render(false) })
+    return
+  }
+  if ('relogins' in t.dataset) { $('#loginsBody').innerHTML = '<p class="faint">Checking…</p>'; return loadLogins() }
+  if (t.dataset.set) {
+    const it = SET[t.dataset.set]; if (!it) return
+    const d = t.dataset
+    if ('bool' in d) return saveSetting(it.id, !it.value)
+    if (d.opt !== undefined) return saveSetting(it.id, it.opts[+d.opt][0])
+    if (d.multi !== undefined) { const o = it.opts[+d.multi][0], have = it.value || []; return saveSetting(it.id, have.includes(o) ? have.filter(x => x !== o) : [...have, o]) }
+    if (d.preset !== undefined) return saveSetting(it.id, it.presets[+d.preset][0])
+    if ('null' in d) return saveSetting(it.id, null)
+    if (d.rm !== undefined) return saveSetting(it.id, (it.value || []).filter((_, i) => i !== +d.rm))
+    if (d.idea !== undefined) return saveSetting(it.id, [...(it.value || []), SET._x.ideas[+d.idea]])
+  }
+  if (t.dataset.anchor && view === 'settings') { e.preventDefault(); history.replaceState(null, '', `#/settings/${t.dataset.anchor}`); $(`#set-${t.dataset.anchor}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); return }
 })
-$('#scrim').onclick = closeJob
-document.addEventListener('keydown', e => { if (e.key === 'Escape' && openId) closeJob() })
-signIn().then(load, e => { $('#view').innerHTML = `<section class="panel glass-card"><p>${esc(e.message)}</p></section>` })
-setInterval(() => { if (!openId && document.visibilityState === 'visible') load() }, 30000)
+document.addEventListener('change', e => {
+  const t = e.target
+  if (t.dataset.set && SET[t.dataset.set]) {
+    const it = SET[t.dataset.set]
+    if ('sel' in t.dataset) return saveSetting(it.id, it.opts[+t.value][0])
+    if ('int' in t.dataset) return saveSetting(it.id, t.value.trim() === '' && it.nullable ? null : t.value.trim())
+    if ('time' in t.dataset && t.value) return saveSetting(it.id, t.value)
+  }
+  if (t.dataset.contact && t.value.trim() !== t.dataset.was) {
+    busy(null, async () => { const r = await call('contact', { key: t.dataset.contact, value: t.value }); t.dataset.was = t.value.trim(); toast(r.text) })
+  }
+  if (t.id === 'fileIn' && t.files[0]) {
+    const f = t.files[0], kind = t.dataset.kind
+    if (f.size > 20 * 1024 * 1024) return toast('That file is over 20 MB.', true)
+    const rd = new FileReader()
+    rd.onload = () => busy(null, async () => { toast('Uploading…'); const r = await call('upload', { kind, name: f.name, data: String(rd.result).split(',')[1] || '' }); toast(r.text); await refresh(true); render(false) })
+    rd.readAsDataURL(f)
+  }
+})
+document.addEventListener('keydown', e => {
+  const t = e.target
+  if (e.key === 'Escape' && openId) return closeJob()
+  if (e.key === 'Enter' && t.dataset?.add !== undefined && t.dataset.set) {
+    e.preventDefault()
+    const it = SET[t.dataset.set], items = t.value.split(/[,\n]/).map(x => x.trim()).filter(Boolean)
+    if (items.length) saveSetting(it.id, [...(it.value || []), ...items])
+  }
+  if (e.key === 'Enter' && t.matches('tr[data-job]')) openJob(t.dataset.job)
+})
+document.addEventListener('input', e => {
+  if (e.target.id === 'jobsQ') { jobsQuery = e.target.value; $('#jobsBody').innerHTML = jobsBody() }
+  if (e.target.id === 'ansQ') $('#ansList').innerHTML = answersList(e.target.value)
+})
+document.addEventListener('submit', e => {
+  const f = e.target
+  e.preventDefault()
+  const btn = f.querySelector('button:not([type=button])')
+  if (f.id === 'linkForm') return busy(btn, async () => { const r = await call('link', { text: $('#linkIn').value }); $('#linkIn').value = ''; toast(r.text); await refresh(true) })
+  if (f.dataset.form !== undefined) return busy(btn, async () => { const r = await call('form', collectForm(f)); toast(r.text); await refresh(); render(true) })
+  if (f.dataset.editform !== undefined) return busy(btn, async () => { const r = await call('edit', { id: REVIEW.id, fid: f.dataset.editform, value: f.v.value }); toast(r.text); f.remove() })
+  if (f.dataset.code) return busy(btn, async () => { const r = await call('code', { id: f.dataset.code, value: f.v.value }); toast(r.text); await refresh(true) })
+  if ('ach' in f.dataset) return busy(btn, async () => { const r = await call('achievement', { text: f.t.value }); toast(r.text); render(false) })
+  if ('company' in f.dataset) return busy(btn, async () => { const r = await call('company', { text: f.t.value }); toast(r.text); render(false) })
+  if ('phone' in f.dataset) return busy(btn, async () => { const r = await call('phone', { url: f.u.value }); toast(r.text); render(false) })
+})
+$('#dscrim').onclick = closeJob
+window.addEventListener('hashchange', route)
+signIn().then(async () => { await refresh(); route(); poll() }, e => { $('#main').innerHTML = `<section class="panel pad"><p>${esc(e.message)}</p></section>` })
+</script>
+
+<!-- ===== Background: aurora veil (three r0.143, served from this computer). If it fails, the page works without it. ===== -->
+<script type="importmap">{ "imports": { "three": "/vendor/three/build/three.module.js", "three/addons/": "/vendor/three/examples/jsm/" } }</script>
+<script type="module">
+import * as THREE from 'three'
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js'
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js'
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js'
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
+
+// ---- Fixed parameters (see app/web/SPEC.md) ----
+const SEED = 0x9E3779B9, FOV = 48, BLOOM = [0.6, 0.55, 0.0], BASE = 0.55, SPIN = 0.02, APPEAR_MS = 1600, TRAVEL_S = 1.9
+const POSES = { // kinetic: every section has its own camera; switching travels between them
+  overview:  { p: [0.0, 0.0, 6.2],  t: [0.7, 0.5, -2.0], ry: 0.00, dim: 0.62 },
+  review:    { p: [1.5, -0.6, 5.0], t: [1.9, 0.3, -2.0], ry: 0.30, dim: 0.36 },
+  jobs:      { p: [-1.7, 0.7, 7.3], t: [-0.5, 0.6, -2.0], ry: -0.38, dim: 0.40 },
+  questions: { p: [0.9, 1.3, 5.6],  t: [0.5, 1.1, -2.0], ry: 0.18, dim: 0.42 },
+  profile:   { p: [-1.1, -0.9, 6.0], t: [-0.2, -0.1, -2.0], ry: -0.24, dim: 0.45 },
+  settings:  { p: [2.3, 0.3, 7.7],  t: [1.0, 0.3, -2.0], ry: 0.52, dim: 0.36 },
+  insights:  { p: [0.2, -1.5, 6.6], t: [0.3, -0.3, -2.0], ry: 0.08, dim: 0.55 },
+  health:    { p: [-2.3, -0.2, 6.4], t: [-0.8, 0.1, -2.0], ry: -0.58, dim: 0.55 },
+}
+const SHEETS = [ // amp, z, y, ry, rx, phase, alpha
+  [0.55, -2.6, 0.9, 0.10, -0.12, 0.0, 0.95],
+  [0.90, -1.5, 0.2, -0.20, -0.05, 1.7, 0.72],
+  [1.25, -3.8, 1.4, 0.32, -0.18, 3.1, 0.62],
+  [1.40, -0.7, -0.7, -0.08, 0.06, 4.4, 0.40],
+]
+function mulberry32(a){ return function(){ a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296 } }
+const css = getComputedStyle(document.documentElement), token = n => css.getPropertyValue(n).trim()
+function hexToVec3(hex){ let h = hex.replace('#','').trim(); if (h.length === 3) h = h.split('').map(c => c + c).join(''); const n = parseInt(h, 16); return new THREE.Vector3(((n>>16)&255)/255, ((n>>8)&255)/255, (n&255)/255) }
+const clamp = THREE.MathUtils.clamp, lerp = THREE.MathUtils.lerp
+const ease = x => x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2
+
+try {
+  const canvas = document.getElementById('bg')
+  const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches
+  const coarse = matchMedia('(pointer: coarse)').matches
+  const lowPower = coarse || innerWidth < 760 || (navigator.hardwareConcurrency || 8) <= 4
+  const dpr = () => Math.min(devicePixelRatio || 1, lowPower ? 1 : 1.5) // soft light: no visible gain above 1.5, 2.25x the fragment work
+  const rng = mulberry32(SEED)
+
+  const renderer = new THREE.WebGL1Renderer({ canvas, antialias: false, powerPreference: 'high-performance' })
+  renderer.setClearColor(0x000000, 1)
+  const scene = new THREE.Scene(); scene.background = new THREE.Color(0x000000)
+  let W = canvas.clientWidth || innerWidth, H = canvas.clientHeight || innerHeight
+  const camera = new THREE.PerspectiveCamera(FOV, W / H, 0.1, 80); camera.position.set(0, 0, 6.2); scene.add(camera)
+  const rig = new THREE.Group(); scene.add(rig)    // TRANSLATE only, never rotated
+  const group = new THREE.Group(); rig.add(group)  // the subject; this one animates
+
+  const COL = { core: hexToVec3(token('--col-core')), inner: hexToVec3(token('--col-inner')), mid: hexToVec3(token('--col-mid')), outer: hexToVec3(token('--col-outer')), spark: hexToVec3(token('--col-spark')) }
+  const add = { blending: THREE.AdditiveBlending, transparent: true, depthTest: false, depthWrite: false }
+
+  // ---- Sheets: the vertex shader does all the work ----
+  const sheetVert = `
+    uniform float uTime, uAmp, uEnergy, uPhase;
+    varying float vHeight, vEdge; varying vec2 vUv;
+    void main(){
+      vUv = uv;
+      float t = uTime * 0.11 + uPhase;
+      vec2  q = position.xy * 0.22;
+      float w1 = sin(q.x * 1.7 + t * 1.3) * cos(q.y * 1.1 - t);
+      float w2 = sin(q.x * 3.1 - t * 0.7 + w1 * 1.4);
+      float h  = w1 * 0.8 + w2 * 0.35;
+      vec3 p = position;
+      p.z += h * uAmp * (1.0 + uEnergy * 0.8);
+      vHeight = h;
+      vEdge   = abs(w2);
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+    }`
+  const sheetFrag = `
+    uniform vec3 uColCore, uColMid, uColOuter; uniform float uBrightness, uAlpha;
+    varying float vHeight, vEdge; varying vec2 vUv;
+    void main(){
+      float crease = pow(1.0 - clamp(vEdge, 0.0, 1.0), 3.0);
+      vec3  c = mix(uColOuter, uColMid, clamp(vHeight * 0.5 + 0.5, 0.0, 1.0));
+      c = mix(c, uColCore, crease * 0.65);
+      float fade = smoothstep(0.5, 0.15, abs(vUv.y - 0.5)) * smoothstep(0.5, 0.2, abs(vUv.x - 0.5));
+      gl_FragColor = vec4(c * uBrightness * (0.1 + crease * 0.95), fade * uAlpha * 0.5);
+    }`
+  const mats = []
+  const segX = lowPower ? 100 : 160, segY = lowPower ? 44 : 72
+  for (const [amp, z, y, ry, rx, phase, alpha] of SHEETS) {
+    const m = new THREE.ShaderMaterial({ ...add, side: THREE.DoubleSide, vertexShader: sheetVert, fragmentShader: sheetFrag, uniforms: {
+      uTime: { value: 0 }, uAmp: { value: amp }, uEnergy: { value: 0 }, uPhase: { value: phase + rng() * 0.4 },
+      uColCore: { value: COL.core }, uColMid: { value: COL.mid }, uColOuter: { value: COL.outer }, uBrightness: { value: BASE }, uAlpha: { value: alpha } } })
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(18, 8, segX, segY), m)
+    mesh.position.set((rng() - 0.5) * 0.8, y, z); mesh.rotation.set(rx, ry, (rng() - 0.5) * 0.12)
+    mesh.frustumCulled = false // displaced in the vertex shader: its bounding box is wrong
+    group.add(mesh); mats.push(m)
+  }
+
+  // ---- Motes: a sparse dust for scale, heavy-tailed brightness ----
+  const N = lowPower ? 120 : 220, pos = new Float32Array(N * 3), seed = new Float32Array(N), size = new Float32Array(N)
+  for (let i = 0; i < N; i++) {
+    pos[i * 3] = (rng() - 0.5) * 16; pos[i * 3 + 1] = -3.5 + rng() * 7.5; pos[i * 3 + 2] = -5 + rng() * 6.5
+    seed[i] = rng(); size[i] = 0.35 + Math.pow(rng(), 3) * 2.2
+  }
+  const mg = new THREE.BufferGeometry()
+  mg.setAttribute('position', new THREE.BufferAttribute(pos, 3)); mg.setAttribute('aSeed', new THREE.BufferAttribute(seed, 1)); mg.setAttribute('aSize', new THREE.BufferAttribute(size, 1))
+  const moteMat = new THREE.ShaderMaterial({ ...add, uniforms: { uTime: { value: 0 }, uPixelRatio: { value: dpr() }, uBrightness: { value: BASE }, uCol: { value: COL.spark } },
+    vertexShader: `
+      attribute float aSeed, aSize; uniform float uTime, uPixelRatio; varying float vTw;
+      void main(){
+        vec3 p = position; p.y += sin(uTime * 0.2 + aSeed * 6.2831) * 0.08;
+        vec4 mv = modelViewMatrix * vec4(p, 1.0);
+        gl_PointSize = aSize * uPixelRatio * (18.0 / max(0.001, -mv.z));
+        vTw = 0.55 + 0.45 * sin(uTime * 1.3 + aSeed * 6.2831);
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader: `
+      uniform vec3 uCol; uniform float uBrightness; varying float vTw;
+      void main(){ float d = length(gl_PointCoord - 0.5); float a = smoothstep(0.5, 0.0, d); a *= a; gl_FragColor = vec4(uCol * uBrightness * vTw, a * 0.6); }` })
+  const motes = new THREE.Points(mg, moteMat); motes.frustumCulled = false; group.add(motes)
+
+  // ---- Post: bloom, then the lens (vignette, gamma, grain dither that kills banding in the soft gradients) ----
+  const composer = new EffectComposer(renderer)
+  composer.addPass(new RenderPass(scene, camera))
+  composer.addPass(new UnrealBloomPass(new THREE.Vector2(W, H), ...BLOOM))
+  const lens = new ShaderPass({ uniforms: { tDiffuse: { value: null }, uTime: { value: 0 }, uRes: { value: new THREE.Vector2(W, H) } },
+    vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    fragmentShader: `
+      uniform sampler2D tDiffuse; uniform float uTime; uniform vec2 uRes; varying vec2 vUv;
+      float grain(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+      void main(){
+        vec3 col = texture2D(tDiffuse, vUv).rgb;
+        vec2 c = vUv - 0.5;
+        col *= mix(0.6, 1.0, smoothstep(1.05, 0.25, length(c * vec2(1.0, 1.25))));
+        col = pow(max(col, 0.0), vec3(1.0 / 2.2));
+        col += (grain(vUv * uRes + fract(uTime) * 61.0) - 0.5) * (2.5 / 255.0);
+        gl_FragColor = vec4(col, 1.0);
+      }` })
+  composer.addPass(lens)
+
+  function layoutRig(){ const wide = (W / H) > 1.15; rig.position.set(wide ? 0.9 : 0, wide ? 0.5 : 1.3, 0) }
+  function resize(){
+    // Read from the CANVAS, never innerHeight: 100lvh does not change when a mobile URL bar hides on scroll.
+    W = canvas.clientWidth || innerWidth; H = canvas.clientHeight || innerHeight
+    const r = dpr()
+    renderer.setPixelRatio(r); renderer.setSize(W, H, false)
+    camera.aspect = W / H; camera.updateProjectionMatrix()
+    composer.setPixelRatio(r); composer.setSize(W, H) // no bloomPass.setSize after this: it would size in CSS pixels
+    moteMat.uniforms.uPixelRatio.value = r; lens.uniforms.uRes.value.set(W * r, H * r)
+    layoutRig()
+    if (reduceMotion) drawFrozen()
+  }
+  let rt = 0
+  addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(resize, 120) }, { passive: true })
+
+  // ---- Motion state ----
+  const startView = (location.hash.replace(/^#\/?/, '').split('/')[0]) || 'overview'
+  const pose0 = POSES[startView] || POSES.overview
+  const cam = { p: new THREE.Vector3(...pose0.p), t: new THREE.Vector3(...pose0.t), ry: pose0.ry, dim: pose0.dim }
+  let from = null, to = pose0, travelStart = -10
+  const mouse = new THREE.Vector2(), mouseTarget = new THREE.Vector2()
+  let appearStart = performance.now(), lastT = performance.now() / 1000, spin = 0, energy = 0, energyTarget = 0, scrollRaw = 0, scrollSmooth = 0
+  addEventListener('jobagent:view', e => {
+    const next = POSES[e.detail]; if (!next || next === to) return
+    from = { p: cam.p.clone(), t: cam.t.clone(), ry: cam.ry, dim: cam.dim }; to = next; travelStart = performance.now() / 1000; energyTarget = 1
+    if (reduceMotion) { cam.p.set(...to.p); cam.t.set(...to.t); cam.ry = to.ry; cam.dim = to.dim; drawFrozen() }
+  })
+  addEventListener('scroll', () => { const max = Math.max(1, document.documentElement.scrollHeight - innerHeight); scrollRaw = clamp(scrollY / max, 0, 1) }, { passive: true })
+  if (!reduceMotion && !coarse) addEventListener('pointermove', e => {
+    const nx = (e.clientX / innerWidth) * 2 - 1, ny = -((e.clientY / innerHeight) * 2 - 1)
+    energyTarget = Math.min(1, energyTarget + Math.hypot(nx - mouseTarget.x, ny - mouseTarget.y) * 0.6)
+    mouseTarget.set(nx, ny)
+  }, { passive: true })
+
+  function pose(now) {
+    if (from) {
+      const k = clamp((now - travelStart) / TRAVEL_S, 0, 1), e = ease(k)
+      cam.p.lerpVectors(new THREE.Vector3(...from.p), new THREE.Vector3(...to.p), e)
+      cam.t.lerpVectors(new THREE.Vector3(...from.t), new THREE.Vector3(...to.t), e)
+      cam.ry = lerp(from.ry, to.ry, e); cam.dim = lerp(from.dim, to.dim, e)
+      if (k >= 1) from = null
+    }
+    camera.position.set(cam.p.x + mouse.x * 0.35, cam.p.y + mouse.y * 0.22 - scrollSmooth * 0.7, cam.p.z + scrollSmooth * 0.9)
+    camera.lookAt(cam.t.x, cam.t.y - scrollSmooth * 0.35, cam.t.z)
+    group.rotation.y = cam.ry + spin + mouse.x * 0.06
+  }
+  function push(time, bright, en) {
+    for (const m of mats) { m.uniforms.uTime.value = time; m.uniforms.uBrightness.value = bright; m.uniforms.uEnergy.value = en }
+    moteMat.uniforms.uTime.value = time; moteMat.uniforms.uBrightness.value = bright
+    lens.uniforms.uTime.value = time
+  }
+  function frame(){
+    requestAnimationFrame(frame)
+    if (document.hidden) return
+    const now = performance.now() / 1000, dt = Math.min(0.05, now - lastT) // clamp the tab-refocus jump
+    lastT = now
+    const alpha = clamp((performance.now() - appearStart - 300) / APPEAR_MS, 0, 1)
+    energyTarget *= 0.93; energy += (energyTarget - energy) * 0.12
+    mouse.lerp(mouseTarget, 0.05)
+    scrollSmooth += (scrollRaw - scrollSmooth) * 0.08
+    spin += SPIN * dt
+    pose(now)
+    const narrow = W / H < 1.15 ? 0.7 : 1 // phones: the panels are full width, so the light sits behind text
+    const travel = from ? Math.sin(clamp((now - travelStart) / TRAVEL_S, 0, 1) * Math.PI) : 0 // light swells mid-flight
+    push(now, BASE * cam.dim * narrow * alpha * (1 + travel * 0.35), energy)
+    composer.render()
+  }
+  function drawFrozen(){ pose(0); push(12.0, BASE * cam.dim * (W / H < 1.15 ? 0.7 : 1), 0); composer.render() }
+
+  resize()
+  if (reduceMotion) drawFrozen(); else frame()
+  document.documentElement.dataset.scene = 'ready'
+} catch (e) {
+  document.documentElement.dataset.scene = 'off' // no WebGL: the CSS gradient stays
+}
 </script>
 </body>
 </html>

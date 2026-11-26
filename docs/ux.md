@@ -23,6 +23,7 @@ Every screen is built from `app/src/kit.ts`. Use its helpers (`heading`, `note`,
 
 - Progress is a **live card** that is edited in place and never makes a sound. Only things that need the user are loud: a review, a kit, a question, a problem.
 - One message per event. When a prompt is answered, edit it into its result instead of sending a new message.
+- Typed text has **one listener**: the screen the user opened last (`pending` in `app.ts`). A message the app sends on its own never starts listening (the emailed verification code is the one exception). Questions are answered only through ❓ Open Questions.
 - Pictures (a resume preview, the filled form) go before the card as a silent album. Files go behind a `📎 Files` button.
 
 ## Home

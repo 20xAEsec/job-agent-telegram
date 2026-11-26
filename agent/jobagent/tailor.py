@@ -1,24 +1,34 @@
-"""Job-level resume and cover-letter commands: `resume outline`, `resume-check`, `tailor <id>`, `cover-letter <id>`."""
+"""Job-level resume and cover-letter commands: `resume outline`, `resume bank`, `resume-check`, `tailor <id>`, `cover-letter <id>`."""
 import json
+import re
 import shutil
 from pathlib import Path
 
 import docx
+import pymupdf
 
-from . import profile
-from .docs import docx_tailor, pdf_tailor, render, verify
-from .docs.plan import DocError, diff
+from . import profile, resume
+from .docs import ats, docx_tailor, pdf_tailor, render, verify
+from .docs.plan import LIMIT, DocError, diff
 from .paths import atomic_write_json
 from .profile import JOB_RE
 
 MAX_WORDS = 250
 
 
-def _tailoring(d: Path) -> str:
+FACT_SECTIONS = ("Summary", "Experience", "Skills", "Confirmed skills", "Achievements", "Education")  # never Saved answers
+
+
+def _settings(d: Path) -> dict:
     try:
-        return json.loads((d / "settings.json").read_text("utf-8"))["apply"]["tailoring"]
-    except (OSError, KeyError, ValueError):
-        return "light"
+        return json.loads((d / "settings.json").read_text("utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def _tailoring(d: Path) -> str:
+    t = (_settings(d).get("apply") or {}).get("tailoring")
+    return t if t in (*LIMIT, "ats") else "light"
 
 
 def _base(d: Path) -> Path:
@@ -38,6 +48,8 @@ def _job_dir(d: Path, job_id: str) -> Path:
 
 def outline(d: Path) -> dict:
     b = _base(d)
+    if _tailoring(d) == "ats":  # the rebuild works from the line bank, not the layout
+        return {"ok": True, "format": b.suffix[1:], "tailoring": "ats", "next": "jobagent resume bank"}
     mod = docx_tailor if b.suffix == ".docx" else pdf_tailor
     units = mod.outline(b, _tailoring(d))
     for u in units:  # layout details are for the tailor, not for Claude
@@ -57,7 +69,7 @@ def _base_pdf(d: Path, b: Path) -> Path:
 
 def _run(d: Path, out_dir: Path, plan: dict, stem: str = "resume") -> dict:
     """Apply `plan` to the base resume into out_dir, then verify. Returns the files and the verify report."""
-    b, t = _base(d), _tailoring(d)
+    b, t = _base(d), _tailoring(d) if _tailoring(d) in LIMIT else "light"  # ats mode: a zero-edit resume-check round trip
     units = (docx_tailor if b.suffix == ".docx" else pdf_tailor).outline(b, t)
     by = {u["uid"]: u for u in units}
     edits = [{"old": by[e["uid"]]["text"], "new": e["new_text"]} for e in plan.get("edits") or [] if e.get("uid") in by]
@@ -86,12 +98,86 @@ def tailor(d: Path, job_id: str, fallback: bool = False) -> dict:
         plan = json.loads((j / "tailor_plan.json").read_text("utf-8"))
     except (OSError, ValueError) as e:
         raise DocError("no_plan", f"tailor_plan.json is missing or not valid JSON ({type(e).__name__})") from e
+    if _tailoring(d) == "ats":
+        return _ats(d, j, plan)
     r = _run(d, j, plan)
     atomic_write_json(j / "diff.json", {**diff(r["units"], plan), "verify": r["verify"]})
     files = sorted(p.name for p in j.glob("resume.*"))
     if not r["verify"]["ok"]:
         return {"ok": False, "code": "verify_failed", "error": "; ".join(c["detail"] for c in r["verify"]["checks"] if not c["ok"]), "verify": r["verify"], "files": files}
     return {"ok": True, "edits": len(plan.get("edits") or []), "verify": r["verify"], "files": files}
+
+
+def _texts(d: Path) -> dict[str, str]:
+    srcs = resume.sources(d)
+    if not srcs:
+        raise DocError("no_resume", "no base resume yet: the user must send one first")
+    return {s["name"]: Path(s["text_file"]).read_text("utf-8") for s in srcs}
+
+
+def _read_bank(d: Path, texts: dict) -> dict:
+    try:
+        bank = json.loads((d / "resume_bank.json").read_text("utf-8"))
+    except OSError as e:
+        raise DocError("no_bank", "resume_bank.json is missing: run `jobagent resume bank` and build it") from e
+    except ValueError:
+        bank = None
+    if errs := ats.check_bank(bank, list(texts.values())):
+        raise DocError("bad_bank", "; ".join(errs[:8]))
+    return bank
+
+
+def bank_status(d: Path) -> dict:
+    """Whether data/resume_bank.json (every line item from every resume version) is there and still true to the resumes."""
+    texts, srcs = _texts(d), resume.sources(d)
+    if not (d / "resume_bank.json").exists():
+        return {"ok": True, "status": "missing", "bank_file": str((d / "resume_bank.json").resolve()), "sources": srcs}
+    bank = _read_bank(d, texts)
+    return {"ok": True, "status": "ready", "versions": len(srcs), "roles": len(bank["roles"]),
+            "bullets": sum(len(r["bullets"]) for r in bank["roles"]), "skills": len(bank.get("skills") or [])}
+
+
+def _paper(b: Path) -> pymupdf.Rect:
+    """The ATS rebuild keeps the user's paper size (Letter or A4)."""
+    if b.suffix == ".pdf":
+        with pymupdf.open(b) as x:
+            return x[0].rect
+    s = docx.Document(str(b)).sections[0]
+    return pymupdf.Rect(0, 0, s.page_width.pt, s.page_height.pt) if s.page_width and s.page_height else pymupdf.paper_rect("letter")
+
+
+def _ats(d: Path, j: Path, plan: dict) -> dict:
+    texts = _texts(d)
+    bank = _read_bank(d, texts)
+    secs = profile.show(d)["sections"] if (d / "profile.md").exists() else {}
+    facts = "\n".join([*texts.values(), *(secs.get(k, "") for k in FACT_SECTIONS)])
+    ach = {k: v for k, v in profile._fields(secs.get("Achievements", "").splitlines()).items() if re.fullmatch(r"a\d{1,2}", k) and v.strip()}
+    try:
+        an = json.loads((j / "analysis.json").read_text("utf-8"))
+    except (OSError, ValueError):
+        an = {}
+    kws, years = ats.keywords(an), (_settings(d).get("filters") or {}).get("years_experience")
+    ats.check_plan(plan, bank, kws, facts, ach, [years] if isinstance(years, int) else [])
+    contact = profile._fields(secs.get("Contact", "").splitlines())
+    r = ats.compose(plan, bank, contact, ach, j / "resume.pdf", _paper(_base(d)))
+    (j / "resume.docx").unlink(missing_ok=True)  # left from an earlier non-ATS run: the PDF is the resume now
+    src = {b["id"]: b["text"] for x in bank["roles"] for b in x["bullets"]} | ach
+    picked = [b for x in plan["roles"] for b in x.get("bullets", [])]
+    edits = [{"old": src[b["src"]], "new": b["text"], "reason": b.get("reason", "")} for b in picked if ats.norm(b["text"]) != ats.norm(src[b["src"]])]
+    sq = {n: ats._sq(t) for n, t in texts.items()}
+    used = sorted({n for b in picked for n, t in sq.items() if ats._sq(src[b["src"]]) in t})
+    atomic_write_json(j / "diff.json", {"mode": "ats", "edits": edits, "reorder": [], "versions_used": used, "versions_total": len(texts),
+                                        "pages": r["pages"], "verify": r["verify"]})
+    res = {"ok": True, "mode": "ats", "pages": r["pages"], "font_pt": r["font_pt"], "reworded": len(edits), "versions_used": used, "files": ["resume.pdf"]}
+    if kws:
+        after, fn = ats.score(r["text"], kws), ats.norm(facts)
+        res["keywords"] = {"before": ats.score(texts.get("main", ""), kws)["score"], "after": after["score"],
+                           # missing ones the user's own resumes back can still be added; the others are true gaps
+                           "missing_you_have": [m for m in after["missing"] if ats.backed(m, fn, kws)],
+                           "missing_not_on_your_resumes": [m for m in after["missing"] if not ats.backed(m, fn, kws)]}
+    if not r["verify"]["ok"]:
+        return {**res, "ok": False, "code": "verify_failed", "error": "; ".join(c["detail"] for c in r["verify"]["checks"] if not c["ok"]), "verify": r["verify"]}
+    return res
 
 
 def resume_check(d: Path) -> dict:

@@ -9,6 +9,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
     "grammy": "^1.46.0",
+    "three": "0.143.0",
     "zod": "^3.23.0"
   },
   "devDependencies": {

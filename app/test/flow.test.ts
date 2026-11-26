@@ -281,7 +281,7 @@ describe('upgrade: dashboard', () => {
       const st = await (await fetch(`${base}/api/state`, { headers: { cookie } })).json()
       expect(st.jobs.find((j: any) => j.id === id).column).toBe('Needs you')
       const j = jobJson(id)!
-      expect(j.answers).toEqual([{ label: 'Salary', value: null, source: '', private: true }, { label: 'Name', value: 'Jane', source: '', private: false }])
+      expect(j.answers.map((a: { label: string; value: string | null; private: boolean }) => [a.label, a.value, a.private])).toEqual([['Salary', null, true], ['Name', 'Jane', false]])
       expect(JSON.stringify(j)).not.toContain('150000')
       const post = (body: unknown, extra: Record<string, string> = {}) => fetch(`${base}/api/job/${id}/approve`, { method: 'POST', headers: { cookie, 'content-type': 'application/json', ...extra }, body: JSON.stringify(body) })
       expect((await post({ plan_hash: 'h1' }, { origin: 'https://evil.example' })).status).toBe(403) // cross-site
@@ -291,6 +291,54 @@ describe('upgrade: dashboard', () => {
       expect((await fetch(`${base}/api/job/${id}/img/x.png`, { headers: { cookie } })).status).toBe(404) // only known screenshots
       expect(columnOf({ status: 'SUBMITTED' } as any, 'interview')).toBe('Interview')
     } finally { dash.stop(); rmSync(d, { recursive: true, force: true }) }
+  })
+
+  test('front end: library files from an allowlist, actions only signed in and never reads, files only the job\'s own', async () => {
+    const { startDashboard, TAPS, pageButtons } = await import('../src/dashboard')
+    const id = 'greenhouse-dash-2', d = join(DATA, 'jobs', id)
+    mkdirSync(d, { recursive: true })
+    writeFileSync(join(d, 'status.json'), JSON.stringify({ status: 'AWAITING_APPROVAL', updated_at: new Date().toISOString(), history: [] }))
+    writeFileSync(join(d, 'review.json'), JSON.stringify({ plan_hash: 'h', files: ['resume.pdf'], answers: [] }))
+    writeFileSync(join(d, 'resume.pdf'), '%PDF-1.4')
+    writeFileSync(join(d, 'analysis.json'), '{}')
+    const ops: string[] = []
+    const dash = startDashboard({ botToken: TOKEN, pairedId: () => 42, approve: async () => null, skip: async () => null, health: () => null, call: async op => { ops.push(op); return { text: 'ok' } } }, 0)
+    try {
+      const base = `http://127.0.0.1:${dash.port}`
+      const cookie = (await fetch(dash.link, { redirect: 'manual' })).headers.get('set-cookie')!.split(';')[0]
+      expect((await fetch(`${base}/vendor/three/build/three.module.js`)).status).toBe(200)
+      for (const p of ['package.json', 'build/three.cjs', '..%2F..%2Fpackage.json']) expect((await fetch(`${base}/vendor/three/${p}`)).status).toBe(404)
+      const act = (body: unknown, c = cookie) => fetch(`${base}/api/do`, { method: 'POST', headers: { cookie: c, 'content-type': 'application/json' }, body: JSON.stringify(body) })
+      expect((await act({ op: 'tap', data: 'H:pause' }, '')).status).toBe(403)
+      expect((await act({ op: 'view:profile' })).status).toBe(400) // reads go through GET /api/view only
+      expect((await act({ op: 'export' })).status).toBe(400)
+      expect((await act({ op: 'tap', data: 'H:pause' })).status).toBe(200)
+      expect(ops).toEqual(['tap'])
+      const file = (n: string) => fetch(`${base}/api/job/${id}/file/${n}`, { headers: { cookie } })
+      expect((await file('resume.pdf')).status).toBe(200)
+      for (const n of ['analysis.json', '..%2F..%2Fsettings.json', '%E0%A4%A']) expect((await file(n)).status).toBe(404)
+    } finally { dash.stop(); rmSync(d, { recursive: true, force: true }) }
+    for (const ok of ['H:pause', 'r:sk:0123abcd', 'L:in:linkedin', 'x:job-abc', 'a:dd:0123abcd']) expect(TAPS.test(ok)).toBe(true)
+    for (const no of ['p:pair', 'r:ap:0123abcd', 'L:in:evil', 'H:pause ', 'm:settings', 'r:sk:0123abcd\n']) expect(TAPS.test(no)).toBe(false)
+    expect(pageButtons([{ text: 'a', data: 'r:rv:0123abcd' }, { text: 'b', data: 'p:pair' }, { text: 'c', data: 'j:rt:0123abcd' }, { text: 'd' }]).map(b => b.text)).toEqual(['a', 'c'])
+  })
+
+  test('a whole form sent from the page is checked like taps and replies, and keeps private answers not sent back', async () => {
+    const F = await import('../src/forms')
+    const f = F.newForm('b1', 'job-1', 't', F.validateQuestions([
+      { qid: 'q1', text: 'Sponsorship?', kind: 'yesno', sensitive: true, save_key: 'sponsor' },
+      { qid: 'q2', text: 'Tools', kind: 'multi', options: ['dbt', 'Spark'] },
+      { qid: 'q3', text: 'Expected salary', kind: 'number' },
+    ], true))
+    expect(F.submitAll(f, { q1: 'No', q2: ['dbt'] }).error).toContain('Expected salary')
+    expect(F.submitAll(f, { q1: 'Maybe', q2: ['dbt'], q3: '95k' }).error).toContain('Pick one')
+    expect(F.submitAll(f, { q1: 'No', q2: ['dbt', 'Rust'], q3: '95k' }).error).toContain('Pick at least one')
+    const ok = F.submitAll(f, { q1: 'No', q2: ['dbt', 'dbt'], q3: '95k' }, { q1: false })
+    expect(ok.event?.kind).toBe('answers')
+    expect(ok.event?.kind === 'answers' && ok.event.answers.map(a => [a.qid, a.value, a.save])).toEqual([['q1', 'No', 'no'], ['q2', ['dbt'], 'no'], ['q3', 95000, 'no']])
+    const again = F.submitAll({ ...f, answers: { q1: 'Yes' } }, { q2: ['Spark'], q3: '100000' }) // q1 answered before, not sent back
+    expect(again.event?.kind === 'answers' && again.event.answers[0].value).toBe('Yes')
+    expect(F.submitAll(ok.form, {}).error).toContain('closed')
   })
 })
 

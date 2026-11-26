@@ -1,7 +1,7 @@
 // Wires everything together: Telegram (grammy), the Claude task runner, live cards, forms, review gate and setup wizard.
 import { Bot, GrammyError, InputFile, type Context } from 'grammy'
 import { createHash, timingSafeEqual } from 'crypto'
-import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'fs'
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'fs'
 import { basename, isAbsolute, join, relative } from 'path'
 import { z } from 'zod'
 import { createAgent, type Lane, type Live, type Outcome, type Task, type Usage } from './agent'
@@ -13,7 +13,7 @@ import { clock, CURRENCIES, esc, heading, isUS, kb, nav, note, parseList, parseN
 import * as OB from './onboarding'
 import { kitPage, readKit } from './applykit'
 import { insightsPage, scoreSuggestion } from './insights'
-import { phoneUrl, setPhoneUrl, startDashboard, type DashDeps } from './dashboard'
+import { looksLikeAddress, pageButtons, phoneUrl, plain, setPhoneUrl, startDashboard, TAPS, type DashDeps } from './dashboard'
 import * as P from './pages'
 import { boardCount, readAnswers, readBoards, readSection } from './profile'
 import { createReview, reviewPage, type JobPending } from './review'
@@ -72,6 +72,10 @@ export function extractUrls(text: string): string[] {
   return [...new Set(urls)].slice(0, 10)
 }
 
+// A posting on a job site or careers pages; and a LinkedIn person page, which is never a job.
+export const isJobLink = (u: string) => /greenhouse\.io|lever\.co|ashbyhq\.com|indeed\.com|glassdoor\.|ziprecruiter\.com|\/(jobs?|careers?)([/?]|$)/i.test(u)
+export const isProfileLink = (u: string) => /^https?:\/\/([\w-]+\.)*linkedin\.com\/(in|pub)\//i.test(u)
+
 type Base = { chat: number; msg: number; at: number }
 type Pending = Base & (
   | { kind: 'setting'; id: string; adding: boolean }
@@ -83,7 +87,25 @@ type Pending = Base & (
   | { kind: 'dashurl' }
   | { kind: 'ob'; what: string }
   | { kind: 'resume' }
+  | { kind: 'version' } // another version of the resume, for the ATS rebuild's line pool
+  | { kind: 'form'; batch: string } // the question form opened from Open Questions
 ) | JobPending
+const FORM_MS = 2 * 3600_000 // answering may mean looking something up, so a form waits longer than other screens
+
+// Whether a waiting screen can use this message. A link is a reply only where one makes sense; otherwise it goes on to
+// job links and chat, and the screen keeps waiting.
+export function claims(p: Pending, text: string): boolean {
+  if (p.kind === 'dashurl') return looksLikeAddress(text)
+  const urls = extractUrls(text)
+  if (p.kind === 'form') {
+    const f = F.loadForm(p.batch)
+    return !!f && f.status === 'open' && !f.confirming && (!urls.length || F.wantsLink(f) && !urls.some(isJobLink))
+  }
+  if (!urls.length || p.kind === 'company') return true // a company is added by its job board link
+  if (urls.some(isJobLink)) return false
+  if (p.kind === 'contact') return p.key === 'linkedin' || p.key === 'portfolio'
+  return p.kind === 'answer' || p.kind === 'edit' || p.kind === 'change' || p.kind === 'achievement'
+}
 
 const SummarySchema = z.object({
   name: z.string().max(100), headline: z.string().max(140), years: z.number().int().min(0).max(60).nullable().optional(),
@@ -122,8 +144,10 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
     const o2 = { ...OPTS, reply_markup: kb(rows), disable_notification: !loud || silent(), ...(x.reply_to ? { reply_parameters: { message_id: x.reply_to, allow_sending_without_reply: true } } : {}) }
     return api.sendMessage(to, text, o2).catch(() => api.sendMessage(to, text.replace(/<[^>]+>/g, ''), { ...o2, parse_mode: undefined }))
   }
-  const editAt = (chat: number, msg: number, p: Page) =>
-    api.editMessageText(chat, msg, p.text, { ...OPTS, reply_markup: kb(p) }).catch(e => { if (!/not modified/i.test(String(e))) log(`edit failed: ${String(e).slice(0, 100)}`) })
+  const editAt = async (chat: number, msg: number, p: Page) => {
+    if (msg < 0) return // a dashboard press: there is no Telegram message to update
+    await api.editMessageText(chat, msg, p.text, { ...OPTS, reply_markup: kb(p) }).catch(e => { if (!/not modified/i.test(String(e))) log(`edit failed: ${String(e).slice(0, 100)}`) })
+  }
 
   const cards = createCards(api, paired)
 
@@ -197,6 +221,7 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
       return null
     },
     health: () => health,
+    call: (op, b) => dashCall(op, b),
   }
 
   // ---- Health: the setup check at start and every 6 hours, so a problem shows on Home before a job fails ----
@@ -560,12 +585,12 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
       if (a.job_id !== undefined && !JOB_RE.test(String(a.job_id))) throw new Error('bad job_id')
       if (F.loadForm(String(a.batch_id))?.status === 'open') throw new Error('a form with this batch_id is already open')
       const f = F.newForm(String(a.batch_id), a.job_id, a.title ? short(String(a.title), 100) : undefined, F.validateQuestions(a.questions, !!a.job_id))
-      const p = F.render(f)
-      f.message_id = (await sendTo(p.text, p.rows, { kind: 'reviews' })).message_id
+      const p = P.askPage(f)
+      await sendTo(p.text, p.rows, { kind: 'reviews' })
       F.saveForm(f)
       spoke.add(t.id)
       refresh()
-      return ok('form started. The answers arrive in a new task once the user confirms. Set the job to NEEDS_ANSWERS now and stop.')
+      return ok('form started: the user was told to answer under Open Questions. The answers arrive in a new task once the user confirms. Set the job to NEEDS_ANSWERS now and stop.')
     }
     if (name === 'tg_review') { const r = await review.send(String(a.job_id), !!t.payload.parent); spoke.add(t.id); return ok(r) }
     throw new Error(`unknown tool ${name}`)
@@ -749,12 +774,45 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
     const [contact, list] = await Promise.all([contactFields(), answers()])
     if (!list) return helperDown
     const resume = ['pdf', 'docx'].map(e => `base_resume.${e}`).find(f => existsSync(join(DATA, f))) ?? null
-    return P.profilePage(loadSettings(), contact, list, resume)
+    return P.profilePage(loadSettings(), contact, list, resume, versions())
   }
+  // names of the extra resume versions (data/resumes/<name>.txt, written by `jobagent resume import --version`)
+  const versions = (): string[] => { try { return readdirSync(join(DATA, 'resumes')).filter(f => f.endsWith('.txt')).map(f => f.slice(0, -4)).sort() } catch { return [] } }
   const boards = async (): Promise<string[]> => [...new Set(Object.values(readBoards()).flat())].sort() // every ATS, read without Python
   const companies = async (msg?: string) => { const b = await boards(), l = readJson<Record<string, unknown>>(join(DATA, 'boards_learned.json'), {}); return ST.companiesPage(b, msg, b.filter(x => x in l).length) }
   const ideas = (s: Settings) => ST.relatedIdeas(readJson<ST.SeenTitles>(join(DATA, 'seen_titles.json'), {}), s)
   const specView = (spec: ST.Spec, s: Settings, msg?: string) => ST.specPage(spec, s, msg, spec.id === 'rt' ? ideas(s) : [])
+  // A task is running or waiting for this job (its own, or a line on a search card).
+  const busyJob = (id: string) => [agent.live('work')?.task, ...agent.queued()].some(t => t && (t.job_id === id || cards.get(t.id)?.jobs.some(l => l.job_id === id)))
+  // Typed input, shared by the Telegram screens and the dashboard. Each returns an error to show, or the result.
+  async function addCompany(text: string): Promise<{ error: string } | { company: string; open_jobs?: number }> {
+    const slug = ST.boardSlug(text)
+    if (!slug) return { error: "That doesn't look like a job board link or name." }
+    const ats = /lever\.co/i.test(text) ? 'lever' : /ashbyhq\.com/i.test(text) ? 'ashby' : /greenhouse\.io/i.test(text) ? 'greenhouse' : null // a pasted link names its ATS
+    const c = await run(['boards', 'check', slug, ...(ats ? [`--ats=${ats}`] : [])])
+    if (!c.ok) return { error: c.code === 'not_found' ? `There is no Greenhouse, Lever or Ashby job board called "${slug}".` : "I couldn't reach the job board. Try again in a minute." }
+    await run(['boards', 'add', c.ats ?? 'greenhouse', slug])
+    return { company: String(c.company), open_jobs: c.open_jobs ?? undefined }
+  }
+  async function addAchievement(text: string): Promise<string | null> {
+    const used = new Set(achievements().map(([k]) => k))
+    const key = [...Array(P.ACH_MAX)].map((_, i) => `a${i + 1}`).find(k => !used.has(k))
+    if (!key) return 'That is the most I keep. Remove one first.'
+    if (text.trim().length < 10) return 'Tell me a little more: what you did and what came of it.'
+    const r = await run(['profile', 'set-field', 'Achievements', key, text])
+    return r.ok ? null : r.error ?? 'could not save'
+  }
+  const rewriteAnswer = (a: P.AnswerRec, text: string) =>
+    run(['profile', 'answer', 'set', a.base_key, `--question=${a.question}`, `--value=${text}`, `--scope=${a.scope}`, ...(a.job ? [`--job=${a.job}`] : []), ...(a.sensitive ? ['--sensitive'] : [])])
+  const requestChange = (id: string, text: string) => {
+    review.cancelAuto(id)
+    const j = readJob(id)
+    startTask({ kind: 'revise', job_id: id, title: j ? jobTitle(j) : id, payload: { request: text.slice(0, 1000) } })
+  }
+  async function addVersion(path: string): Promise<string | null> {
+    const r = await run(['resume', 'import', path, '--version'])
+    return r.ok ? null : r.code === 'no_text' ? "I couldn't find any text in it (is it a scan?). Send a text-based PDF or a .docx." : r.code === 'too_many' ? 'You have the most versions I keep. Remove one first.' : 'I couldn\'t open that file. Try saving it again as PDF.'
+  }
   let loginOpen = false // one login window at a time: they share JobAgent's browser profile
   // Jobs that failed because a job site wanted a login (fetch's detail starts with the site name), so a login can retry them.
   const needLogin = (site: string) => allJobs().filter(j => j.status === 'FAILED' && /\blogged in\b/i.test(lastDetail(j)) && lastDetail(j).startsWith(ST.JOB_SITES[site]))
@@ -768,7 +826,8 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
     const s = loadSettings()
     const chat = ctx.chat!.id, msg = ctx.callbackQuery!.message!.message_id
     if (data === 'noop') return undefined
-    if (!data.startsWith('f:') && !data.startsWith('o:f') && !data.startsWith('o:add')) pending = null // navigating away cancels a half-typed input
+    // Navigating away cancels a half-typed input. A verification code stays: it expires in minutes.
+    if (pending?.kind !== 'code' && !data.startsWith('f:') && !data.startsWith('o:f') && !data.startsWith('o:add')) pending = null
     let m: RegExpExecArray | null
 
     if (data === 'm:home') return P.home(homeCtx())
@@ -822,8 +881,8 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
       const id = findJob(m[2]), j = id ? readJob(id) : null
       if (!id || !j) return 'That job no longer exists.'
       const onCard = cards.all().some(c => c.msg === msg)
-      const running = [agent.live('work')?.task, ...agent.queued()].some(t => t && (t.job_id === id || cards.get(t.id)?.jobs.some(l => l.job_id === id)))
-      const detail = async () => P.jobPage(readJob(id)!, { usedPct: usedBy(id), running: [agent.live('work')?.task, ...agent.queued()].some(t => t && (t.job_id === id || cards.get(t.id)?.jobs.some(l => l.job_id === id))), hasForm: F.openForms().some(f => f.job_id === id), outcome: readOutcomes()[id] })
+      const running = busyJob(id)
+      const detail = async () => P.jobPage(readJob(id)!, { usedPct: usedBy(id), running: busyJob(id), hasForm: F.openForms().some(f => f.job_id === id), outcome: readOutcomes()[id] })
       if (m[1] === 'v') return detail()
       if (m[1] === 'kit') { await sendKitFiles(id); return kitPage(j, readKit(id)) }
       if (m[1] === 'zz') { writeJson(FOLLOW_FILE, { ...readJson<P.FollowState>(FOLLOW_FILE, {}), [id]: { snooze_until: new Date(Date.now() + 7 * 86_400_000).toISOString() } }); toast.text = '⏰ I will ask again in a week'; return { text: `${heading('⏰', 'Asking again in a week')}\n${esc(jobTitle(j))}`, rows: [nav('J:d:0')] } }
@@ -895,15 +954,24 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
     // Review
     if ((m = /^r:(ok|ch|sk|nv|nx|cx|rv|ss|ea|or|fl|df|hv):([0-9a-f]{8})(?::(\d{1,3}))?$/.exec(data))) return review.press(m[1], m[2], chat, msg, m[3])
 
-    // Forms
-    if ((m = /^f:job:([0-9a-f]{8})$/.exec(data))) { const id = findJob(m[1]); const f = F.openForms().find(x => x.job_id === id); if (!f) return 'Those questions are already answered.'; F.saveForm({ ...f, message_id: msg, updated_at: Date.now() }); return F.render(f) }
+    // Forms: answered only after "Open" in Open Questions, which makes that form the one thing typed text goes to.
+    if (data === 'F:list' || data.startsWith('f:job:')) return P.questionsPage(F.openForms()) // f:job: is on older messages
     if ((m = /^f:([0-9a-f]{8}):(.+)$/.exec(data))) {
       const f = F.findForm(m[1])
       if (!f) return 'That form no longer exists.'
-      if (m[2] === 'open') { F.saveForm({ ...f, message_id: msg, updated_at: Date.now() }); return F.render(f) }
-      const step = F.act({ ...f, message_id: f.message_id ?? msg }, m[2])
+      const listening: Pending = { kind: 'form', batch: f.batch_id, chat, msg, at: Date.now() }
+      if (m[2] === 'open') {
+        if (pending?.kind === 'code' && Date.now() - pending.at < PENDING_MS) return 'First send me the verification code I asked for.'
+        pending = listening
+        F.saveForm({ ...f, message_id: msg, updated_at: Date.now() })
+        return F.render(f)
+      }
+      // A button on a form that is not open (an older message, or you moved away): back to the menu.
+      if (f.status === 'open' && !(pending?.kind === 'form' && pending.batch === f.batch_id)) return P.questionsPage(F.openForms())
+      const step = F.act(f, m[2])
       if (step.error) return step.error
-      if (step.form.message_id !== msg) step.form.message_id = msg // answered from a moved copy: keep editing this one
+      pending = listening
+      step.form.message_id = msg // answered from a copy: keep editing this one
       await applyStep(step)
       return undefined
     }
@@ -990,6 +1058,16 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
       const r = await run(['profile', 'set-field', 'Achievements', m[1], ''])
       return r.ok ? P.achievementsPage(achievements(), '🗑 Removed.') : `Could not remove it: ${r.error}`
     }
+    if (data === 'p:rv') return P.versionsPage(versions())
+    if (data === 'p:rv:add') {
+      if (versions().length >= P.VERSIONS_MAX) return 'That is the most I keep. Remove one first.'
+      pending = { kind: 'version', chat, msg, at: Date.now() }
+      return P.versionPrompt
+    }
+    if ((m = /^p:rv:rm:([a-z0-9-]{1,40})$/.exec(data))) {
+      const r = await run(['resume', 'remove', m[1]])
+      return r.ok ? P.versionsPage(versions(), '🗑 Removed.') : `Could not remove it: ${r.error}`
+    }
     if ((m = /^p:f:(\w+)$/.exec(data))) {
       const lbl = OB.PROFILE_FIELDS.find(([k]) => k === m![1])?.[1]
       if (!lbl) return undefined
@@ -1021,6 +1099,204 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
   }
   let lastUpload: string | null = null
 
+  // ---- Dashboard: the desktop front end. Reads are the data behind each Telegram screen; a button is the same Telegram
+  // button pressed through `route` (TAPS lists which), and typed input goes through the helpers the chat uses.
+  // Private answer values never leave here. Throws a plain-words message for the page to show.
+  async function dashTap(data: string): Promise<string> {
+    if (!TAPS.test(data)) throw new Error('That action is not available here.')
+    const to = paired()
+    if (to == null) throw new Error('JobAgent is not connected to Telegram yet.')
+    const keep = pending, toast: { text?: string } = {}
+    const ctx = { chat: { id: to }, callbackQuery: { message: { message_id: -1 } } } as unknown as Context // -1: no message to edit
+    let res: Page | string | undefined
+    try { res = await route(ctx, data, toast) } finally { pending = keep } // a click here never cancels what is being typed in Telegram
+    return toast.text ?? (typeof res === 'string' ? res : res ? plain(res.text.split('\n')[0]) : 'Done')
+  }
+  const fixes = () => {
+    try { return readdirSync(join(DATA, 'repair')).filter(id => !existsSync(join(DATA, 'repair', id, 'approved.json'))).map(id => ({ id, p: readProposal(id) })).filter(x => x.p).map(({ id, p }) => ({ id, title: p!.title, summary: p!.summary, files: p!.files.length, added: p!.added, removed: p!.removed, login: p!.login })) } catch { return [] }
+  }
+  async function dashCall(op: string, b: Record<string, any>): Promise<unknown> {
+    const s = loadSettings(), str = (v: unknown, max = 2000) => String(v ?? '').trim().slice(0, max)
+    switch (op) {
+      case 'view:live': {
+        const c = homeCtx(), ob = OB.loadOb()
+        return {
+          agent_on: c.s.agent_on, onboarded: c.s.onboarded, discovery: c.s.discovery.enabled, searching: discoveryBusy(), queued: c.queued,
+          work: c.work ? { title: c.workTitle, doing: c.work.doing, steps: c.work.steps, started: c.work.started, kind: c.work.task.kind } : null,
+          next_search: c.nextSearch ?? null, usage: c.usage?.five_hour ?? null, limited_until: c.limitedUntil ?? null,
+          needs: P.needsCount(c), updates: c.updates ?? 0, tip: c.tip ?? null, problems: (c.problems ?? []).map(plain), fixes: fixes(),
+          cards: cards.all().sort((x, y) => (y.started ?? 9e15) - (x.started ?? 9e15)) /* not started yet: first */.slice(0, 12).map(({ msg: _m, reply_to: _r, ...x }) => ({
+            ...x, final: x.final && { ...x.final, buttons: pageButtons(x.final.buttons) }, jobs: x.jobs.map(l => ({ ...l, final: l.final && { ...l.final, buttons: pageButtons(l.final.buttons) } })),
+          })),
+          codes: c.jobs.filter(j => j.status === 'SUBMITTING' && existsSync(join(jobDir(j.id), 'needs_input.json')) && !existsSync(join(jobDir(j.id), 'input.json'))).map(j => ({ id: j.id, title: jobTitle(j) })),
+          resume: ob.replace ? { step: ob.step, error: ob.error ?? null, doing: ob.doing ?? null, summary: ob.step === 'profile' ? ob.summary ?? null : null } : null,
+        }
+      }
+      case 'view:job': {
+        const id = str(b.id, 80), j = readJob(id)
+        if (!j) throw new Error('That job no longer exists.')
+        const running = busyJob(id), hasForm = F.openForms().some(f => f.job_id === id)
+        const pg = P.jobPage(j, { usedPct: usedBy(id), running, hasForm, outcome: readOutcomes()[id] })
+        return { running, has_form: hasForm, used_pct: usedBy(id) ?? null, actions: pageButtons(pg.rows.flat()), kit: j.status === 'KIT_READY' ? readKit(id) : null, code: code(id) }
+      }
+      case 'view:settings': {
+        const b2 = await boards(), learned = readJson<Record<string, unknown>>(join(DATA, 'boards_learned.json'), {})
+        return {
+          cats: Object.entries(ST.CATS).map(([key, c]) => ({
+            key, emoji: c.emoji, title: c.title, blurb: c.blurb,
+            items: c.items.map(sp => ({
+              id: sp.id, emoji: sp.emoji, label: sp.label, t: sp.t, what: sp.what, opts: sp.opts ?? null, nullable: sp.nullable ?? null, unit: sp.unit ?? null, example: sp.example ?? null,
+              presets: (sp.presets ?? []).map(p => [p, ST.chip(sp, p)]), value: getPath(s, sp.path) ?? null, text: ST.valueText(sp, s),
+            })),
+          })),
+          ideas: ideas(s), practice: practiceOn(s), forced: practiceForced(), companies: b2, learned: b2.filter(x => x in learned).length,
+          phone: phoneUrl(), port: dash?.port ?? null, windows: process.platform === 'win32',
+        }
+      }
+      case 'view:profile': {
+        const [contact, list] = await Promise.all([contactFields(), answers()])
+        return {
+          contact: OB.PROFILE_FIELDS.map(([key, label]) => ({ key, label, value: contact[key] ?? '' })),
+          resume: ['pdf', 'docx'].map(e => `base_resume.${e}`).find(f => existsSync(join(DATA, f))) ?? null, versions: versions(), versions_max: P.VERSIONS_MAX,
+          achievements: achievements().map(([key, text]) => ({ key, text })), ach_max: P.ACH_MAX, skills: readSection('Confirmed skills').confirmed ?? '',
+          answers: (list ?? []).map(a => ({ key: a.key, code: P.akey(a.key), question: a.question, answer: a.sensitive ? null : a.answer, sensitive: a.sensitive, updated: a.updated })),
+          completeness: P.completeness(s, contact, list ?? []), helper: !!list,
+        }
+      }
+      case 'view:forms':
+        return F.openForms().map(f => ({
+          batch: f.batch_id, job_id: f.job_id ?? null, title: f.title ?? 'A few questions', created_at: f.created_at,
+          questions: f.questions.map(q => ({
+            qid: q.qid, text: q.text, kind: q.kind, options: q.options ?? null, sensitive: !!q.sensitive, why: q.why ?? null, can_save: !!q.save_key,
+            remember: f.save[q.qid] !== 'no', answered: q.qid in f.answers, answer: q.sensitive ? null : f.answers[q.qid] ?? null,
+          })),
+        }))
+      case 'view:logins': {
+        const r = loginOpen ? null : await run(['login', 'status'])
+        return { sites: r?.ok ? r.sites : null, busy: loginOpen, names: ST.JOB_SITES, retry: Object.fromEntries(Object.keys(ST.JOB_SITES).map(k => [k, needLogin(k).length])) }
+      }
+      case 'export': {
+        const r = await run(['log', 'export'])
+        if (!r.ok) throw new Error(`Export failed: ${r.error}`)
+        return { path: String(r.path) }
+      }
+      case 'tap': return { text: await dashTap(str(b.data, 100)) }
+      case 'link': {
+        if (!s.onboarded) throw new Error('Finish the setup in Telegram first.')
+        const urls = extractUrls(str(b.text, 4000)).filter(u => !isProfileLink(u))
+        if (!urls.length) throw new Error('Paste the link to a job posting (it starts with https://).')
+        for (const u of urls) startJobUrl(u)
+        return { text: urls.length === 1 ? '🚀 On it. Watch Activity on Overview.' : `🚀 Starting ${urls.length} jobs.` }
+      }
+      case 'setting': {
+        const spec = ST.specById(str(b.id, 4))
+        if (!spec) throw new Error('That setting does not exist.')
+        let v: unknown = b.value
+        if (spec.t === 'list') v = Array.isArray(v) ? [...new Map(v.map(x => str(x, 100)).filter(Boolean).map(x => [x.toLowerCase(), x])).values()] : null
+        else if (spec.t === 'int' && v !== null) v = typeof v === 'number' ? v : parseNumber(str(v, 30))
+        else if (spec.t === 'time') { const mm = /^(\d{1,2})[:.](\d{2})$/.exec(str(v, 10)); v = mm ? `${mm[1].padStart(2, '0')}:${mm[2]}` : null }
+        if (v == null && !(spec.t === 'int' && spec.nullable && b.value === null)) throw new Error(spec.t === 'time' ? 'Enter a time like 22:30.' : spec.t === 'int' ? 'Please enter a number.' : 'That value does not fit.')
+        if (spec.t === 'multi' && (!Array.isArray(v) || !v.length)) throw new Error('Keep at least one.')
+        const r = trySettingsUpdate(patchFor(spec.path, v))
+        if (!r.ok) throw new Error(r.error)
+        refresh()
+        return { text: `${spec.label}: ${ST.valueText(spec, r.settings)}` }
+      }
+      case 'company': {
+        const r = await addCompany(str(b.text, 300))
+        if ('error' in r) throw new Error(r.error)
+        return { text: `✅ Added ${r.company}${r.open_jobs != null ? ` (${r.open_jobs} open jobs right now)` : ''}.` }
+      }
+      case 'contact': {
+        if (!OB.PROFILE_FIELDS.some(([k]) => k === b.key)) throw new Error('That field does not exist.')
+        const v = str(b.value, 300)
+        if (!v) throw new Error('Type a value first.')
+        const r = await run(['profile', 'set-field', 'Contact', String(b.key), v])
+        if (!r.ok) throw new Error(r.error ?? 'could not save')
+        return { text: '✅ Saved' }
+      }
+      case 'achievement': {
+        const e = await addAchievement(str(b.text, 1000))
+        if (e) throw new Error(e)
+        return { text: '✅ Saved' }
+      }
+      case 'answer': {
+        const a = readAnswers().find(x => x.key === b.key), v = str(b.value, 2000)
+        if (!a) throw new Error('That answer no longer exists.')
+        if (!v) throw new Error('Type the new answer first.')
+        const r = await rewriteAnswer(a, v)
+        if (!r.ok) throw new Error(r.error ?? 'could not save')
+        return { text: '✅ Saved' }
+      }
+      case 'change': {
+        const id = str(b.id, 80), t = str(b.text, 1000)
+        if (!readJob(id)) throw new Error('That job no longer exists.')
+        if (t.length < 3) throw new Error('Tell me what to change.')
+        requestChange(id, t)
+        return { text: '✏️ On it. A fresh review follows.' }
+      }
+      case 'edit': {
+        const to = paired()
+        if (to == null) throw new Error('JobAgent is not connected to Telegram yet.')
+        const e = review.quickEdit(str(b.id, 80), str(b.fid, 120), str(b.value, 2000), to, -1)
+        if (e) throw new Error(e)
+        return { text: '⏳ Updating the form. A fresh review follows in a moment.' }
+      }
+      case 'form': {
+        const f = F.loadForm(str(b.batch, 80))
+        if (!f || f.status !== 'open') throw new Error('Those questions are already closed.')
+        const step = b.skip ? F.act(f, 's') : F.submitAll(f, b.answers && typeof b.answers === 'object' ? b.answers : {}, b.remember && typeof b.remember === 'object' ? b.remember : {})
+        if (step.error) throw new Error(step.error)
+        if (pending?.kind === 'form' && pending.batch === f.batch_id) pending = null
+        await applyStep(step)
+        return { text: b.skip ? '⏭ Skipped' : '✅ Thanks. Picking the job back up now.' }
+      }
+      case 'code': {
+        const id = str(b.id, 80), e = review.submitCode(id, str(b.value, 20))
+        if (e) throw new Error(e)
+        if (pending?.kind === 'code' && pending.job === id) { await editAt(pending.chat, pending.msg, { text: `${heading('✅', 'Code received')}\n${note('Finishing the application.')}`, rows: [] }); pending = null }
+        return { text: '✅ Code received. Finishing the application.' }
+      }
+      case 'phone': {
+        if (b.url == null) { setPhoneUrl(null); return { text: '🚫 Phone access is off' } }
+        if (!setPhoneUrl(str(b.url, 300))) throw new Error('Paste the https address the tunnel printed, like https://something.trycloudflare.com')
+        return { text: '📱 Phone access is on' }
+      }
+      case 'upload': {
+        const name = basename(str(b.name, 120)).replace(/[^\w.\- ]/g, '_'), data = Buffer.from(String(b.data ?? ''), 'base64')
+        if (!/\.(pdf|docx)$/i.test(name)) throw new Error('Please choose a PDF or Word (.docx) file.')
+        if (!data.length) throw new Error('That file is empty.')
+        if (data.length > 20 * 1024 * 1024) throw new Error('That file is over 20 MB.')
+        if (!s.onboarded) throw new Error('Finish the setup in Telegram first.')
+        if (b.kind === 'version' && versions().length >= P.VERSIONS_MAX) throw new Error('That is the most I keep. Remove one first.')
+        mkdirSync(join(DATA, 'inbox'), { recursive: true })
+        const path = join(DATA, 'inbox', `${Date.now()}-${name}`)
+        writeFileSync(path, data)
+        if (b.kind === 'version') { const why = await addVersion(path); if (why) throw new Error(why); return { text: '✅ Added. I will pick lines from it for the next jobs.' } }
+        await importResume(path, true)
+        const ob = OB.loadOb()
+        if (ob.step === 'resume' && ob.error) throw new Error(ob.error)
+        return { text: '📄 Reading your new resume. Check what I found when it is done.' }
+      }
+      case 'resume_ok': {
+        const ob = OB.loadOb()
+        if (ob.step !== 'profile' || !ob.replace) throw new Error('There is nothing to confirm.')
+        ob.replace = false
+        await obStep(ob, 'done')
+        const to = paired()
+        if (to != null && ob.msg) await editAt(to, ob.msg, await profileHome())
+        return { text: '✅ Profile updated' }
+      }
+      case 'stop': {
+        setAgent(false)
+        const hit = stopTasks(() => true)
+        killHelpers()
+        return { text: hit ? '🛑 Stopped everything. Resume when you want me to continue.' : '🛑 Paused. Nothing was running.' }
+      }
+    }
+    throw new Error('That action is not available here.')
+  }
+
   // Stop tasks: running ones end through onFinish; ones still waiting in line are closed here.
   function stopTasks(pred: (t: Task) => boolean): boolean {
     const waiting = agent.queued('work').filter(pred)
@@ -1041,15 +1317,22 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
   async function capture(ctx: Context, text: string): Promise<boolean> {
     const p = pending
     if (!p) return false
-    if (Date.now() - p.at > PENDING_MS) { pending = null; return false }
+    if (Date.now() - p.at > (p.kind === 'form' ? FORM_MS : PENDING_MS)) { pending = null; return false }
     const fail = async (e: string) => { await ctx.reply(`❌ ${esc(e)}\n${note('Try again, or tap Cancel above.')}`, OPTS); return true }
     const tidy = () => void ctx.deleteMessage().catch(() => {}) // keep the chat clean: the screen above shows the result
-    if (p.kind === 'resume') return false // waiting for a file, not text
+    if (p.kind === 'resume' || p.kind === 'version') return false // waiting for a file, not text
+    if (!claims(p, text)) return false
     pending = null
+    if (p.kind === 'form') {
+      pending = { ...p, at: Date.now() } // stays open for the next question
+      const step = F.answerText(F.loadForm(p.batch)!, text)
+      if (step.error) { await ctx.reply(`❌ ${esc(step.error)}`, OPTS); return true } // forms have no Cancel button
+      tidy() // the form above shows the answer
+      await applyStep(step)
+      return true
+    }
     if (p.kind === 'change') {
-      review.cancelAuto(p.job)
-      const j = readJob(p.job)
-      startTask({ kind: 'revise', job_id: p.job, title: j ? jobTitle(j) : p.job, payload: { request: text.slice(0, 1000) } })
+      requestChange(p.job, text)
       await editAt(p.chat, p.msg, { text: `${heading('✏️', 'Change requested')}\n${quote(esc(short(text, 300)))}\n${note('I am on it. You will get a fresh review to approve.')}`, rows: [] })
       return true
     }
@@ -1074,7 +1357,7 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
     }
     if (p.kind === 'answer') {
       const a = p.rec
-      const r = await run(['profile', 'answer', 'set', a.base_key, `--question=${a.question}`, `--value=${text}`, `--scope=${a.scope}`, ...(a.job ? [`--job=${a.job}`] : []), ...(a.sensitive ? ['--sensitive'] : [])])
+      const r = await rewriteAnswer(a, text)
       if (!r.ok) { pending = p; return fail(r.error ?? 'could not save') }
       tidy()
       const g = readAnswers(a.job || undefined).find(x => x.key === r.key)
@@ -1086,10 +1369,8 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
       if (!slug) { pending = p; return fail("That doesn't look like a job board link or name.") }
       tidy()
       await editAt(p.chat, p.msg, { text: `${heading('🔎', `Checking ${esc(slug)}…`)}`, rows: [] })
-      const ats = /lever\.co/i.test(text) ? 'lever' : /ashbyhq\.com/i.test(text) ? 'ashby' : /greenhouse\.io/i.test(text) ? 'greenhouse' : null // a pasted link names its ATS
-      const c = await run(['boards', 'check', slug, ...(ats ? [`--ats=${ats}`] : [])])
-      if (!c.ok) { pending = { ...p, at: Date.now() }; await editAt(p.chat, p.msg, { ...ST.addCompanyPrompt(), text: `${ST.addCompanyPrompt().text}\n\n❌ ${esc(c.code === 'not_found' ? `There is no Greenhouse, Lever or Ashby job board called "${slug}".` : "I couldn't reach the job board. Try again in a minute.")}` }); return true }
-      await run(['boards', 'add', c.ats ?? 'greenhouse', slug])
+      const c = await addCompany(text)
+      if ('error' in c) { pending = { ...p, at: Date.now() }; await editAt(p.chat, p.msg, { ...ST.addCompanyPrompt(), text: `${ST.addCompanyPrompt().text}\n\n❌ ${esc(c.error)}` }); return true }
       await editAt(p.chat, p.msg, await companies(`✅ Added <b>${esc(c.company)}</b>${c.open_jobs != null ? ` (${c.open_jobs} open jobs right now)` : ''}.`))
       return true
     }
@@ -1101,12 +1382,8 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
       return true
     }
     if (p.kind === 'achievement') {
-      const used = new Set(achievements().map(([k]) => k))
-      const key = [...Array(P.ACH_MAX)].map((_, i) => `a${i + 1}`).find(k => !used.has(k))
-      if (!key) return fail('That is the most I keep. Remove one first.')
-      if (text.trim().length < 10) { pending = p; return fail('Tell me a little more: what you did and what came of it.') }
-      const r = await run(['profile', 'set-field', 'Achievements', key, text])
-      if (!r.ok) { pending = p; return fail(r.error ?? 'could not save') }
+      const e = await addAchievement(text)
+      if (e) { if (!e.startsWith('That is the most')) pending = p; return fail(e) }
       tidy()
       await editAt(p.chat, p.msg, P.achievementsPage(achievements(), '✅ Saved.'))
       return true
@@ -1244,21 +1521,15 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
   })
 
   bot.on('message:text', async ctx => {
-    const text = ctx.message.text
-    if (await capture(ctx, text)) return
+    const text = ctx.message.text, urls = extractUrls(text)
+    if (await capture(ctx, text)) return // the one screen the user has open, if any
     const s = loadSettings()
-    const tf = F.textForm()
-    if (tf && !extractUrls(text).length) {
-      const step = F.answerText(tf, text)
-      if (step.error) return void ctx.reply(`❌ ${esc(step.error)}`, OPTS)
-      void ctx.deleteMessage().catch(() => {}) // the form above shows the answer
-      return applyStep(step)
-    }
-    const urls = extractUrls(text)
     if (urls.length) {
       if (!s.onboarded) return void ctx.reply(`${heading('🧩', 'Let’s finish setup first')}\n${note('I need your resume and what you are looking for before I can apply.')}`, { ...OPTS, reply_markup: kb([[{ text: '🧩 Continue setup', data: 'o:resume' }]]) })
+      const jobs = urls.filter(u => !isProfileLink(u))
+      if (!jobs.length) return void ctx.reply(`${heading('👤', 'That is a profile, not a job posting')}\nTo change the LinkedIn address on your applications, open Contact details. Answering a question? Open it under Open Questions, then send it again.`, { ...OPTS, reply_markup: kb([[{ text: '✏️ Contact details', data: 'p:edit' }, { text: '❓ Open Questions', data: 'F:list' }]]) })
       void ctx.react('👀').catch(() => {})
-      for (const u of urls) startJobUrl(u, ctx.message.message_id)
+      for (const u of jobs) startJobUrl(u, ctx.message.message_id)
       return
     }
     if (!s.onboarded) { // mid-setup, typed text answers the step on screen; it never starts a Claude chat
@@ -1284,6 +1555,12 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
     mkdirSync(join(DATA, 'inbox'), { recursive: true })
     const path = join(DATA, 'inbox', `${Date.now()}-${name}`)
     writeFileSync(path, Buffer.from(await res.arrayBuffer()))
+    if (pending?.kind === 'version') {
+      const { chat, msg } = pending
+      pending = null
+      const why = await addVersion(path)
+      return void editAt(chat, msg, P.versionsPage(versions(), !why ? `✅ Added. ${note('I will pick lines from it for the next jobs.')}` : `⚠️ ${why}`))
+    }
     const s = loadSettings(), ob = OB.loadOb()
     const asResume = pending?.kind === 'resume' || !s.onboarded && ['welcome', 'resume', 'profile', 'fix'].includes(ob.step)
     if (asResume) { pending = null; return importResume(path, s.onboarded) }

@@ -1,15 +1,31 @@
 # Dashboard and phone access: how it is protected
 
-The dashboard (`app/src/dashboard.ts`, `app/web/dashboard.html`) shows the pipeline, score breakdowns, resume changes,
-insights and screenshots, and can **approve** or **skip** an application. Approving from the dashboard calls the same
-`review.approve` as the Telegram button, so the `plan_hash` check and practice mode apply unchanged. The dashboard also
-checks that the review the page showed is still the current one.
+The dashboard (`app/src/dashboard.ts`, `app/web/dashboard.html`) is the desktop front end. It does what the Telegram
+screens do: overview and live activity, the review queue, every job, question forms, profile, saved answers, all
+settings, practice mode, companies, job site logins, phone access, insights and health. Telegram stays the on-the-go
+option; the onboarding wizard and the chat with Claude stay there.
+
+How actions reach the app (`dashCall` in `app/src/app.ts`):
+
+- **Buttons** that mirror a Telegram button send its callback code to `POST /api/do {op:"tap"}`. Only codes matching
+  `TAPS` in `dashboard.ts` are accepted, and they run through the same `route()` the chat uses. Pairing, onboarding,
+  version and anything that would send a file into the chat are not on the list.
+- **Typed input** (a job link, a setting, a contact field, an achievement, a saved answer, a form, a code, a change
+  request, a resume upload) has its own `op`, which uses the same helpers as the chat and validates the same way.
+- **Approve** still goes through `POST /api/job/<id>/approve` with the `plan_hash` of the review the page showed, then
+  `review.approve`, so practice mode and the plan check apply unchanged.
+- **Reads** are `GET /api/state`, `GET /api/view/<live|settings|profile|forms|logins>` and `GET /api/job/<id>`.
+  `/api/do` refuses `view:` and `export` ops so a write path can never be used to read.
 
 ## What it never does
 
-- It never sends private answers to the page. Answers marked sensitive are replaced with `null` on the server.
-- It never loads anything from outside. The page has no CDN scripts, and its CSP is `default-src 'self'`.
-- It never serves files other than the three known screenshots of a job.
+- It never sends private answers to the page. Answers marked sensitive are replaced with `null` on the server, in
+  reviews, forms and saved answers alike. The page can replace a private answer but never read it.
+- It never loads anything from outside. The 3D background uses three.js served by JobAgent itself from
+  `app/node_modules/three` (a fixed list of 9 files), and the CSP is `default-src 'self'`.
+- It never serves job files other than the known screenshots and the files listed in that job's review or
+  apply-yourself kit.
+- It cannot pair, finish setup or change who is paired. Going live (`P:yes`) needs a confirm on the page, as in Telegram.
 - It never listens on the network. The server binds `127.0.0.1` only.
 
 ## On the computer (always on)
@@ -21,10 +37,17 @@ checks that the review the page showed is still the current one.
 
 ## On the phone (off by default)
 
-Telegram Mini Apps must be served over public HTTPS, so phone access needs a tunnel the user starts themselves, such as
-`cloudflared tunnel --url http://127.0.0.1:4777` or Tailscale Funnel. To turn it on, the user pastes the tunnel's https
-address in Telegram (Home → 🖥 Dashboard → 📱 Set up phone access). Until then, requests that arrive with any other host
-are refused, so a tunnel that is left running does nothing on its own.
+Telegram Mini Apps must be served over public HTTPS, so phone access needs a tunnel the user starts themselves.
+
+- **`scripts\phone.ps1` (Windows):** runs `scripts/phone.ts`, which uses an installed `cloudflared`, or downloads the
+  latest official one to `data/bin/` and keeps it only if its Windows signature is valid and Cloudflare's. It tunnels
+  only to a port that answers like the dashboard, turns phone access on with the address once the tunnel connects, and
+  turns it off when the tunnel ends (if the window is killed outright, the dead address stays until the next run).
+- **Your own tunnel,** such as `cloudflared tunnel --url http://127.0.0.1:4777` or Tailscale Funnel: paste its https
+  address in Telegram (Home → 🖥 Dashboard → 📱 Set up phone access).
+
+While phone access is off, requests that arrive with any other host are refused, so a tunnel that is left running does
+nothing on its own.
 
 ### How requests through the tunnel are checked
 

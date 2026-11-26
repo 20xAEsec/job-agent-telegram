@@ -102,7 +102,7 @@ export function finalFor(status: string, detail: string, jobId: string): Final |
   const c = code(jobId), d = detail.trim()
   switch (status) {
     case 'AWAITING_APPROVAL': case 'FILLED_DRY': return { emoji: '🔔', text: 'Ready for your review (below).' }
-    case 'NEEDS_ANSWERS': return { emoji: '❓', text: 'I need a few answers from you (below).' }
+    case 'NEEDS_ANSWERS': return { emoji: '❓', text: 'I need a few answers from you (see Open Questions below).' }
     case 'KIT_READY': return { emoji: '🧰', text: `I can't fill this form, so your kit to apply yourself is below${d ? ` (${d})` : ''}.`, buttons: [{ text: '✅ I applied', data: `j:ap:${c}` }] }
     case 'APPLIED_SELF': return { emoji: '✅', text: 'You applied.' }
     case 'SKIPPED': return { emoji: '⏭', text: `Skipped${d ? `: ${d}` : ''}`, buttons: [{ text: '↩ Apply anyway', data: `j:any:${c}` }] }

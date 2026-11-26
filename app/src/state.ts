@@ -65,7 +65,7 @@ export const DEFAULT_SETTINGS = {
   },
   apply: {
     mode: 'review', min_match_score: 60, auto_min_score: 85, auto_grace_seconds: 120,
-    company_cooldown_hours: 3, cover_letter: 'if_field', draft_free_text: true, tailoring: 'moderate',
+    company_cooldown_hours: 3, cover_letter: 'if_field', draft_free_text: true, tailoring: 'ats',
     followup_days: 7, // ask about an application with no news after this many days (0 = never)
   },
   discovery: { enabled: false, interval_hours: 6, web_search: true, sources: ['companies', 'linkedin', 'indeed'] as Source[], reserve_pct: 20, // sources: keep in step with DEFAULT_SOURCES (agent/jobagent/discover/ats_api.py)
@@ -129,7 +129,7 @@ export const SettingsSchema = z.object({
     company_cooldown_hours: z.number().min(0).max(168),
     cover_letter: z.enum(['always', 'if_field', 'if_required', 'never']),
     draft_free_text: z.boolean(),
-    tailoring: z.enum(['light', 'moderate']),
+    tailoring: z.enum(['light', 'moderate', 'ats']),
     followup_days: z.number().int().min(0).max(60),
   }).strict(),
   discovery: z.object({

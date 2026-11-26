@@ -19,8 +19,8 @@ In about 3 lines: about 10 minutes; you install what's needed and open Telegram 
 
 **Windows**, in PowerShell:
 ```powershell
-$env:Path += ";$env:LOCALAPPDATA\Microsoft\WindowsApps;$HOME\.bun\bin;$HOME\.local\bin"
-foreach ($c in "winget","uv","bun","claude") { "{0}: {1}" -f $c, [bool](Get-Command $c -EA 0) }
+$env:Path += ";$HOME\.bun\bin;$HOME\.local\bin"
+foreach ($c in "uv","bun","claude") { "{0}: {1}" -f $c, [bool](Get-Command $c -EA 0) }
 "telegram app: " + (Test-Path "Registry::HKEY_CLASSES_ROOT\tg")
 "bot token saved: " + (Test-Path data\.env)
 "running: " + [bool](Get-CimInstance Win32_Process | ? { $_.CommandLine -match "app/src/main.ts" })
@@ -34,16 +34,15 @@ If JobAgent is already **running**, tell them it's already set up and running ("
 
 ## 3. Install what's missing
 
-Say in one line what you're installing and why, then run it. Windows may show a permission pop-up: tell them to click **Yes**.
+Say in one line what you're installing and why, then run it. Windows may show a permission pop-up: tell them to click **Yes**. Don't require winget or any package manager on Windows.
 
-| Missing | Windows (`winget install -e --accept-source-agreements --accept-package-agreements --id …`) | macOS (Homebrew) | Without a package manager |
+| Missing | Windows (PowerShell) | macOS (Homebrew) | Without a package manager |
 |---|---|---|---|
-| uv (runs the Python helper) | `astral-sh.uv` | `brew install uv` | `curl -LsSf https://astral.sh/uv/install.sh \| sh` · https://docs.astral.sh/uv/getting-started/installation/ |
-| Bun (runs the app) | `Oven-sh.Bun` | `brew install oven-sh/bun/bun` | `curl -fsSL https://bun.sh/install \| bash` · https://bun.sh |
-| Telegram Desktop (recommended: links then open right on this computer) | `Telegram.TelegramDesktop` | `brew install --cask telegram` | https://desktop.telegram.org (Linux: `flatpak install flathub org.telegram.desktop`) |
-| cloudflared (only if they want the dashboard on their phone, step 8) | `Cloudflare.cloudflared` | `brew install cloudflared` | https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/ |
+| uv (runs the Python helper) | `powershell -ExecutionPolicy Bypass -c "irm https://astral.sh/uv/install.ps1 \| iex"` | `brew install uv` | `curl -LsSf https://astral.sh/uv/install.sh \| sh` · https://docs.astral.sh/uv/getting-started/installation/ |
+| Bun (runs the app) | `powershell -ExecutionPolicy Bypass -c "irm https://bun.sh/install.ps1 \| iex"` | `brew install oven-sh/bun/bun` | `curl -fsSL https://bun.sh/install \| bash` · https://bun.sh |
+| Telegram Desktop (recommended: links then open right on this computer) | they download it from https://desktop.telegram.org | `brew install --cask telegram` | https://desktop.telegram.org (Linux: `flatpak install flathub org.telegram.desktop`) |
+| cloudflared (only if they want the dashboard on their phone, step 8) | nothing to do: step 8's script gets it | `brew install cloudflared` | https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/ |
 
-- **No winget** (older Windows): send them to https://apps.microsoft.com/detail/9nblggh4nns1 ("App Installer"), or to the download links above.
 - **Telegram Desktop is optional.** If they'd rather use only their phone, skip it: setup shows a QR code they can scan instead.
 - **Claude not logged in:** they run `claude auth login` (a browser opens), using a Claude **Pro or Max** plan (https://claude.com/pricing). JobAgent runs on their own subscription.
 - After a fresh install your shell may not find the new tool. Refresh Path the way `scripts/setup.ps1` does (`Refresh-Path`) instead of asking them to restart.
@@ -101,13 +100,15 @@ Once they're connected, tell them in two lines that JobAgent also has a dashboar
 Then ask whether they'd also like it on their phone. If they say no, you're done.
 
 If they say yes:
-1. Install cloudflared (table in step 3).
-2. Tell them to open a **new** terminal window and run `cloudflared tunnel --url http://127.0.0.1:<port>`, and to keep that window open. Don't start it in this session, because it would stop when this session ends.
-3. Tell them to send the `https://….trycloudflare.com` address it prints to JobAgent in Telegram: Home → 🖥 Dashboard → 📱 Set up phone access. Then **📱 Open dashboard** opens it inside Telegram.
+1. **Windows:** open the phone script in its own window (never inside this session, because it would stop when this session ends):
+   `Start-Process powershell -WorkingDirectory "<ROOT>" -ArgumentList "-ExecutionPolicy","Bypass","-File","<ROOT>\scripts\phone.ps1"`
+   It gets cloudflared, starts the tunnel and gives JobAgent the address. When the window says their phone can reach the dashboard, they keep it open.
+2. **macOS/Linux:** install cloudflared (table in step 3), have them run `cloudflared tunnel --url http://127.0.0.1:<port>` in a **new** terminal window and keep it open, then send the `https://….trycloudflare.com` address to JobAgent: Home → 🖥 Dashboard → 📱 Set up phone access.
+3. In Telegram, Home → 🖥 Dashboard → **📱 Open dashboard** opens it inside Telegram.
 4. Say in one line what to expect:
    - Only their Telegram account can sign in.
    - Private answers are never shown.
-   - A quick tunnel gets a new address each time it starts, so they send the new one.
+   - A quick tunnel gets a new address each time it starts: on Windows they run `scripts\phone.ps1` again; otherwise they send the new one.
    - They can turn it off with 🚫 Turn off phone access.
 
    [docs/dashboard.md](../../../docs/dashboard.md) has the details if they ask.
@@ -132,6 +133,6 @@ If they say yes:
 
 - Run `jobagent pair`, `credentials`, `login` or `submit` yourself, or `fill` without `--dry-run`.
 - Read, print or ask for the bot token or anything in `data/.env`; edit `data/settings.json` or any `approval.json`.
-- Read or print `data/dashboard.json` (it holds the dashboard's secret), or set the phone address yourself. The owner sends it in Telegram.
-- Run the setup or start scripts inside this session.
+- Read or print `data/dashboard.json` (it holds the dashboard's secret), or set the phone address yourself. Only `scripts\phone.ps1` in its own window, or the owner in Telegram, sets it.
+- Run the setup, start or phone scripts inside this session.
 - Turn practice mode off, or tell them how to skip the approval step.

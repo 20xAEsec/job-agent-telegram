@@ -41,7 +41,7 @@ export function suggestion(jobs: Job[], out: Record<string, string>, minScore: n
     return { text: `Your interviews come from matches of 80 or more (${highI} of ${highN}); none of the ${lowN} below 80 led to one. Raising the minimum match score would save time.`, btn: { text: '📊 Minimum match score', data: 's:ms' } }
   }
   const f = funnel(jobs, out)
-  if (f.applied >= MIN_FOR_SUGGESTIONS && f.replied === 0) return { text: `No replies yet from ${f.applied} applications. Check that your resume preview looks right, and consider "Moderate" tailoring.`, btn: { text: '📨 How I apply', data: 'S:apply' } }
+  if (f.applied >= MIN_FOR_SUGGESTIONS && f.replied === 0) return { text: `No replies yet from ${f.applied} applications. Check that your resume preview looks right, and consider "Rebuild for ATS" tailoring.`, btn: { text: '📨 How I apply', data: 'S:apply' } }
   return null
 }
 

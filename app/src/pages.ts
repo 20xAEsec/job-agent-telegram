@@ -85,7 +85,7 @@ export function nextAction(c: HomeCtx): Btn {
   if (!c.s.onboarded) return { text: '🧩 Finish setup', data: 'o:resume', style: 'success' }
   if (n.reviews) return { text: n.reviews === 1 ? '🔔 Review your application' : `🔔 Review ${n.reviews} applications`, data: n.reviews === 1 ? `r:rv:${code(one('AWAITING_APPROVAL')!.id)}` : 'Q:0', style: 'success' }
   if (n.kits) return { text: n.kits === 1 ? '🧰 Apply yourself: 1 match' : `🧰 Apply yourself: ${n.kits} matches`, data: n.kits === 1 ? `j:kit:${code(one('KIT_READY')!.id)}` : 'N:0', style: 'success' }
-  if (n.forms) return { text: `❓ Answer ${plural(n.forms, 'question form')}`, data: 'N:0', style: 'primary' }
+  if (n.forms) return { text: `❓ Open Questions (${n.forms})`, data: 'F:list', style: 'primary' }
   if (n.other) return { text: `🙋 Fix ${plural(n.other, 'stuck job')}`, data: 'N:0', style: 'primary' }
   if (c.work) return { text: '📋 See my jobs', data: 'J:a:0' }
   return c.s.discovery.enabled ? { text: '🔎 Search now', data: 'd:run', style: 'primary' } : { text: '🔭 Turn on Auto-search', data: 's:ae', style: 'primary' }
@@ -156,7 +156,7 @@ export function needsPage(c: Pick<HomeCtx, 'jobs' | 'forms'>): Page {
     ...(reviews.length > 1 ? [[{ text: `🔔 Review all ${reviews.length}, best first`, data: 'Q:0', style: 'success' as const }]] : []),
     ...reviews.map(j => [{ text: `🔔 Review · ${short(jobTitle(j), 44)}`, data: `r:rv:${code(j.id)}` }]),
     ...kits.map(j => [{ text: `🧰 Apply yourself · ${short(jobTitle(j), 38)}`, data: `j:kit:${code(j.id)}` }]),
-    ...c.forms.map(f => [{ text: `❓ Answer · ${short(f.title ?? 'Questions', 44)}`, data: `f:${code(f.batch_id)}:open` }]),
+    ...(c.forms.length ? [[{ text: `❓ Open Questions (${c.forms.length})`, data: 'F:list' }]] : []),
     ...problems.map(j => [{ text: `${statusOf(j.status).emoji} ${short(jobTitle(j), 50)}`, data: `j:v:${code(j.id)}` }]),
   ]
   if (!rows.length) return { text: `${heading('📥', 'Needs you')}\n\n✨ All clear. Nothing is waiting for you.\n\n${note('Reviews, questions and problems show up here.')}`, rows: [[{ text: '🔎 Search now', data: 'd:run', style: 'primary' }], nav()] }
@@ -169,6 +169,22 @@ export function needsPage(c: Pick<HomeCtx, 'jobs' | 'forms'>): Page {
   ].join('\n')
   return { text, rows: [...rows.slice(0, 20), nav()] }
 }
+
+// ---- Open Questions: the only way into a question form, so it is always clear where typed text goes ----
+
+export function questionsPage(forms: Form[]): Page {
+  if (!forms.length) return { text: `${heading('❓', 'Open Questions')}\n\n✨ ${note('No questions are waiting.')}`, rows: [nav()] }
+  return {
+    text: [heading('❓', 'Open Questions'), '', 'Open an application to answer its questions.', note('What you type counts as an answer only while its questions are open.')].join('\n'),
+    rows: [...forms.slice(0, 20).map(f => [{ text: `Open · ${short(f.title ?? 'Questions', 48)}`, data: `f:${code(f.batch_id)}:open` }]), nav()],
+  }
+}
+
+// Sent when Claude has questions. It has no answer buttons and does not listen for text.
+export const askPage = (f: Form): Page => ({
+  text: `${heading('❓', esc(f.title ?? 'A few questions'))}\nI need ${plural(f.questions.length, 'answer')} from you. Tap <b>Open Questions</b> to give them.`,
+  rows: [[{ text: '❓ Open Questions', data: 'F:list', style: 'primary' }]],
+})
 
 // ---- Follow-ups: applications with no news after a while ----
 export type FollowState = Record<string, { asked?: string; snooze_until?: string }>
@@ -214,14 +230,21 @@ export const dashPage = (link: string | null, phone: string | null = null): Page
   ],
 })
 
-export const phoneSetupPage = (port: number): Page => ({
+export const phoneSetupPage = (port: number, windows = process.platform === 'win32'): Page => ({
   text: [heading('📱', 'Dashboard on your phone'), '',
     'Your phone reaches the dashboard through a secure tunnel to your computer. It is optional, and only you can sign in: every visit is checked against your Telegram account.', '',
-    '<b>1.</b> On your computer, install Cloudflare Tunnel (<code>winget install Cloudflare.cloudflared</code> on Windows) or use Tailscale Funnel.',
-    `<b>2.</b> Run <code>cloudflared tunnel --url http://127.0.0.1:${port}</code> and keep it open.`,
-    '<b>3.</b> It prints an address like <code>https://something.trycloudflare.com</code>. Send that address here.', '',
-    note('Quick tunnels get a new address each time they start: send the new one when it changes. Turn phone access off any time from this screen.')].join('\n'),
-  rows: [[{ text: '✖ Cancel', data: 'm:dash' }]],
+    ...(windows ? [
+      '<b>1.</b> On the computer JobAgent runs on, open the JobAgent folder, then <code>scripts</code>.',
+      '<b>2.</b> Right-click <code>phone.ps1</code> → <b>Run with PowerShell</b>, and keep that window open.',
+      '<b>3.</b> When it says your phone can reach the dashboard, tap <b>Done</b> below.', '',
+      note('The script gets everything it needs and gives me the address itself. Run it again after restarting your computer. Using your own tunnel (such as Tailscale Funnel)? Send its https address here.'),
+    ] : [
+      '<b>1.</b> On your computer, install Cloudflare Tunnel (<code>brew install cloudflared</code> on Mac) or use Tailscale Funnel.',
+      `<b>2.</b> Run <code>cloudflared tunnel --url http://127.0.0.1:${port}</code> and keep it open.`,
+      '<b>3.</b> It prints an address like <code>https://something.trycloudflare.com</code>. Send that address here.', '',
+      note('Quick tunnels get a new address each time they start: send the new one when it changes.'),
+    ])].join('\n'),
+  rows: [...(windows ? [[{ text: '✅ Done, show the dashboard', data: 'm:dash' }]] : []), [{ text: '✖ Cancel', data: 'm:dash' }]],
 })
 
 // ---- Chat shortcuts: common questions answered on the spot, without starting Claude ----
@@ -324,7 +347,7 @@ export function jobPage(j: Job, x: { running: boolean; hasForm: boolean; outcome
   const act: Btn[][] = []
   if (j.status === 'AWAITING_APPROVAL') act.push([{ text: '👀 Open the review', data: `r:rv:${c}`, style: 'success' }])
   if (j.status === 'KIT_READY') act.push([{ text: '🧰 Show my kit', data: `j:kit:${c}`, style: 'success' }, { text: '✅ I applied', data: `j:ap:${c}` }])
-  if (j.status === 'NEEDS_ANSWERS' && x.hasForm) act.push([{ text: '❓ Answer the questions', data: `f:job:${c}`, style: 'success' }])
+  if (j.status === 'NEEDS_ANSWERS' && x.hasForm) act.push([{ text: '❓ Open Questions', data: 'F:list', style: 'success' }])
   if ((j.status === 'NEEDS_HUMAN' || j.status === 'FAILED') && !x.running) act.push([{ text: '🔄 Try again', data: `j:rt:${c}`, style: 'success' }, { text: '✅ I applied myself', data: `j:ap:${c}` }])
   if (j.status === 'SKIPPED' && !x.running) act.push([{ text: '↩ Apply anyway', data: `j:any:${c}` }])
   if (x.running) act.push([{ text: '✋ Stop working on it', data: `j:x:${c}`, style: 'danger' }])
@@ -373,7 +396,7 @@ export function completeness(s: Settings, contact: Record<string, string>, answe
   return { pct: Math.round(((checks.length - missing.length) / checks.length) * 100), missing }
 }
 
-export function profilePage(s: Settings, contact: Record<string, string>, answers: AnswerRec[], resume: string | null): Page {
+export function profilePage(s: Settings, contact: Record<string, string>, answers: AnswerRec[], resume: string | null, versions: string[] = []): Page {
   const c = completeness(s, contact, answers)
   return {
     text: [
@@ -382,7 +405,7 @@ export function profilePage(s: Settings, contact: Record<string, string>, answer
       `📧 ${esc(contact.email || '—')}   📞 ${esc(contact.phone || '—')}`,
       `📍 ${esc(contact.location || '—')}`,
       ...(contact.linkedin ? [`🔗 ${esc(contact.linkedin)}`] : []),
-      `📄 ${resume ? `Resume: ${esc(resume)}` : note('No resume yet')}`,
+      `📄 ${resume ? `Resume: ${esc(resume)}${versions.length ? ` ${note(`+ ${plural(versions.length, 'other version')}`)}` : ''}` : note('No resume yet')}`,
       '',
       `${bar(c.pct, 100)} <b>${c.pct}% complete</b>`,
       c.missing.length ? note(`Missing: ${esc(c.missing.join(', '))}`) : note('I have everything I need.'),
@@ -393,7 +416,7 @@ export function profilePage(s: Settings, contact: Record<string, string>, answer
     rows: [
       [{ text: '💾 Saved answers', data: 'a:l:0' }, { text: '✏️ Contact details', data: 'p:edit' }],
       [{ text: '📄 Replace resume', data: 'p:resume' }, { text: '🎯 What I look for', data: 'S:search' }],
-      [{ text: '🏆 Achievements', data: 'p:ach' }],
+      [{ text: '🏆 Achievements', data: 'p:ach' }, { text: '📚 Resume versions', data: 'p:rv' }],
       nav(),
     ],
   }
@@ -423,6 +446,27 @@ export const achievementPrompt = (n: number): Page => ({
   text: `${heading('🏆', 'Tell me one win')}\n${ACH_PROMPTS[n % ACH_PROMPTS.length]}\n\n${note('One or two sentences. Only what really happened.')}`,
   rows: [[{ text: '✖ Cancel', data: 'p:ach' }]],
 })
+
+// Other versions of the resume (another focus, an older one): the ATS rebuild picks the best lines from all of them.
+export const VERSIONS_MAX = 6
+export function versionsPage(names: string[], msg = ''): Page {
+  return {
+    text: [heading('📚', 'Resume versions'),
+      note('Send other versions of your resume, like one aimed at a different kind of role. For each job I pick the lines from all of them that fit it best. Your main resume stays as it is.'), '',
+      '<b>1.</b> Main resume',
+      ...names.map((n, i) => `<b>${i + 2}.</b> ${esc(n)}`),
+      ...(msg ? ['', msg] : [])].join('\n'),
+    rows: [
+      ...(names.length < VERSIONS_MAX ? [[{ text: '➕ Add a version', data: 'p:rv:add', style: 'primary' as const }]] : []),
+      ...pairs(names.map((n, i) => ({ text: `🗑 ${i + 2}`, data: `p:rv:rm:${n}` })), 6),
+      nav('m:prof'),
+    ],
+  }
+}
+export const versionPrompt: Page = {
+  text: `${heading('📚', 'Send another version')}\nSend it as a PDF or .docx file. ${note('Only add versions with real experience: I use their lines word for word in meaning.')}`,
+  rows: [[{ text: '✖ Cancel', data: 'p:rv' }]],
+}
 
 export const contactEditPage = (contact: Record<string, string>, fields: [string, string][]): Page => ({
   text: [heading('✏️', 'Contact details'), note('These go on every application. Tap one to change it.'), '', ...fields.map(([k, l]) => `<b>${l}:</b> ${esc(contact[k] || '—')}`)].join('\n'),
@@ -490,7 +534,7 @@ const HELP: Record<string, [string, string]> = {
   how: ['🧭 How it works', [
     '1️⃣ <b>You send a job link</b> (or Auto-search finds one).',
     '2️⃣ <b>I read the posting</b> in a locked-down reader that cannot take orders from the posting, and score how well it fits you (0–100). Weak fits are skipped, with the reason shown.',
-    '3️⃣ <b>I ask only what I can\'t know</b>, like work authorization, once. Your answers are saved for next time.',
+    '3️⃣ <b>I ask only what I can\'t know</b>, like work authorization, once. Answer under ❓ Open Questions. Your answers are saved for next time.',
     '4️⃣ <b>I tailor your resume</b>: I reword a few lines to mirror the job, keep your layout, and never invent experience.',
     '5️⃣ <b>I fill in the form</b> in a hidden browser and take a screenshot.',
     '6️⃣ <b>You review everything</b>: every answer, what I changed on your resume, and a picture of the filled form. Approve, edit an answer, or skip.',

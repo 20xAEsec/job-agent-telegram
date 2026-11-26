@@ -28,6 +28,7 @@ You analyse one job posting for the user. Input: a `job_id`. Run commands as `uv
   "match": {"score": 0-100, "reasons": ["max 4 short strings"], "dealbreakers": ["…"],
             "breakdown": {"title": 0-100, "seniority": 0-100, "skills": 0-100, "location": 0-100, "pay": 0-100},
             "must_haves": [{"text": "a requirement the posting calls required, max 60 chars", "status": "met|partial|missing"}]},
+  "ats_keywords": [{"term": "SQL", "aliases": ["Structured Query Language"], "kind": "title|hard|cert|degree|soft", "required": true}],
   "field_classification": [
     {"fid": "first_name", "class": "profile|generated|document|must_ask", "value": "…", "save_key": "…",
      "sensitive": false, "unusual": false, "reason": "short"}
@@ -48,6 +49,17 @@ Judge title fit by the work, not the words: when the title differs from all of t
 `breakdown` gives each of those five parts its own 0 to 100 (`pay` is 50 when the posting gives no pay). `must_haves`: up to 8 requirements the posting marks as required, each `met` (the profile clearly shows it), `partial` (related experience) or `missing`. Judge only from the profile; never mark something `met` the profile does not show.
 
 **Calibrate with the user's past decisions.** Run `jobagent feedback summary`. It reports, from this user's own approve/skip choices, the score bands they approve and the title words they keep skipping. Treat it as a hint about this user's taste (for example lower `title` for words they always skip), not as a rule, and never let it override a dealbreaker.
+
+## ATS keywords
+
+`ats_keywords` is what an applicant tracking system will search the resume for. Up to 30 entries, most important first:
+
+- The job title first, exactly as posted (`kind: title`, `required: true`), without levels in brackets or location suffixes.
+- Then hard skills, tools, platforms, languages, methods and domain terms (`hard`), certifications (`cert`), and degrees or fields of study (`degree`). Soft skills (`soft`) only when the posting stresses them.
+- `term` is spelled exactly as the posting spells it ("PostgreSQL", "CI/CD", "Power BI"). At most 40 characters: a noun phrase, never a sentence.
+- `aliases`: up to 3 other forms the same thing goes by: the acronym and the spelled-out form ("AWS" / "Amazon Web Services"), common short names ("Postgres"). Never a different skill.
+- `required: true` when the posting lists it under requirements or must-haves, or names it three or more times.
+- List what the posting asks for, whether or not the profile has it. Never copy profile text here.
 
 ## Field classification (every field in `fields.json`)
 

@@ -68,9 +68,10 @@ export const CATS: Record<string, { emoji: string; title: string; blurb: string;
         opts: [['if_field', 'When the form has a field for one'], ['if_required', 'Only when required'], ['always', 'Always'], ['never', 'Never']].map(([v, l]) => [v, l] as Opt),
       }),
       S('df', '✍️', 'Draft open questions', 'apply.draft_free_text', 'bool', 'ON: I draft answers to questions like "Why do you want to work here?" from your profile; you see every draft in the review. OFF: I ask you instead.'),
-      S('tl', '📝', 'Resume tailoring', 'apply.tailoring', 'enum', 'How much I adjust your resume for each job. Your layout is always kept, and I never invent experience.', {
+      S('tl', '📝', 'Resume tailoring', 'apply.tailoring', 'enum', 'How much I adjust your resume for each job. I never invent experience.', {
         opts: [
-          ['moderate', 'Moderate', 'Reword up to 12 lines to mirror the job (recommended)'],
+          ['ats', 'Rebuild for ATS', 'A clean layout that hiring software reads perfectly, the best lines from all your resume versions, worded with the job\'s keywords (recommended)'],
+          ['moderate', 'Moderate', 'Keep your layout, reword up to 12 lines to mirror the job'],
           ['light', 'Light touch', 'Reword at most 5 lines, keep the length exactly'],
         ],
       }),
@@ -158,7 +159,7 @@ export function categoryPage(key: string, s: Settings): Page {
   }
 }
 
-const chip = (spec: Spec, v: number) => (spec.path[1] === 'min_salary' ? money(v) : spec.show ? spec.show(v, {} as Settings) : String(v))
+export const chip = (spec: Spec, v: number) => (spec.path[1] === 'min_salary' ? money(v) : spec.show ? spec.show(v, {} as Settings) : String(v))
 
 // Titles auto-search keeps seeing in your field (data/seen_titles.json, written by `discover poll`): seen twice in the last
 // 14 days and not in your lists yet. Offered under Related titles; only a tap adds one.

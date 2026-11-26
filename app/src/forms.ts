@@ -150,6 +150,32 @@ export function act(f: Form, action: string, now = Date.now()): Step {
   return bad(f)
 }
 
+// The dashboard sends a whole form at once. Each answer is checked like a tap or a typed reply; a question left out keeps
+// the answer already given (a private one is never sent back to the page). Then it is confirmed, exactly like "c".
+export function submitAll(f: Form, raw: Record<string, unknown>, remember: Record<string, unknown> = {}, now = Date.now()): Step {
+  if (f.status !== 'open') return { form: f, error: 'This form is already closed.' }
+  const answers: Record<string, Value> = { ...f.answers }, save = { ...f.save }
+  for (const q of f.questions) {
+    const v = raw[q.qid], name = short(q.text, 60)
+    if (q.save_key && typeof remember[q.qid] === 'boolean') save[q.qid] = remember[q.qid] ? (q.default_save && q.default_save !== 'no' ? q.default_save : 'global') : 'no'
+    if (v === undefined || v === null || v === '') { if (q.qid in answers) continue; return { form: f, error: `Please answer: ${name}` } }
+    if (q.kind === 'multi') {
+      const picks = (Array.isArray(v) ? v : []).map(x => q.options!.find(o => o === x))
+      if (!picks.length || picks.some(p => p === undefined)) return { form: f, error: `Pick at least one option: ${name}` }
+      answers[q.qid] = [...new Set(picks as string[])]
+    } else if (q.kind === 'choice' || q.kind === 'yesno') {
+      const o = q.options!.find(x => x === v)
+      if (o === undefined) return { form: f, error: `Pick one of the options: ${name}` }
+      answers[q.qid] = o
+    } else {
+      const p = parseAnswer(q, String(v).trim())
+      if ('error' in p) return { form: f, error: `${name}: ${p.error}` }
+      answers[q.qid] = p.v
+    }
+  }
+  return act({ ...f, answers, save, current: 0, confirming: true, picking: false, skipping: false, updated_at: now }, 'c', now)
+}
+
 // A typed reply to the current question. Returns an error (form unchanged) if it does not validate.
 export function answerText(f: Form, text: string, now = Date.now()): Step {
   if (f.status !== 'open' || f.confirming) return { form: f, error: 'No open question.' }
@@ -165,6 +191,8 @@ const fmt = (q: Question, v: Value) => (q.sensitive ? '<tg-spoiler>' + esc(short
 const hint = (q: Question) =>
   numbered(q) ? 'Type the number of your choice below.' : q.kind === 'number' ? 'Type a number below, like 95000 or 95k.'
     : q.kind === 'date' ? 'Type a date below, like 2026-12-01, "2 weeks" or "immediately".' : q.kind === 'text' ? 'Type your answer below.' : ''
+
+const BACK: Btn = { text: '← Open Questions', data: 'F:list' } // leaving stops typed text counting as an answer
 
 export function render(f: Form): Page {
   const c = code(f.batch_id)
@@ -194,6 +222,7 @@ export function render(f: Form): Page {
       text += `\n\n⚠️ <b>Skip this job?</b> ${note("I'll stop working on it.")}`
       rows.push([{ text: '⏭ Yes, skip it', data: `f:${c}:s`, style: 'danger' }, { text: '↩ Keep going', data: `f:${c}:xn` }])
     } else if (f.job_id) rows.push([{ text: '⏭ Skip this job', data: `f:${c}:x` }])
+    rows.push([BACK])
     return { text, rows }
   }
 
@@ -222,6 +251,7 @@ export function render(f: Form): Page {
     rows.push([{ text: '⏭ Yes, skip it', data: `f:${c}:s`, style: 'danger' }, { text: '↩ Keep going', data: `f:${c}:xn` }])
   } else if (f.job_id) last.push({ text: '⏭ Skip this job', data: `f:${c}:x` })
   if (last.length) rows.push(last)
+  rows.push([BACK])
   return { text, rows }
 }
 
@@ -238,6 +268,5 @@ export function listForms(): Form[] {
 }
 export const openForms = () => listForms().filter(f => f.status === 'open').sort((a, b) => b.updated_at - a.updated_at)
 export const findForm = (c: string) => listForms().find(f => code(f.batch_id) === c)
-// Which form a typed message answers: the most recently touched open form waiting for typed input, if it is recent.
-// An old form does not swallow a chat message; opening it from Needs you makes it recent again.
-export const textForm = (now = Date.now()) => openForms().find(f => !f.confirming && textual(cur(f)) && now - f.updated_at < 2 * 3600_000)
+// The current question wants a web address ("Your LinkedIn profile URL"), so a typed link answers it.
+export const wantsLink = (f: Form) => cur(f).kind === 'text' && /\b(url|link|linkedin|github|website|web site|personal site|portfolio|profile)\b/i.test(cur(f).text)

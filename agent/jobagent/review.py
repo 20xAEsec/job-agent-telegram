@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 
 from . import safety, store
+from .docs import ats
 from .paths import atomic_write_json
 
 
@@ -63,7 +64,8 @@ def build(d: Path, job_id: str) -> dict:
         "breakdown": _breakdown(m_), "must_haves": _must_haves(m_), "coverage": coverage(d, job_id, files),
         "answers": answers, "unusual": unusual, "generated_sensitive": gen_sens, "files": files,
         "resume": {"edits": len(diff.get("edits") or []), "reorders": len(diff.get("reorder") or []), "fallback": bool(diff.get("fallback")),
-                   "verified": bool((diff.get("verify") or {}).get("ok", True))},
+                   "verified": bool((diff.get("verify") or {}).get("ok", True)),
+                   **({"ats": True, "versions_used": len(diff.get("versions_used") or []), "versions_total": int(diff.get("versions_total") or 1)} if diff.get("mode") == "ats" else {})},
         "screenshots": ["screenshots/filled.png"] if shot.exists() else [], "url": m["canonical_url"],
         # what tailoring changed, so the user can judge it on the phone without opening the file
         "changes": [{"old": _s(e.get("old"), 200), "new": _s(e.get("new"), 200), "reason": _s(e.get("reason"), 140)} for e in (diff.get("edits") or [])[:12]],
@@ -88,12 +90,14 @@ def _has(text: str, req: str) -> bool:
 
 
 def coverage(d: Path, job_id: str, files: list | None = None) -> dict:
-    """How many of the posting's must-haves the resume names, before and after tailoring. Deterministic word matching:
-    shortcut: synonyms ("Postgres" for "PostgreSQL") count as missing; use the analyst's met/partial for meaning."""
+    """How well the resume matches the posting's keywords, before and after tailoring: the weighted ATS keyword score
+    when the analyst listed `ats_keywords` (aliases count), else the share of must-haves named. Deterministic word matching:
+    shortcut: for must-haves, synonyms ("Postgres" for "PostgreSQL") count as missing; use the analyst's met/partial for meaning."""
     j = store.jdir(d, job_id)
     an = _read(j, "analysis.json", required=False) or {}
+    kws = ats.keywords(an)
     reqs = [x["text"] for x in _must_haves(an.get("match") if isinstance(an.get("match"), dict) else {})]
-    if not reqs:
+    if not reqs and not kws:
         return {}
     try:
         before = (d / "resume_text.txt").read_text("utf-8").lower()
@@ -109,6 +113,9 @@ def coverage(d: Path, job_id: str, files: list | None = None) -> dict:
                 after = "\n".join(p.get_text() for p in doc).lower()
         except Exception:  # noqa: BLE001 - coverage is a nicety: never block the review
             pass
+    if kws:
+        a = ats.score(after, kws)
+        return {"before": ats.score(before, kws)["score"], "after": a["score"], "missing": a["missing"][:6]}
     pct = lambda t: round(100 * sum(_has(t, r) for r in reqs) / len(reqs))  # noqa: E731
     return {"before": pct(before), "after": pct(after), "missing": [r for r in reqs if not _has(after, r)][:6]}
 

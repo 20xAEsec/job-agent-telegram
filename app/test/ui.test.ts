@@ -390,6 +390,27 @@ describe('upgrade: achievements', () => {
   })
 })
 
+describe('ATS rebuild and resume versions', () => {
+  test('versions: list, add until the cap, remove by name; profile shows the count', () => {
+    const p = P.versionsPage(['backend-focus', 'old-2021'])
+    expect(p.text).toContain('Main resume')
+    expect(datas(p)).toEqual(expect.arrayContaining(['p:rv:add', 'p:rv:rm:backend-focus', 'p:rv:rm:old-2021']))
+    expect(datas(P.versionsPage([...Array(P.VERSIONS_MAX)].map((_, i) => `v${i}`)))).not.toContain('p:rv:add')
+    fits(p)
+    const prof = P.profilePage(S(), {}, [], 'base_resume.pdf', ['backend-focus'])
+    expect(datas(prof)).toContain('p:rv')
+    expect(prof.text).toContain('1 other version')
+  })
+  test('the review says the resume was rebuilt, from how many versions; ats is a valid setting and the default', () => {
+    const { REVIEW } = require('../dev/preview') as typeof import('../dev/preview')
+    const R = require('../src/review') as typeof import('../src/review')
+    const t = R.reviewPage({ ...REVIEW, resume: { edits: 4, reorders: 0, fallback: false, verified: true, ats: true, versions_used: 2, versions_total: 3 } }, true).text
+    expect(t).toContain('rebuilt for hiring software from 2 of your 3 versions, 4 lines reworded')
+    expect(S().apply.tailoring).toBe('ats')
+    expect(SettingsSchema.safeParse({ ...S(), apply: { ...S().apply, tailoring: 'ats' } }).success).toBe(true)
+  })
+})
+
 describe('upgrade: notification settings', () => {
   test('each kind is loud or silent; only the weekly summary can be turned off', () => {
     expect(SettingsSchema.safeParse(S()).success).toBe(true)

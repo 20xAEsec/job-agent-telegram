@@ -6,7 +6,8 @@ import { STAGES } from './cards'
 export const AGENT_BUTTONS: Record<string, string> = {
   'm:home': '🏠 Home', 'N:0': '📥 Needs you', 'J:a:0': '📋 Jobs', 'm:settings': '⚙️ Settings', 'S:search': '🎯 What I look for',
   'S:auto': '🔭 Auto-search', 'C:list': '🏢 Companies I watch', 'm:prof': '👤 Profile', 'a:l:0': '💾 Saved answers', 'm:help': '❔ Help',
-  'L:show': '🔑 Job site logins', 'Q:0': '🔔 Review queue', 'm:health': '🩺 Health', 'I:0': '📊 Insights',
+  'L:show': '🔑 Job site logins', 'Q:0': '🔔 Review queue', 'm:health': '🩺 Health', 'I:0': '📊 Insights', 'F:list': '❓ Open Questions',
+  'p:rv': '📚 Resume versions',
 }
 export const TONES: Record<string, string> = { info: 'ℹ️', success: '✅', warn: '⚠️', error: '❌' }
 
@@ -57,7 +58,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: 'tg_ask',
     description:
-      'Ask the user questions with a Telegram form (buttons and typed answers). Returns at once; when the user confirms, the app saves the answers ' +
+      'Ask the user questions with a Telegram form (buttons and typed answers). The app tells the user to answer under Open Questions. Returns at once; when the user confirms, the app saves the answers ' +
       '(to profile.md for questions with a save_key and save on, to data/jobs/<job_id>/answers.json for questions with a fid) and starts a new task to continue the job. ' +
       'So after tg_ask, set the job to NEEDS_ANSWERS and stop. kind: choice | multi | yesno | text | number | date. Sensitive questions need a save_key. save_key is reusable, like work_auth_us.',
     inputSchema: {

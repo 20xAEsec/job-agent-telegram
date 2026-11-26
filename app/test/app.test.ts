@@ -3,7 +3,9 @@ import { describe, expect, test } from 'bun:test'
 import { createHash } from 'crypto'
 import { existsSync, readFileSync, rmSync } from 'fs'
 import { join } from 'path'
-import { createApp, discoverTitles, extractUrls, isAllowed, tryPair } from '../src/app'
+import { claims, createApp, discoverTitles, extractUrls, isAllowed, tryPair } from '../src/app'
+import * as F from '../src/forms'
+import { code } from '../src/jobs'
 import * as OB from '../src/onboarding'
 import { DATA, DEFAULT_SETTINGS, PAIR_FILE, loadSettings, logError, readJson, writeJson } from '../src/state'
 
@@ -129,6 +131,90 @@ describe('setup wizard', () => {
     for (const k of ['eeo_gender', 'eeo_race', 'eeo_veteran', 'eeo_disability']) expect(key(k)).toContain(`--value=${OB.DECLINE}`)
     expect(readJson<any>(join(DATA, 'onboarding.json'), {}).step).toBe('done')
     await app.stop()
+  })
+})
+
+describe('typed input goes to what asked for it', () => {
+  const PROFILE = 'https://www.linkedin.com/in/jane-doe'
+  const JOB = 'https://job-boards.greenhouse.io/acme/jobs/1'
+  function chat() {
+    const m = makeApp()
+    writeJson(join(DATA, 'settings.json'), { ...DEFAULT_SETTINGS, paired_user_id: 42, onboarded: true })
+    rmSync(join(DATA, 'forms'), { recursive: true, force: true })
+    m.app.bot.botInfo = { id: 1, is_bot: true, first_name: 'B', username: 'testbot' } as any
+    let n = 0
+    const send = (text: string) => m.app.bot.handleUpdate({ update_id: ++n, message: { message_id: n, date: 0, chat: { id: 42, type: 'private', first_name: 'J' }, from: { id: 42, is_bot: false, first_name: 'J' }, text } } as any)
+    const tap = (d: string) => m.app.route({ chat: { id: 42 }, callbackQuery: { message: { message_id: 9 } } } as any, d, {})
+    const jobUrls = () => [m.app.agent.live('work')?.task, ...m.app.agent.queued()].flatMap(t => (t?.kind === 'job' ? [t.payload.url] : []))
+    const ask = (text: string) => F.saveForm(F.newForm('f1', undefined, 'x', F.validateQuestions([{ qid: 'q1', text, kind: 'text' }], false)))
+    const open = () => tap(`f:${code('f1')}:open`)
+    const answer = () => F.loadForm('f1')!.answers.q1
+    const done = async () => { m.release(); await m.app.stop() }
+    return { ...m, send, tap, jobUrls, ask, open, answer, done }
+  }
+
+  test('a screen only takes what it can use', () => {
+    const at = { chat: 42, msg: 1, at: 0 }
+    const dash = { ...at, kind: 'dashurl' as const }
+    for (const yes of ['https://a-b.trycloudflare.com', 'a-b.trycloudflare.com', 'https://pc.tail1.ts.net/x', 'http://mine.example.com']) expect(claims(dash, yes)).toBe(true)
+    for (const no of [PROFILE, JOB, 'linkedin.com/in/jane-doe', 'what is waiting?', '95000']) expect(claims(dash, no)).toBe(false)
+    expect(claims({ ...at, kind: 'contact', key: 'linkedin', ob: false }, PROFILE)).toBe(true)
+    expect(claims({ ...at, kind: 'contact', key: 'phone', ob: false }, PROFILE)).toBe(false)
+    expect(claims({ ...at, kind: 'achievement' }, JOB)).toBe(false)
+    expect(claims({ ...at, kind: 'company' }, JOB)).toBe(true)
+  })
+
+  test('asking sends a pointer to Open Questions, with nothing to answer on it', async () => {
+    const t = chat()
+    const job = t.app.agent.enqueue({ kind: 'job', title: 'x', payload: { url: JOB } }).task
+    await wait()
+    await t.app.handleTool(job.id, 'tg_ask', { batch_id: 'f1', title: 'Acme · Analyst', questions: [{ qid: 'q1', text: 'Remote?', kind: 'yesno' }] })
+    const sent = t.calls.find(c => String(c.payload.text).includes('Open Questions'))!
+    expect(sent.payload.reply_markup.inline_keyboard.flat().map((b: any) => b.callback_data)).toEqual(['F:list'])
+    expect(((await t.tap('F:list')) as any).rows[0][0]).toMatchObject({ text: 'Open · Acme · Analyst', data: `f:${code('f1')}:open` })
+    await t.done()
+  })
+
+  test('typed text and buttons answer a question only while it is open', async () => {
+    const t = chat()
+    t.ask('Your LinkedIn profile URL (optional)')
+    await t.send('not opened yet')
+    await t.send(PROFILE)
+    expect(t.answer()).toBeUndefined()
+    expect(t.jobUrls()).toEqual([])
+    await t.open()
+    await t.tap('m:home') // moving away closes it
+    expect(((await t.tap(`f:${code('f1')}:t`)) as any).text).toContain('Open Questions')
+    await t.send('still closed')
+    expect(t.answer()).toBeUndefined()
+    await t.open()
+    await t.send(PROFILE)
+    expect(t.answer()).toBe(PROFILE)
+    await t.done()
+  })
+
+  test('opening a question replaces the screen that was waiting', async () => {
+    const t = chat()
+    t.ask('Anything else?')
+    await t.tap('p:ach:add')
+    await t.open()
+    await t.send('Cut report time by 40 percent')
+    expect(t.answer()).toBe('Cut report time by 40 percent')
+    expect(t.pyCalls.some(a => a[1] === 'set-field')).toBe(false)
+    await t.done()
+  })
+
+  test('a job link stays a job link; a profile link never becomes one', async () => {
+    const t = chat()
+    await t.send(PROFILE)
+    expect(t.jobUrls()).toEqual([])
+    expect(t.calls.some(c => String(c.payload.text).includes('not a job posting'))).toBe(true)
+    t.ask('Link to your portfolio')
+    await t.open()
+    await t.send(JOB)
+    expect(t.jobUrls()).toEqual([JOB])
+    expect(t.answer()).toBeUndefined()
+    await t.done()
   })
 })
 

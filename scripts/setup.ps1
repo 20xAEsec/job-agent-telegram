@@ -9,8 +9,7 @@ function Ok($text) { Write-Host "  OK  $text" -ForegroundColor Green }
 function Warn($text) { Write-Host "  !   $text" -ForegroundColor Yellow }
 function Fail($text) { Write-Host "  X   $text" -ForegroundColor Red; Write-Host ''; Write-Host 'Fix that, then run this setup again.'; Read-Host '  Press Enter to close' | Out-Null; exit 1 } # a right-click run closes the window on exit
 function Refresh-Path {
-    # WindowsApps holds winget; it is not always in the saved user Path.
-    $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User') + ";$HOME\.bun\bin;$HOME\.local\bin;$env:LOCALAPPDATA\Microsoft\WindowsApps"
+    $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User') + ";$HOME\.bun\bin;$HOME\.local\bin"
 }
 function Has($cmd) { [bool](Get-Command $cmd -ErrorAction SilentlyContinue) }
 # Telegram Desktop registers tg:// links; with it, links open straight in the app on this computer.
@@ -25,11 +24,11 @@ Write-Host '  Finds jobs, tailors your resume and prepares applications. Nothing
 # ---- 1. Tools ----
 Step 1 'Checking your computer'
 Refresh-Path
-foreach ($t in @(@{ cmd = 'uv'; id = 'astral-sh.uv'; what = 'uv (runs the Python helper)' }, @{ cmd = 'bun'; id = 'Oven-sh.Bun'; what = 'Bun (runs the app)' })) {
+foreach ($t in @(@{ cmd = 'uv'; url = 'https://astral.sh/uv/install.ps1'; what = 'uv (runs the Python helper)' }, @{ cmd = 'bun'; url = 'https://bun.sh/install.ps1'; what = 'Bun (runs the app)' })) {
     if (Has $t.cmd) { Ok $t.what; continue }
-    if (-not (Has 'winget')) { Fail "$($t.what) is missing. Install it, then run setup again." }
     if (-not (Ask-YesNo "$($t.what) is missing. Install it now?")) { Fail "$($t.what) is needed." }
-    winget install --id $t.id -e --accept-source-agreements --accept-package-agreements | Out-Host
+    # The tool's own installer, so no package manager is needed. A separate process: an installer may call exit.
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "irm $($t.url) | iex" | Out-Host
     Refresh-Path
     if (Has $t.cmd) { Ok $t.what } else { Fail "Installed $($t.cmd), but this window can't see it yet. Close this window, open a new one, and run setup again." }
 }
@@ -117,6 +116,7 @@ else { Fail "Could not make a pairing link: $($p.error)" }
 
 Write-Host ''
 Write-Host '  Setup is done. In Telegram I ask for your resume first: have it ready as a PDF or Word file.' -ForegroundColor Green
+Write-Host '  Want the dashboard on your phone too? While JobAgent runs, run:  scripts\phone.ps1'
 Write-Host ''
 # JobAgent only works while it runs; most "it stopped answering" is a closed window.
 if (Ask-YesNo 'Once your phone is connected: keep JobAgent running in the background (no window, starts when you log in)?') {

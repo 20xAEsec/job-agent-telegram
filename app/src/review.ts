@@ -5,7 +5,7 @@ import { existsSync, rmSync } from 'fs'
 import { basename, join } from 'path'
 import { allJobs, code, findJob, jobDir, jobIds, JOB_RE, logDecision } from './jobs'
 import { readSection } from './profile'
-import { breakdownLines, clock, esc, heading, kb, mustHaveLine, note, pairs, quote, short, splitMsg, type Btn, type Page } from './kit'
+import { breakdownLines, clock, esc, heading, kb, mustHaveLine, note, pairs, plural, quote, short, splitMsg, type Btn, type Page } from './kit'
 import type { Breakdown, MustHave } from './jobs'
 import { runJobagent, type Run } from './runner'
 import { log, logError, loadSettings, practiceOn, readJson, trySettingsUpdate, writeJson, type Settings } from './state'
@@ -15,7 +15,7 @@ export type Review = {
   job_id: string; plan_hash: string; ats: string; company: string; role: string; location: string; salary: string; score: number | null
   reasons: string[]; dealbreakers: string[]; answers: Answer[]; unusual: string[]; generated_sensitive: string[]; files: string[]
   breakdown?: Breakdown; must_haves?: MustHave[]; coverage?: { before?: number; after?: number; missing?: string[] }
-  resume: { edits: number; reorders: number; fallback: boolean; verified: boolean }; screenshots: string[]; url: string
+  resume: { edits: number; reorders: number; fallback: boolean; verified: boolean; ats?: boolean; versions_used?: number; versions_total?: number }; screenshots: string[]; url: string
   changes?: { old: string; new: string; reason: string }[]; cover_letter?: string; previews?: string[]
 }
 export type Change = NonNullable<Review['changes']>[number]
@@ -54,6 +54,7 @@ export function reviewText(rv: Review, practice: boolean, extra?: string): strin
   const r = rv.resume
   const tail = [
     r.fallback ? '📄 <b>Resume:</b> your original, unchanged ' + note('(tailoring did not pass the layout check)')
+      : r.ats ? `📄 <b>Resume:</b> rebuilt for hiring software${(r.versions_total ?? 1) > 1 ? ` from ${r.versions_used} of your ${r.versions_total} versions` : ''}, ${plural(r.edits, 'line')} reworded${r.verified ? ', reads back cleanly ✓' : ' ⚠️ not verified'}`
       : `📄 <b>Resume:</b> ${r.edits ? `${r.edits} line${r.edits === 1 ? '' : 's'} reworded` : 'unchanged'}${r.reorders ? `, ${r.reorders} section${r.reorders === 1 ? '' : 's'} reordered` : ''}${r.verified ? ', layout checked ✓' : ' ⚠️ layout not verified'}`,
     rv.files.length ? `📎 <b>Attached:</b> ${rv.files.map(esc).join(', ')}` : '',
     '',

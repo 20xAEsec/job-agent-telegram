@@ -49,6 +49,7 @@ Add `-Practice` (Windows) or `--practice` (Mac/Linux) to lock practice mode on.
 | Apply to a job you found | Send the link in the chat. A live card shows each step: reading, scoring, tailoring, filling in, review. |
 | Let it find jobs | Home → **🔭 Turn on Auto-search**. It checks companies you watch and searches LinkedIn and Indeed on a schedule, and can find new companies hiring for your titles. Set **Posted within** to 1 hour (and **How often** to every hour) to see only the newest jobs. |
 | See what needs you | Home → **📥 Needs you**: reviews to approve, questions only you can answer, and stuck jobs. |
+| Answer application questions | Tap **❓ Open Questions**, then **Open** on the application. What you type counts as an answer only while its questions are open. |
 | Approve an application | The review card shows every answer, what changed on your resume, the cover letter, and pictures of your resume and the filled-in form. Tap **✅ Approve**, **✏️ Edit an answer** (instant, no waiting for Claude), **📄 Original resume**, **💬 Ask for a change** (just say what), **⏭ Skip**, or **🚫 Never this company**. |
 | Apply where JobAgent can't fill the form | You get an **application kit**: your tailored resume (and cover letter), drafted answers you tap to copy, and the link. Apply on the site, then tap **✅ I applied** so it is tracked under Jobs → Applied. |
 | Choose which messages ring | **⚙️ Settings → 🔔 Notifications**: reviews, auto-search results, follow-up reminders and computer problems can each ring or arrive silently; the weekly summary can also be turned off. Quiet hours silence everything overnight, and typing *"snooze"* silences everything for an hour. |
@@ -57,7 +58,7 @@ Add `-Practice` (Windows) or `--practice` (Mac/Linux) to lock practice mode on.
 | Track how it's going | **📋 Jobs**: mark Interview, Offer, Rejected or No reply (Interview and Offer get their own tabs), or export everything to a spreadsheet. **📊 Insights** shows where applications go and what gets replies; a weekly summary arrives on Monday mornings. |
 | Get ready for an interview | Mark the job **🗣 Interview**, then tap **🎤 Interview prep**: a company snapshot, likely questions, STAR stories from your own profile, and questions to ask. |
 | Follow up | After a week with no news, JobAgent asks how it went and can **✍️ draft a follow-up email** for you to send (it never sends email). Change or turn off the reminder in Settings → How I apply. |
-| See everything on one screen | Home → **🖥 Dashboard** gives a link to open on your computer: a pipeline board, score breakdowns, resume changes, insights, and Approve/Skip. It never shows private answers. It can also open on your phone, inside Telegram: see [Dashboard](#dashboard) below. |
+| Use it from your computer | Home → **🖥 Dashboard** gives a link to the desktop app: everything the Telegram screens do (review queue, jobs, questions, profile, all settings, logins, insights, health) with more room. It never shows private answers. It can also open on your phone, inside Telegram: see [Dashboard](#dashboard) below. |
 | Ask quick questions | Type *"what's waiting?"*, *"status"*, *"show my jobs"*, *"pause"* or *"snooze"* for an instant answer (no Claude needed), or use `/review` and `/search`. Anything else goes to Claude. |
 | Pause or stop | **⏸ Pause** on Home finishes the current step, then waits. **✋ Stop** on a card stops that job. `/stop` stops everything. |
 
@@ -70,19 +71,29 @@ Turn it off in **Settings → Practice mode** when you're ready; you still appro
 
 ### Dashboard
 
-Home → **🖥 Dashboard** shows your whole pipeline on one screen. It has a board (Preparing, Needs you, Applied, Interview, Offer, Closed) and each job's score breakdown, requirements, resume changes, cover letter, answers and screenshots. It also has the insights and health checks, and **Approve** / **Skip**. It starts by itself with JobAgent. Approving there is the same as tapping Approve in Telegram, and practice mode still applies.
+Home → **🖥 Dashboard** opens the desktop version of JobAgent. Telegram is for on the go; the dashboard is for sitting down with it. It has a sidebar with **Overview** (what I'm doing now, live activity, pause / search / stop), **Review** (the queue, best match first, with score parts, keywords, resume changes, every answer, and Approve, Ask for a change, Skip), **Jobs** (list or board, filters, search, CSV export), **Questions** (answer whole forms at once), **Profile** (contact details, resume and versions, achievements, saved answers), **Settings** (every setting, practice mode, companies, job site logins, phone access), **Insights** and **Health**. Paste a job link at the top of any screen. It starts by itself with JobAgent. Approving there is the same as tapping Approve in Telegram, and practice mode still applies.
 
 **On your computer:** Telegram gives you a private link (`http://127.0.0.1:4777/?k=…`) to open in your browser on the computer JobAgent runs on. Treat it like a password. Anyone who has it and uses that computer can approve applications.
 
-**On your phone (optional, off by default):** Telegram only opens web pages that are on the public internet, so you run a free tunnel from your computer:
+**On your phone (optional, off by default):** Telegram only opens web pages that are on the public internet, so a free tunnel connects your phone to your computer.
 
-1. Install Cloudflare Tunnel: `winget install Cloudflare.cloudflared` (Windows) or `brew install cloudflared` (Mac).
+**Windows:**
+
+1. Start JobAgent.
+2. Right-click `scripts\phone.ps1` → *Run with PowerShell*, or in a terminal:
+   `powershell -ExecutionPolicy Bypass -File scripts\phone.ps1`
+   It downloads Cloudflare Tunnel the first time (no winget or installer needed), starts it and gives JobAgent the address. Keep its window open.
+3. In Telegram: Home → 🖥 Dashboard → **📱 Open dashboard**. It opens inside Telegram.
+
+**Mac / Linux:**
+
+1. Install Cloudflare Tunnel: `brew install cloudflared`.
 2. In a terminal, run `cloudflared tunnel --url http://127.0.0.1:4777` and keep it open.
 3. In Telegram: Home → 🖥 Dashboard → **📱 Set up phone access**, and send the `https://….trycloudflare.com` address it printed.
-4. Tap **📱 Open dashboard**. It opens inside Telegram.
+4. Tap **📱 Open dashboard**.
 
 - **Who can get in:** only your paired Telegram account can sign in. Every visit is checked against Telegram's signature, and the computer link doesn't work through the tunnel. Private answers are never sent to the dashboard.
-- **When the address changes:** a quick tunnel gets a new address each time it starts, so send the new one. For an address that stays the same, use a named Cloudflare tunnel or Tailscale Funnel.
+- **When the address changes:** a quick tunnel gets a new address each time it starts. `scripts\phone.ps1` updates it for you; otherwise send the new one. For an address that stays the same, use a named Cloudflare tunnel or Tailscale Funnel.
 - **What Cloudflare (or Tailscale) can see:** your job titles, scores and resume changes.
 - **Turning it off:** tap **🚫 Turn off phone access**, or close the tunnel.
 - **More detail:** [docs/dashboard.md](docs/dashboard.md) explains how it's protected.
@@ -100,7 +111,7 @@ Unusual forms and private questions always come to you.
 - **Related titles** (⚙️ Settings → What I look for): other names for the same work. They are searched and matched like your job titles, but only prepared when the match score is 10 points above your minimum. Setup suggests some from your resume, and titles auto-search keeps seeing in your field are offered there with one tap; nothing is added without you.
 - **Jobs with other titles** (⚙️ Settings → Auto-search, default *A few*): up to 4 (or 12) jobs a day whose title is not on your lists, but is in your field and of the same kind (not a manager role unless you aim for one), and whose posting names several skills from your profile. Your skills are only compared on your computer, never searched for. These also need a score 10 points above your minimum, and they never take the place of jobs with your own titles. Title matching also skips sales, recruiting and manager titles that look like yours ("Security Sales Engineer", "Security Operations Manager") unless your own titles use those words.
 - LinkedIn links are first read from LinkedIn's public job page, so most need no login (Auto-search reads that page for the LinkedIn results that pass your filters). Indeed links are read through Indeed's app API. When a site still insists on a login, the job is read in JobAgent's own browser window, where you log in once (the job's card has a **🔑 Log in** button): ⚙️ Settings → **🔑 Job site logins**. It can't reuse your everyday browser's login (Chrome encrypts its cookies for Chrome alone). **Save password** keeps your login in the computer's password vault (Windows Credential Manager / macOS Keychain) so JobAgent can log back in by itself; it never goes through Telegram. Applying is still done by you on those sites. From a terminal: `uv run --project agent jobagent login linkedin|indeed|status` and `jobagent credentials set|delete linkedin|indeed`.
-- Resume tailoring for **PDF** and **Word (.docx)** resumes. For .docx you need Microsoft Word or LibreOffice installed (setup tells you).
+- Resume tailoring for **PDF** and **Word (.docx)** resumes. The default, **Rebuild for ATS** (⚙️ Settings → How I apply → Resume tailoring), builds a fresh resume for each job that applicant tracking systems and AI screeners read and rank well. It has one column, standard headings and no tables. It uses the posting's exact title and keyword spelling, puts a skills section first and keeps metrics in the bullets. Every line is checked against your own resumes, so skills you don't have and numbers you didn't write are refused. Missing skills show up on the review as gaps for you to confirm. Add other versions of your resume under 👤 Profile → **📚 Resume versions** (for example one aimed at a different kind of role), and JobAgent picks the best lines from all of them for each job. The other two settings keep your own layout and only reword lines; for a .docx resume they need Microsoft Word or LibreOffice installed (setup tells you).
 
 ## Privacy and safety
 
@@ -118,7 +129,7 @@ Unusual forms and private questions always come to you.
 - **"Claude needs you on your computer":** open a terminal, run `claude`, and log in again.
 - **A job says "Needs you":** it hit a login, a CAPTCHA or an odd page. Open it from **📋 Jobs** and tap **Try again**, or apply by hand.
 - **"JobAgent is already running":** only one copy can use your bot. Close the other window.
-- **The dashboard on the phone says "Open the dashboard from your JobAgent chat":** open it with the **📱 Open dashboard** button, not by pasting the address into a browser. If it still fails, check that the tunnel window is still open and that the address you sent is the current one. Sign-ins also end when JobAgent restarts.
+- **The dashboard on the phone says "Open the dashboard from your JobAgent chat":** open it with the **📱 Open dashboard** button, not by pasting the address into a browser. If it still fails, check that the tunnel window is still open and that the address is the current one (on Windows, run `scripts\phone.ps1` again). Sign-ins also end when JobAgent restarts.
 - **Connect a different Telegram account:** run `uv run --project agent jobagent pair --reset`, then the setup again.
 
 Logs are in `data/logs/app.log` (the app) and `data/logs/agent.log` (why a `jobagent` command failed). They record what happened and where, not your answers or posting text.

@@ -22,8 +22,12 @@ def _parser() -> argparse.ArgumentParser:
     pp.add_argument("--bot", help="bot username: also return the t.me link and a QR code")
 
     rs = sub.add_parser("resume").add_subparsers(dest="sub", required=True)
-    rs.add_parser("import").add_argument("path")
+    ri = rs.add_parser("import")
+    ri.add_argument("path")
+    ri.add_argument("--version", action="store_true", help="store it as an extra resume version, not the main resume")
     rs.add_parser("outline")
+    rs.add_parser("bank")
+    rs.add_parser("remove").add_argument("name")
     sub.add_parser("resume-check")
     tp = sub.add_parser("tailor")
     tp.add_argument("job_id")
@@ -111,7 +115,9 @@ def _dispatch(a) -> dict:
     if a.cmd == "pair":
         return pair.new_code(d, a.bot) if a.new else pair.reset(d)
     if a.cmd == "resume":
-        return tailor.outline(d) if a.sub == "outline" else resume.import_resume(d, a.path)
+        if a.sub == "import":
+            return resume.import_resume(d, a.path, a.version)
+        return tailor.outline(d) if a.sub == "outline" else tailor.bank_status(d) if a.sub == "bank" else resume.remove_version(d, a.name)
     if a.cmd == "resume-check":
         return tailor.resume_check(d)
     if a.cmd == "tailor":
