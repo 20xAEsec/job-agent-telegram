@@ -3,7 +3,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import accounts, canary, check, errlog, feedback, fetch, fill, formplan, llm, log, pair, profile, repair, resolve, resume, review, safety, store, submit, tailor
+from . import accounts, bench, canary, check, errlog, feedback, fetch, fill, formplan, llm, log, pair, profile, repair, resolve, resume, review, safety, store, submit, tailor
 from .discover import ats_api, boards
 from .docs.plan import DocError
 from .paths import default_data_dir
@@ -50,6 +50,9 @@ def _parser() -> argparse.ArgumentParser:
     ll.add_argument("--file", help="accept: the answer JSON")
     ll.add_argument("--extra", default="{}", help="a small JSON object (tier, errors, the change request)")
     sub.add_parser("plan").add_subparsers(dest="sub", required=True).add_parser("build").add_argument("job_id")
+    bn = sub.add_parser("bench").add_subparsers(dest="sub", required=True).add_parser("screen")  # the maintainer's replay: counts only
+    bn.add_argument("--data", required=True, help="a data folder to read (never written)")
+    bn.add_argument("--llm", action="store_true", help="also run the quick sort (uses Claude)")
     rp = sub.add_parser("repair")  # start/test/prepare: Claude. publish/discard: the app only (publish is denied to Claude)
     rp.add_argument("op", choices=["start", "test", "prepare", "publish", "discard"])
     rp.add_argument("repair_id")
@@ -151,6 +154,8 @@ def _dispatch(a) -> dict:
         return llm.build_input(d, a.name, a.job, extra) if a.op == "input" else llm.accept(d, a.name, a.job, a.file or "", extra)
     if a.cmd == "plan":
         return formplan.build(d, a.job_id)
+    if a.cmd == "bench":
+        return bench.screen(Path(a.data), a.llm)
     if a.cmd == "repair":
         return repair.run(d, a.op, a.repair_id)
     if a.cmd == "login":

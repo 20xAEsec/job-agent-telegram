@@ -44,6 +44,16 @@ export function readDecisions(): { job_id: string; decision: string; score: numb
   return [...last.values()]
 }
 
+// data/screened.jsonl (written by Python): jobs auto-search filtered out before a full read, oldest first. Third-party titles: escape on display.
+export type Screened = { at: string; job_id: string; title: string; company: string; url: string; stage: 'rules' | 'triage'; code?: string; reason: string; score?: number }
+export function readScreened(): Screened[] {
+  let text = ''
+  try { text = readFileSync(join(DATA, 'screened.jsonl'), 'utf8') } catch { return [] }
+  const out: Screened[] = []
+  for (const l of text.split('\n')) { try { const r = JSON.parse(l); if (r?.job_id && typeof r.url === 'string') out.push(r) } catch { /* skip */ } }
+  return out
+}
+
 export function jobIds(): string[] {
   try { return readdirSync(join(DATA, 'jobs')).filter(i => JOB_RE.test(i)) } catch { return [] }
 }

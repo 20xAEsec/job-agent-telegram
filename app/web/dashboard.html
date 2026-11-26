@@ -619,11 +619,22 @@ const GROUPS = {
   doing: ['In progress', j => ['NEW', 'FETCHED', 'SCORED', 'READY', 'FILLED_DRY', 'APPROVED', 'SUBMITTING'].includes(j.status_code)],
   sent: ['Applied', j => ['SUBMITTED', 'APPLIED_SELF', 'DRY_RUN_DONE'].includes(j.status_code)],
   closed: ['Closed', j => ['SKIPPED', 'CLOSED'].includes(j.status_code)],
+  out: ['Filtered out', null], // data/screened.jsonl rows, not jobs: skipped by Auto-search before a full read
+}
+const groupCount = (k, f) => k === 'out' ? (S.screened || []).length : S.jobs.filter(f).length
+function outBody(q) {
+  const all = S.screened || [], list = all.filter(r => !q || `${r.company} ${r.title} ${r.reason}`.toLowerCase().includes(q))
+  if (!list.length) return `<section class="panel pad"><div class="empty"><b>Nothing filtered out</b>${all.length ? 'Try another search.' : 'Jobs Auto-search skips before reading them in full show up here, with the reason.'}</div></section>`
+  return `<section class="panel rise" style="overflow:hidden"><table class="table"><thead><tr><th>Job</th><th>Why I skipped it</th><th class="hide-s">When</th><th aria-label="Action"></th></tr></thead><tbody>
+    ${list.map(r => `<tr><td><div class="co">${esc(r.company || 'Unknown company')}</div><div class="faint">${esc(r.title || '')}</div></td><td class="small">${esc(r.reason)}<div class="faint">${esc(r.why)}</div></td><td class="faint hide-s">${esc(ago(r.at))}</td>
+      <td><button class="btn btn--sm" data-tap="fo:look:${esc(r.code)}" data-say="Reading it in full now">Look at it anyway</button></td></tr>`).join('')}
+  </tbody></table></section>`
 }
 let jobsMode = 'list', jobsQuery = ''
 try { jobsMode = localStorage.getItem('jd-jobs-mode') || 'list' } catch {}
 function jobsBody() {
   const g = GROUPS[param] ? param : 'all', q = jobsQuery.toLowerCase()
+  if (g === 'out') return outBody(q)
   const list = S.jobs.filter(GROUPS[g][1]).filter(j => !q || `${j.company} ${j.role} ${j.location} ${j.status}`.toLowerCase().includes(q))
   if (!list.length) return `<section class="panel pad"><div class="empty"><b>No jobs here</b>${S.jobs.length ? 'Try another filter.' : 'Paste a job link above, or turn on Auto-search.'}</div></section>`
   if (jobsMode === 'board') {
@@ -639,7 +650,7 @@ function jobsBody() {
 function jobsView() {
   const g = GROUPS[param] ? param : 'all'
   return `<div class="toolbar">
-      <div class="seg" role="radiogroup" aria-label="Filter">${Object.entries(GROUPS).map(([k, [l, f]]) => `<button role="radio" aria-checked="${k === g}" data-group="${k}">${l} <span class="faint">${S.jobs.filter(f).length}</span></button>`).join('')}</div>
+      <div class="seg" role="radiogroup" aria-label="Filter">${Object.entries(GROUPS).map(([k, [l, f]]) => `<button role="radio" aria-checked="${k === g}" data-group="${k}">${l} <span class="faint">${groupCount(k, f)}</span></button>`).join('')}</div>
       <span class="grow"></span>
       <input class="input" id="jobsQ" placeholder="Search jobs…" value="${esc(jobsQuery)}" style="width:220px" aria-label="Search jobs">
       <div class="seg" role="radiogroup" aria-label="Layout"><button role="radio" aria-checked="${jobsMode === 'list'}" data-mode="list">List</button><button role="radio" aria-checked="${jobsMode === 'board'}" data-mode="board">Board</button></div>

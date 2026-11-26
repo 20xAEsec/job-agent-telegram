@@ -1,7 +1,7 @@
 // The wired app with Telegram intercepted (no network) and a fake `claude` / `jobagent`.
 import { describe, expect, test } from 'bun:test'
 import { createHash } from 'crypto'
-import { existsSync, readFileSync, rmSync } from 'fs'
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { claims, createApp, discoverTitles, extractUrls, isAllowed, tryPair } from '../src/app'
 import * as F from '../src/forms'
@@ -254,7 +254,48 @@ describe('auto-search', () => {
     expect(tasks.filter(t => t.kind === 'job').map(t => t.payload.tier)).toEqual([undefined, 'maybe'])
     expect(readJson<any>(join(DATA, 'discovery.json'), {}).title_cursor).toBe(3)
     await wait(2800) // cards are edited at most every 2.5 s
-    expect(calls.map(c => c.payload.text ?? '').join('\n')).toContain('1 with a different title')
+    const text = calls.map(c => c.payload.text ?? '').join('\n')
+    expect(text).toContain('0 filtered out · 2 being prepared (1 with a different title)') // the sort could not run here: nothing is lost
+    release()
+    await app.stop()
+  }, 10_000)
+  test('"Look at it anyway" reads a filtered-out job in full, like a link the user sent', async () => {
+    const url = 'https://job-boards.greenhouse.io/acme/jobs/77'
+    writeFileSync(join(DATA, 'screened.jsonl'), JSON.stringify({ at: new Date().toISOString(), job_id: 'greenhouse-acme-77', title: 'SOC Analyst', company: 'Acme', url, stage: 'triage', code: 'triage', reason: 'Sales role' }) + '\n')
+    const { app, release } = makeApp()
+    const toast: { text?: string } = {}
+    expect(await app.route({ chat: { id: 42 }, callbackQuery: { message: { message_id: 9 } } } as any, `fo:look:${code('greenhouse-acme-77')}`, toast)).toBeUndefined()
+    expect(toast.text).toContain('Reading it in full')
+    const jobs = [app.agent.live('work')?.task, ...app.agent.queued()].flatMap(t => (t?.kind === 'job' ? [t] : []))
+    expect(jobs.map(t => t.payload.url)).toEqual([url])
+    expect(jobs[0].payload.source).toBeUndefined() // not a discovery job: no quick sort, no auto-search rules
+    expect(await app.route({ chat: { id: 42 }, callbackQuery: { message: { message_id: 9 } } } as any, 'fo:look:0123abcd', {})).toBe('That job is no longer on the list.')
+    rmSync(join(DATA, 'screened.jsonl'), { force: true })
+    release()
+    await app.stop()
+  })
+  test('the quick sort: 30 jobs take 2 calls, the 5 best are prepared, the low ones are filtered out', async () => {
+    const candidates = Array.from({ length: 30 }, (_, i) => ({ job_id: `greenhouse-acme-${i}`, title: `Engineer ${i}`, company: 'Acme', url: `https://job-boards.greenhouse.io/acme/jobs/${i}`, tier: 'exact' }))
+    const input = join(DATA, 'run', 'llm', 'screen-x.in.json'), sorts: string[][] = []
+    writeJson(input, { jobs: 'cards' })
+    const { app, calls, release } = makeApp(a => {
+      if (a[0] === 'discover') return { ok: true, boards: 1, sites: [], new: 30, kept: 30, dropped: { where: 4, title: 9 }, candidates }
+      if (a[0] !== 'llm' || a[2] !== 'screen') return undefined
+      const ids: string[] = JSON.parse(a[a.indexOf('--extra') + 1]).ids
+      if (a[1] === 'input') return sorts.push(ids) && { ok: true, file: input }
+      const scores = ids.map(id => ({ id, score: Number(id.split('-').pop()) * 3, reason: 'x' })) // job i scores 3i; the bar is 60 - 10
+      return { ok: true, scores, bar: 50, filtered: scores.filter(s => s.score < 50).length }
+    })
+    writeJson(join(DATA, 'settings.json'), { ...DEFAULT_SETTINGS, paired_user_id: 42, onboarded: true })
+    writeJson(join(DATA, 'discovery.json'), { last_expand: Date.now() })
+    await app.route({ chat: { id: 42 }, callbackQuery: { message: { message_id: 9 } } } as any, 'd:run', {})
+    await wait(400)
+    expect(sorts.map(s => s.length)).toEqual([25, 5])
+    await wait(2800) // the job tasks run (and end) at once here, so the search card says which five it started
+    const text = calls.map(c => c.payload.text ?? '').join('\n')
+    expect(text).toContain('30 new jobs · 21 filtered out · 5 being prepared · 8 more next run')
+    for (const i of [29, 28, 27, 26, 25]) expect(text).toContain(`Acme · Engineer ${i}`)
+    expect(text).not.toContain('Acme · Engineer 24')
     release()
     await app.stop()
   }, 10_000)

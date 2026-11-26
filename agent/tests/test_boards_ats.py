@@ -41,7 +41,7 @@ def test_lever_and_ashby_listers(api):
     errs = []
     got = ats_api._lever(["acme", "gone"], "USD", errs)
     assert got[0] == {"title": "Data Analyst", "company": "acme", "location": "Austin, TX (Remote)", "url": LEVER_JOB["hostedUrl"], "board": "acme",
-                      "posted": got[0]["posted"], "salary_max": 125000, "dept": got[0]["dept"], "blurb": got[0]["blurb"]}
+                      "posted": got[0]["posted"], "salary_max": 125000, "dept": got[0]["dept"], "blurb": got[0]["blurb"], "kind": "Full-time"}
     assert "Data" in got[0]["dept"] and "We need a Data Analyst." in got[0]["blurb"] and "Write SQL" in got[0]["blurb"]  # text + requirement lists
     assert got[1]["salary_max"] is None and errs == [{"board": "gone", "error": "HTTP 404"}]  # other currency: unknown, not wrong
     got = ats_api._ashby(["beta"], "USD", errs)
@@ -80,8 +80,8 @@ def test_greenhouse_structured_pay_wins_over_the_text():
 
 def test_salary_in_the_users_currency():
     assert ats_api.salary_max("Salary £55,000 - £70,000 per year", "GBP") == 70_000
-    assert ats_api.salary_max("Salary £55,000 - £70,000 per year", "USD") is None  # not dollars: unknown
-    assert ats_api.salary_max("€60k – €80k", "EUR") == 80_000 and ats_api.salary_max("$25 - $40 an hour") is None
+    assert ats_api.salary_max("Salary £55,000 - £70,000 per year", "USD") == 88_900  # converted at the fixed rate (eligibility.RATES)
+    assert ats_api.salary_max("€60k – €80k", "EUR") == 80_000 and ats_api.salary_max("$25 - $40 an hour") == 83_200  # hourly x 2080
 
 
 def test_boards_check_finds_the_ats_and_remove_any(tmp_path, api):

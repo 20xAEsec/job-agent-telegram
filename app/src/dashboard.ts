@@ -13,7 +13,8 @@ import { existsSync, readFileSync } from 'fs'
 import { basename, join } from 'path'
 import { readKit } from './applykit'
 import { byBand, funnel } from './insights'
-import { allJobs, jobDir, JOB_RE, needsYou, readJob, readOutcomes, statusOf, type Job } from './jobs'
+import { allJobs, code, jobDir, JOB_RE, needsYou, readJob, readOutcomes, readScreened, statusOf, type Job } from './jobs'
+import { outWhy } from './pages'
 import { DATA, log, practiceOn, readJson, loadSettings, writeJson } from './state'
 
 const FILE = join(DATA, 'dashboard.json')
@@ -28,7 +29,7 @@ const TYPES: Record<string, string> = { pdf: 'application/pdf', docx: 'applicati
 
 // The Telegram buttons the page may press (same router, same checks). Buttons that open a screen, ask for typed text or
 // send files into the chat are left out: the page has its own screens and inputs for those.
-export const TAPS = /^(H:pause|H:resume|d:run|fix:go|m:hc|P:on|P:yes|m:dash:off|sg:(ms|no):\d{1,3}|fix:(ok|no):[\w-]{1,40}|j:(rt|any|x|sk|ap|fu|pr|go|zz):[0-9a-f]{8}|j:o:[0-9a-f]{8}:[iorg]|r:(sk|nx|or|cx):[0-9a-f]{8}|r:hv:[0-9a-f]{8}:\d{1,3}|C:r:[a-z0-9_-]{1,60}|L:(in|pw|rm|rt):(linkedin|indeed)|p:ach:rm:a\d{1,2}|p:rv:rm:[a-z0-9-]{1,40}|a:dd:[0-9a-f]{8}|u:again:\w+|x:[\w-]{1,80})$/
+export const TAPS = /^(H:pause|H:resume|d:run|fix:go|m:hc|P:on|P:yes|m:dash:off|sg:(ms|no):\d{1,3}|fix:(ok|no):[\w-]{1,40}|j:(rt|any|x|sk|ap|fu|pr|go|zz):[0-9a-f]{8}|j:o:[0-9a-f]{8}:[iorg]|r:(sk|nx|or|cx):[0-9a-f]{8}|r:hv:[0-9a-f]{8}:\d{1,3}|C:r:[a-z0-9_-]{1,60}|L:(in|pw|rm|rt):(linkedin|indeed)|p:ach:rm:a\d{1,2}|p:rv:rm:[a-z0-9-]{1,40}|a:dd:[0-9a-f]{8}|fo:look:[0-9a-f]{8}|u:again:\w+|x:[\w-]{1,80})$/
 // Buttons the page answers itself by opening one of its own screens.
 export const NAVS = /^(r:rv:[0-9a-f]{8}|j:kit:[0-9a-f]{8}|j:rc:[0-9a-f]{8}|F:list)$/
 type Button = { text: string; data?: string; style?: string }
@@ -65,6 +66,7 @@ export function stateJson(now = Date.now()) {
   const jobs = allJobs(now), out = readOutcomes(), s = loadSettings()
   return {
     now, practice: practiceOn(s), columns: COLUMNS, jobs: jobs.map(j => card(j, out)),
+    screened: readScreened().slice(-200).reverse().map(r => ({ code: code(r.job_id), company: r.company, title: r.title, reason: r.reason, why: outWhy(r.code, s.filters.country), at: r.at })),
     insights: { all: funnel(jobs, out), week: funnel(jobs, out, now - 7 * 86_400_000), bands: byBand(jobs, out) },
   }
 }

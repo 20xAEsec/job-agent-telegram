@@ -47,6 +47,7 @@ def cand(**kw):
     ({"location": "Remote"}, {"remote": "onsite_only"}, "location"),
     ({"location": "Berlin"}, {"remote": "any"}, None),
     ({"location": ""}, {}, None),  # unknown location passes
+    ({"location": ""}, {"remote": "remote_only"}, None),
     ({"title": "Detection Engineer Intern"}, {}, "exclude_keyword"),
     ({"company": "Cubic Corporation"}, {}, "company_blocklist"),
     ({"company": "Cubicle Co"}, {}, None),

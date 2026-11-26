@@ -42,11 +42,16 @@ def remove(d: Path, ats: str, slugs: list[str]) -> dict:
     return {"ok": True, "boards": b}
 
 
+# Boards that repost other companies' jobs (v3 S3): never learned, and their jobs with no clear location are dropped.
+# shortcut: a fixed list; the "half the postings are for a partner company" check waits for v3 §8 item 4.
+AGGREGATORS = {"jobgether"}
+
+
 def learn(d: Path, found: list[tuple[str, str]]) -> list[str]:
     """Watch employer boards that search results led to (a posting that fit, on the employer's own Greenhouse, Lever or Ashby board):
     at most LEARN_PER_POLL a poll and LEARN_MAX ever, never one the user removed. Returns the slugs added."""
     learned = _load(d / "boards_learned.json", {})
-    skip = {s for v in load_boards(d).values() for s in v} | set(_load(d / "boards_blocked.json", [])) | set(learned)
+    skip = {s for v in load_boards(d).values() for s in v} | set(_load(d / "boards_blocked.json", [])) | set(learned) | AGGREGATORS
     new: dict[str, str] = {}
     for a, s in found:
         if a in ATS and SLUG.match(s := s.lower()) and s not in skip:

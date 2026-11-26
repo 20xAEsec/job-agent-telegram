@@ -1,0 +1,3 @@
+{"filters": {"titles": ["Security Engineer"], "country": "United States", "locations": ["San Diego, CA"], "remote": "remote_only",
+             "min_salary": 150000, "currency": "USD", "experience_level": "senior", "years_experience": 9},
+ "apply": {"min_match_score": 60}}

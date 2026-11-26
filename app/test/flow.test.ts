@@ -316,8 +316,8 @@ describe('upgrade: dashboard', () => {
       expect((await file('resume.pdf')).status).toBe(200)
       for (const n of ['analysis.json', '..%2F..%2Fsettings.json', '%E0%A4%A']) expect((await file(n)).status).toBe(404)
     } finally { dash.stop(); rmSync(d, { recursive: true, force: true }) }
-    for (const ok of ['H:pause', 'r:sk:0123abcd', 'L:in:linkedin', 'x:job-abc', 'a:dd:0123abcd']) expect(TAPS.test(ok)).toBe(true)
-    for (const no of ['p:pair', 'r:ap:0123abcd', 'L:in:evil', 'H:pause ', 'm:settings', 'r:sk:0123abcd\n']) expect(TAPS.test(no)).toBe(false)
+    for (const ok of ['H:pause', 'r:sk:0123abcd', 'L:in:linkedin', 'x:job-abc', 'a:dd:0123abcd', 'fo:look:0123abcd']) expect(TAPS.test(ok)).toBe(true)
+    for (const no of ['p:pair', 'r:ap:0123abcd', 'L:in:evil', 'H:pause ', 'm:settings', 'r:sk:0123abcd\n', 'fo:look:https://x.test']) expect(TAPS.test(no)).toBe(false)
     expect(pageButtons([{ text: 'a', data: 'r:rv:0123abcd' }, { text: 'b', data: 'p:pair' }, { text: 'c', data: 'j:rt:0123abcd' }, { text: 'd' }]).map(b => b.text)).toEqual(['a', 'c'])
   })
 

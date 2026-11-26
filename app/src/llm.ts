@@ -106,8 +106,9 @@ async function once(name: Name, stdin: string, o: CallOpts): Promise<Once> {
 export async function call(name: Name, job: string | undefined, extra: Record<string, unknown>, o: CallOpts): Promise<CallResult> {
   const jobArgs = job ? ['--job', job] : [], ex = ['--extra', JSON.stringify(extra)]
   const inp = await o.run(['llm', 'input', name, ...jobArgs, ...ex])
-  if (!inp.ok) return { ok: false, kind: 'error', error: String(inp.error ?? inp.code ?? 'no input') }
-  const input = readFileSync(String(inp.file), 'utf8')
+  let input = ''
+  try { if (inp.ok) input = readFileSync(String(inp.file), 'utf8') } catch { /* below */ }
+  if (!input) return { ok: false, kind: 'error', error: String(inp.error ?? inp.code ?? 'no input') }
   let stdin = input
   for (let attempt = 0; attempt < 2; attempt++) {
     const r = await once(name, stdin, o)

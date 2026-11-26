@@ -21,6 +21,7 @@
       "Bash(uv run --project agent jobagent repair discard:*)",
       "Bash(uv run --project agent jobagent llm:*)",
       "Bash(uv run --project agent jobagent plan:*)",
+      "Bash(uv run --project agent jobagent bench:*)",
       "Write(./data/jobs/*/approval.json)", "Edit(./data/jobs/*/approval.json)",
       "Write(./data/jobs/*/review.json)", "Edit(./data/jobs/*/review.json)",
       "Write(./data/jobs/*/status.json)", "Edit(./data/jobs/*/status.json)",

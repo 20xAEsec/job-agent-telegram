@@ -2,7 +2,7 @@
 import { createHash } from 'crypto'
 import type { Live, Usage } from './agent'
 import type { Form } from './forms'
-import { code, inProgress, jobTitle, lastDetail, needsYou, statusOf, type Job } from './jobs'
+import { code, inProgress, jobTitle, lastDetail, needsYou, statusOf, type Job, type Screened } from './jobs'
 import { ago, bar, breakdownLines, elapsed, esc, heading, kv, label, money, mustHaveLine, nav, note, pairs, plural, quote, short, until, type Btn, type Page } from './kit'
 import { practiceForced, practiceOn, SOURCES, type Settings } from './state'
 
@@ -11,6 +11,7 @@ export type HomeCtx = {
   problems?: string[] // from the health check: plain words, with the fix
   tip?: { min: number; text: string } | null // a suggestion from the user's own decisions
   updates?: number // new versions on GitHub not yet in this copy
+  filtered?: string | null // filteredLine(): what auto-search skipped today
 }
 
 // ---- Health: `jobagent setup-check`, run at start and every few hours, in plain words ----
@@ -114,6 +115,7 @@ export function home(c: HomeCtx, now = Date.now()): Page {
     s.discovery.enabled
       ? `🔭 <b>Auto-search:</b> ${c.nextSearch ? `next ${until(c.nextSearch, now)}` : 'running soon'}${searchWhere(c)}`
       : `🔭 <b>Auto-search:</b> off ${note('(I only work on links you send)')}`,
+    ...(c.filtered ? [c.filtered] : []),
     `📊 <b>This week:</b> ${w.found} found${trend(w.found, w.found_before)} · ${w.ready} prepared · ${practiceOn(s) && !w.sent ? `${w.practice} practice runs` : `${w.sent} sent`}`,
     ...(c.usage?.five_hour != null ? [`⚡ <b>Claude usage:</b> ${bar(c.usage.five_hour, 1)} ${Math.round(c.usage.five_hour * 100)}% ${note('of your 5-hour limit')}`] : []),
   ]
@@ -128,7 +130,7 @@ export function home(c: HomeCtx, now = Date.now()): Page {
   rows.push([{ text: '⚙️ Settings', data: 'm:settings' }, { text: '👤 Profile', data: 'm:prof' }])
   if (c.updates) rows.push([{ text: '⬆️ How to update', data: 'm:upd' }])
   if (c.tip) rows.push([{ text: `📊 Set it to ${c.tip.min}`, data: `sg:ms:${c.tip.min}` }, { text: '✖ No thanks', data: `sg:no:${c.tip.min}` }])
-  rows.push([{ text: '❔ Help', data: 'm:help' }, ...(c.problems?.length ? [{ text: '🩺 Health', data: 'm:health' }] : []), ...(c.jobs.length ? [{ text: '🖥 Dashboard', data: 'm:dash' }] : [])]) // no Refresh: Home updates itself
+  rows.push([{ text: '❔ Help', data: 'm:help' }, ...(c.filtered ? [{ text: '🔎 Filtered out', data: 'fo:list' }] : []), ...(c.problems?.length ? [{ text: '🩺 Health', data: 'm:health' }] : []), ...(c.jobs.length ? [{ text: '🖥 Dashboard', data: 'm:dash' }] : [])]) // no Refresh: Home updates itself
   return { text: lines.join('\n'), rows }
 }
 
@@ -168,6 +170,42 @@ export function needsPage(c: Pick<HomeCtx, 'jobs' | 'forms'>): Page {
     ...(problems.length ? [`🙋 <b>${plural(problems.length, 'job')} stuck</b>`, note('A login, a CAPTCHA, or an error. Tap one to see what happened.')] : []),
   ].join('\n')
   return { text, rows: [...rows.slice(0, 20), nav()] }
+}
+
+// ---- Filtered out: jobs auto-search skipped before a full read (data/screened.jsonl), so a wrong rule is easy to spot ----
+
+const OUT_WHY: Record<string, string> = {
+  pay: 'Pay below your minimum', salary: 'Pay below your minimum', level: 'A different level', kind: 'A different job type', triage: 'A different kind of work',
+  aggregator: 'Reposted with no clear location', location: 'Not in the places you chose', exclude_keyword: 'Has a word you excluded',
+  company_blocklist: 'A company you blocked', too_old: 'Posted too long ago',
+}
+export const outWhy = (c: string | undefined, country: string) => c === 'where' ? `Not open to people in ${country || 'your country'}` : OUT_WHY[c ?? ''] ?? 'Other reasons'
+
+function groups(rows: Screened[], country: string): [string, number][] {
+  const by = new Map<string, number>()
+  for (const r of rows) by.set(outWhy(r.code, country), (by.get(outWhy(r.code, country)) ?? 0) + 1)
+  return [...by].sort((a, b) => b[1] - a[1])
+}
+
+// Home: "🔎 Filtered out today: 41, most not open to people in United States"
+export function filteredLine(rows: Screened[], country: string, now = Date.now()): string | null {
+  const day = new Date(now).toDateString(), t = rows.filter(r => new Date(r.at).toDateString() === day)
+  if (!t.length) return null
+  const [top, n] = groups(t, country)[0]
+  return `🔎 <b>Filtered out today:</b> ${t.length}${n * 2 > t.length ? `, most ${esc(top[0].toLowerCase() + top.slice(1))}` : ''}`
+}
+
+export function filteredPage(rows: Screened[], country: string, now = Date.now()): Page {
+  if (!rows.length) return { text: `${heading('🔎', 'Filtered out')}\n\nNothing yet.\n${note('Jobs Auto-search skips before reading them in full show up here, with the reason.')}`, rows: [nav()] }
+  const newest = rows.slice(-10).reverse()
+  const text = [
+    heading('🔎', 'Filtered out'), note(`${plural(rows.length, 'job')} in the last 30 days, skipped before I read them in full.`), '',
+    ...groups(rows, country).slice(0, 8).map(([w, n]) => `• <b>${n}</b> · ${esc(w)}`), '',
+    '<b>Newest</b>',
+    ...newest.map((r, i) => `${i + 1}. ${esc(short([r.company, r.title].filter(Boolean).join(' · ') || 'A job', 60))}\n    ${note(`${esc(short(r.reason, 90))} · ${ago(r.at, now)}`)}`),
+    '', note('Wrong call? Tap "Look at it anyway" and I read it in full, like a link you send.'),
+  ].join('\n')
+  return { text, rows: [...pairs(newest.map((r, i) => ({ text: `👀 ${i + 1}. Look at it anyway`, data: `fo:look:${code(r.job_id)}` }))), [{ text: '🎯 What I look for', data: 'S:search' }], nav()] }
 }
 
 // ---- Open Questions: the only way into a question form, so it is always clear where typed text goes ----

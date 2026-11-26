@@ -114,7 +114,7 @@ def location_ok(c: dict, f: dict) -> bool:
     places = [p.split(",")[0].strip().lower() for p in f.get("locations", []) if p.strip() and p.strip().lower() != "remote"]
     here = not places or not loc or any(re.search(rf"\b{re.escape(p)}\b", loc) for p in places if p)  # unknown location is judged later by the analyst
     if mode == "remote_only":
-        return _remote(c, hybrid=False)  # a hybrid job still needs you in an office
+        return not loc or _remote(c, hybrid=False)  # a hybrid job still needs you in an office; an unknown place is read in full
     if mode == "onsite_only":
         return not _remote(c) and here
     if mode == "remote_or_hybrid":
@@ -149,6 +149,6 @@ def drop_reason(c: dict, f: dict, now: datetime | None = None, title_ok: bool | 
         except ValueError:
             pass  # unparseable date: let it through
     lo, top = f.get("min_salary"), c.get("salary_max")
-    if lo and (top is not None and top < lo or top is None and not f.get("allow_unknown_salary", True)):
+    if lo and (top is not None and top < 0.9 * lo or top is None and not f.get("allow_unknown_salary", True)):  # 10% slack: ranges are rough
         return "salary"
     return None

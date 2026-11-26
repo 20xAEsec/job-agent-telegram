@@ -250,12 +250,17 @@ export const goLiveConfirm = (): Page => ({
 })
 
 // "🏢 Companies I watch": the Greenhouse, Lever and Ashby boards auto-search polls.
+// Boards that repost other companies' jobs: the same list as AGGREGATORS in agent/jobagent/discover/boards.py.
+export const AGGREGATORS = new Set(['jobgether'])
+
 export function companiesPage(slugs: string[], msg?: string, learned = 0): Page {
+  const agg = slugs.filter(x => AGGREGATORS.has(x))
   return {
     text: [
       heading('🏢', 'Companies I watch'),
       'Auto-search checks these companies\' job boards for new openings. I can find more myself ("Find new companies"), or you can add one.', '',
-      slugs.length ? slugs.map(x => `• ${esc(x)}`).join('\n') : note('None yet.'),
+      slugs.length ? slugs.map(x => `• ${esc(x)}${AGGREGATORS.has(x) ? ` ⚠️ ${note("reposts other companies' jobs")}` : ''}`).join('\n') : note('None yet.'),
+      ...(agg.length ? ['', note(`⚠️ A board that reposts other companies' jobs often lists jobs not open where you live. I skip its jobs with no clear location; tap ✖ to stop watching it.`)] : []),
       ...(learned ? ['', note(`+${learned} found from your searches: companies whose jobs fit you. Remove any you don't want; I won't add it again.`)] : []),
       ...(msg ? ['', msg] : []),
       '', note('Greenhouse, Lever and Ashby job boards are supported.'),

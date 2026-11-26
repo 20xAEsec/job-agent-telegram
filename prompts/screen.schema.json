@@ -1,0 +1,16 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["jobs"],
+  "properties": {
+    "jobs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "score", "reason"],
+        "properties": {"id": {"type": "string"}, "score": {"type": "integer"}, "reason": {"type": "string"}}
+      }
+    }
+  }
+}

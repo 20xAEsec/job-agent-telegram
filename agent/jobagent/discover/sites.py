@@ -82,9 +82,11 @@ def _cand(r: dict, currency: str) -> dict:
     if val("is_remote") and "remote" not in loc.lower():
         loc = f"{loc} (Remote)".strip()
     top = val("max_amount") or val("min_amount")
+    per = {"hourly": 2080, "daily": 260, "weekly": 52, "monthly": 12}.get(str(val("interval") or "").lower(), 1)  # a year's pay
     return {"title": str(val("title") or ""), "company": str(val("company") or ""), "location": loc, "url": url,
             "site": SITES.get(str(val("site")), str(val("site"))), "posted": "",  # the site already applied the hours window; its dates are day-only
-            "salary_max": int(top) if top and val("currency") == currency else None, "description": str(val("description") or "")}
+            "salary_max": int(top * per) if top and val("currency") == currency else None, "description": str(val("description") or ""),
+            "kind": str(val("job_type") or "") or None}
 
 
 def plan(site: str, n_queries: int, st: dict, now: datetime) -> tuple[int, int] | str:

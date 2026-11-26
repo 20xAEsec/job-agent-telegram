@@ -93,6 +93,29 @@ describe('settings catalog', () => {
     expect(page.text).toContain('Seen often in your searches')
     fits(ST.companiesPage(['acme', 'beta'], undefined, 2))
     expect(ST.companiesPage(['acme'], undefined, 1).text).toContain('+1 found from your searches')
+    const agg = ST.companiesPage(['acme', 'jobgether'])
+    expect(agg.text).toContain("jobgether ⚠️ <i>reposts other companies' jobs</i>")
+    expect(datas(agg)).toContain('C:r:jobgether') // a Remove button: never removed silently
+    expect(ST.companiesPage(['acme']).text).not.toContain('reposts')
+  })
+  test('filtered out: reasons grouped, the 10 newest, and a way to look at one anyway', () => {
+    const now = Date.parse('2026-11-25T15:00:00Z'), at = (h: number) => new Date(now - h * 3600_000).toISOString()
+    const row = (i: number, c: string, h = 1) => ({ at: at(h), job_id: `greenhouse-acme-${i}`, title: `Engineer <${i}> ${'x'.repeat(80)}`, company: 'Acme & Co',
+      url: `https://x.test/${i}`, stage: c === 'triage' ? 'triage' as const : 'rules' as const, code: c, reason: `Reason ${i} ${'y'.repeat(120)}` })
+    const rows = [...Array.from({ length: 30 }, (_, i) => row(i, 'where', 50)), ...Array.from({ length: 8 }, (_, i) => row(30 + i, i % 2 ? 'pay' : 'triage'))]
+    const p = P.filteredPage(rows, 'United States', now)
+    fits(p)
+    expect(p.text).toContain('• <b>30</b> · Not open to people in United States')
+    expect(p.text).toContain('Acme &amp; Co · Engineer &lt;37&gt;') // third-party titles are escaped
+    expect(datas(p).filter(d => d.startsWith('fo:look:'))).toHaveLength(10)
+    expect(datas(p)).toContain(`fo:look:${code('greenhouse-acme-37')}`)
+    expect(P.filteredPage([], 'United States', now).text).toContain('Nothing yet')
+    expect(P.filteredLine(rows, 'United States', now)).toBe('🔎 <b>Filtered out today:</b> 8') // 4 triage, 4 pay: no reason is most
+    expect(P.filteredLine([...rows, row(40, 'pay'), row(41, 'pay')], '', now)).toBe('🔎 <b>Filtered out today:</b> 10, most pay below your minimum')
+    expect(P.filteredLine(rows.slice(0, 30), 'United States', now)).toBeNull() // nothing today
+    const home = P.home({ s: { ...S(), onboarded: true }, queued: 0, jobs: [], forms: [], filtered: P.filteredLine(rows, '', now) }, now)
+    expect(home.text).toContain('Filtered out today:</b> 8')
+    expect(home.rows.flat().map(b => b.data)).toContain('fo:list')
   })
   test('board links and names', () => {
     expect(ST.boardSlug('https://job-boards.greenhouse.io/acme/jobs/123')).toBe('acme')

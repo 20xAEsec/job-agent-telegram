@@ -267,6 +267,58 @@ def _in_followup(d: Path, job: str, extra: dict) -> dict:
             "applied_on": sent, "name": _contact(d).get("full_name", "")}
 
 
+SCREEN_BATCH, SCREEN_KEEP_DAYS = 25, 7
+
+
+def _screen_ids(d: Path, extra: dict) -> tuple[list[str], dict]:
+    ids = extra.get("ids")
+    cands = {c["job_id"]: c for c in (_load(d / "run" / "poll.json", {}) or {}).get("candidates") or [] if isinstance(c, dict) and c.get("job_id")}
+    if not isinstance(ids, list) or not 1 <= len(ids) <= SCREEN_BATCH or any(i not in cands for i in ids):
+        raise store.JobError("bad_args", f"screen needs 1 to {SCREEN_BATCH} job ids from the last search")
+    return ids, cands
+
+
+def _in_screen(d: Path, job, extra: dict) -> dict:
+    ids, cands = _screen_ids(d, extra)
+    s = _settings(d)
+    f = s.get("filters") or {}
+    from .discover import tiers
+    return {"user": {**{k: f.get(k) for k in ("titles", "related_titles", "experience_level", "years_experience", "country", "remote", "min_salary", "currency",
+                                              "job_types")}, "top_skills": tiers.skills(d)[:15]},
+            "feedback": feedback.summary(d),
+            "jobs": _wrap("job listings", [{**{k: cands[i].get(k) for k in ("title", "company", "location", "salary_max", "tier")}, "id": i,
+                                            "excerpt": _s(cands[i].get("excerpt"), 800)} for i in ids])}
+
+
+def _acc_screen(d: Path, job, ans: dict, extra: dict) -> dict:
+    """Scores for one batch. Jobs below min_match_score - 10 are filtered out for good (data/screened.jsonl, marked seen);
+    the rest go into data/screen_scores.json, so a job not prepared this run is not sorted again next run."""
+    ids, cands = _screen_ids(d, extra)
+    got, errs = {}, []
+    for r in ans.get("jobs") or []:
+        if not isinstance(r, dict) or r.get("id") not in ids:
+            errs.append(f"unknown id {r.get('id') if isinstance(r, dict) else r!r:.40}")
+        elif not isinstance(r.get("score"), int) or not 0 <= r["score"] <= 100:
+            errs.append(f"{r['id']}: score must be an integer from 0 to 100")
+        else:
+            got[r["id"]] = {"score": r["score"], "reason": _s(r.get("reason"), 90) or "Not a close match"}
+    errs += [f"{i}: missing" for i in ids if i not in got]
+    if errs:
+        raise Rejected(errs[:12])
+    from .discover import boards, screened
+    bar = int((_settings(d).get("apply") or {}).get("min_match_score", 60)) - 10
+    from datetime import datetime, timedelta, timezone
+    now, cut = store.now(), (datetime.now(timezone.utc) - timedelta(days=SCREEN_KEEP_DAYS)).isoformat(timespec="seconds")
+    cache = {k: v for k, v in (_load(d / "screen_scores.json", {}) or {}).items() if isinstance(v, dict) and str(v.get("at", "")) >= cut}
+    out = [cands[i] for i in ids if got[i]["score"] < bar]
+    screened.append(d, [{"job_id": c["job_id"], "title": c.get("title", ""), "company": c.get("company", ""), "url": c.get("url", ""), "stage": "triage",
+                         "code": "triage", "reason": got[c["job_id"]]["reason"], "score": got[c["job_id"]]["score"]} for c in out])
+    boards.mark_seen(d, [c["job_id"] for c in out])
+    cache.update({i: {**got[i], "at": now} for i in ids if got[i]["score"] >= bar})
+    atomic_write_json(d / "screen_scores.json", cache)
+    return {"scores": [{"id": i, **got[i]} for i in ids], "bar": bar, "filtered": len(out)}
+
+
 # ---- accept: check, then write ----
 
 def _acc_analyze(d: Path, job: str, ans: dict, extra: dict) -> dict:
@@ -499,9 +551,9 @@ def _acc_followup(d: Path, job: str, ans: dict, extra: dict) -> dict:
 
 
 INPUTS = {"analyze": _in_analyze, "tailor_ats": _in_tailor_ats, "tailor_edit": _in_tailor_edit, "cover_letter": _in_cover_letter, "kit": _in_kit,
-          "revise": _in_revise, "resume_profile": _in_resume_profile, "resume_bank": _in_resume_bank, "followup": _in_followup}
+          "revise": _in_revise, "resume_profile": _in_resume_profile, "resume_bank": _in_resume_bank, "followup": _in_followup, "screen": _in_screen}
 ACCEPTS = {"analyze": _acc_analyze, "tailor_ats": _acc_tailor_ats, "tailor_edit": _acc_tailor_edit, "cover_letter": _acc_cover_letter, "kit": _acc_kit,
-           "revise": _acc_revise, "resume_profile": _acc_resume_profile, "resume_bank": _acc_resume_bank, "followup": _acc_followup}
+           "revise": _acc_revise, "resume_profile": _acc_resume_profile, "resume_bank": _acc_resume_bank, "followup": _acc_followup, "screen": _acc_screen}
 JOBLESS = {"resume_profile", "resume_bank", "screen"}
 
 

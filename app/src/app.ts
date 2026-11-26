@@ -10,7 +10,7 @@ import { createPipeline } from './pipeline'
 import { startBridge, type ToolResult } from './bridge'
 import { createCards, finalFor, recordStage, typicalMs, type Card, type Final, type JobLine, type Stage } from './cards'
 import * as F from './forms'
-import { allJobs, code, findJob, jobDir, jobTitle, JOB_RE, lastDetail, logDecision, readDecisions, readJob, readOutcomes } from './jobs'
+import { allJobs, code, findJob, jobDir, jobTitle, JOB_RE, lastDetail, logDecision, readDecisions, readJob, readOutcomes, readScreened } from './jobs'
 import { clock, CURRENCIES, esc, heading, isUS, kb, nav, note, parseList, parseNumber, plural, quote, short, splitMsg, type Btn, type Page } from './kit'
 import * as OB from './onboarding'
 import { kitPage, readKit } from './applykit'
@@ -40,6 +40,7 @@ const tipFor = (s: Settings) => {
   return t && readJson<{ dismissed?: number }>(TIP_FILE, {}).dismissed !== t.min ? t : null
 }
 const PENDING_MS = 15 * 60_000
+const SCREEN_BATCH = 25, PREP_MAX = 5 // the quick sort: jobs per call (Python checks the same 25), full reads per search run
 
 // "12 companies, LinkedIn and Indeed" (no "0 companies" when job sites are searched).
 export function whereText(boards: number, sites: string[]): string {
@@ -162,7 +163,7 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
     return {
       s: loadSettings(), work, workTitle: work ? cardTitle(work.task) : undefined, queued: agent.queued('work').length,
       jobs: allJobs(), forms: F.openForms(), usage, nextSearch: nextSearch(), limitedUntil: limitUntil > Date.now() ? limitUntil : undefined,
-      companies: boardCount(), tip: tipFor(loadSettings()), updates, problems: health ? P.problemsFrom(health.checks, existsSync(join(DATA, 'base_resume.docx'))) : [],
+      companies: boardCount(), tip: tipFor(loadSettings()), updates, filtered: P.filteredLine(readScreened(), loadSettings().filters.country), problems: health ? P.problemsFrom(health.checks, existsSync(join(DATA, 'base_resume.docx'))) : [],
     }
   }
   // ---- Follow-ups: once a day, ask about applications with no news (one message each, at most 3 a day) ----
@@ -351,12 +352,18 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
     if (!r.boards && !(r.sites ?? []).length) { end({ emoji: 'ℹ️', text: 'No companies to search yet. Add companies, or turn on "Find new companies".', buttons: [{ text: '🏢 Companies', data: 'C:list' }, { text: '🔭 Auto-search', data: 'S:auto' }] }); return refresh() }
     const slow = [...(r.errors ?? []).filter((e: any) => e.site).map((e: any) => `${e.site} is limiting searches right now; I'll try again later.`), ...(r.skipped ?? []).map((x: any) => String(x.reason)).filter((x: string) => /slow down/.test(x))]
     if (!r.kept) { end({ emoji: '✅', text: [`Checked ${where}: nothing new fits your settings yet. Try more titles or places, or send me a link to a job you like.`, ...slow].join(' '), buttons: [{ text: '🎯 What I look for', data: 'S:search' }] }); return refresh() }
-    const cap = reason === 'first' ? 3 : (usage.five_hour ?? 0) > 0.8 ? 2 : 8 // save the user's Claude limit when it is nearly used up
-    const take = (r.candidates as any[]).slice(0, cap)
+    const cap = reason === 'first' ? 3 : (usage.five_hour ?? 0) > 0.8 ? 2 : PREP_MAX // save the user's Claude limit when it is nearly used up
+    if (reason !== 'timer' || cards.get(key)) card(c => { c.doing = `Sorting ${plural(r.kept, 'job')} that fit your settings` }) // hourly runs stay quiet unless a job is prepared
+    const sorted = await quickSort(r.candidates as any[], cap)
+    if (cards.get(key)?.state === 'ended') return refresh() // stopped while sorting
+    const take = sorted.take
+    const out = Object.entries(r.dropped ?? {}).reduce((n, [k, v]) => n + (k === 'title' ? 0 : Number(v)), 0) + sorted.filtered
+    const other = take.filter(x => x.tier && x.tier !== 'exact').length
+    const summary = `Checked ${where}: ${plural(r.new ?? r.kept, 'new job')} · ${out} filtered out · ${take.length} being prepared${other ? ` (${other} with a different title)` : ''}${sorted.later ? ` · ${sorted.later} more next run` : ''}.${slow.length ? ` ${slow.join(' ')}` : ''}`
+    if (!take.length) { end({ emoji: '✅', text: `${summary} None looked like your kind of work this time.`, buttons: [{ text: '🔎 Filtered out', data: 'fo:list' }, { text: '🎯 What I look for', data: 'S:search' }] }); return refresh() }
     card(c => {
       c.state = 'running'; c.doing = 'Waiting for my turn'
-      const other = (r.candidates as any[]).filter(x => x.tier && x.tier !== 'exact').length
-      c.note = `Checked ${where} · ${plural(r.kept, 'new job')} fit${r.kept === 1 ? 's' : ''} your settings${other ? ` · ${other} with a different title` : ''}${r.kept > cap ? ` · preparing ${cap} now, the rest come next run` : ''}.${slow.length ? ` ${slow.join(' ')}` : ''}`
+      c.note = summary
       c.jobs = take.map(x => ({ job_id: x.job_id, title: short([x.company, x.title].filter(Boolean).join(' · ') || x.job_id, 80), url: x.url, details: {} }))
     })
     for (const x of take) {
@@ -366,6 +373,23 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
     finishSearchIfDone(key)
     syncQueued()
     refresh()
+  }
+  // v3 S4: one cheap call per 25 jobs code kept scores them all; only the best (at least min_match_score - 10) get the full read.
+  // Python filters out the low ones for good and remembers the rest, so a job not prepared this run is not sorted again.
+  // A sort that fails keeps the unsorted jobs in poll's order: nothing is lost, it just costs full reads.
+  async function quickSort(cands: any[], cap: number): Promise<{ take: any[]; filtered: number; later: number }> {
+    const bar = loadSettings().apply.min_match_score - 10
+    let filtered = 0, failed = false
+    const fresh = cands.filter(x => !x.screen)
+    for (let i = 0; i < fresh.length && !failed; i += SCREEN_BATCH) {
+      const ids = fresh.slice(i, i + SCREEN_BATCH).map(x => String(x.job_id))
+      const a = await LLM.call('screen', undefined, { ids }, { run, exec: o.llmExec, onUsage, model: LLM.MODEL.screen })
+      if (!a.ok) { failed = true; log(`quick sort failed (${a.kind}): the rest go on unsorted`); break }
+      filtered += Number(a.data.filtered ?? 0)
+      for (const sc of a.data.scores ?? []) { const x = fresh.find(c => c.job_id === sc.id); if (x) x.screen = { score: sc.score, reason: sc.reason } }
+    }
+    const ok = cands.filter(x => (x.screen ? x.screen.score >= bar : failed)).sort((a, b) => (b.screen?.score ?? -1) - (a.screen?.score ?? -1))
+    return { take: ok.slice(0, cap), filtered, later: Math.max(0, ok.length - cap) }
   }
   // The search card ends once every job it started has finished.
   function finishSearchIfDone(key: string) {
@@ -981,6 +1005,16 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
 
     // Review
     if ((m = /^r:(ok|ch|sk|nv|nx|cx|rv|ss|ea|or|fl|df|hv):([0-9a-f]{8})(?::(\d{1,3}))?$/.exec(data))) return review.press(m[1], m[2], chat, msg, m[3])
+
+    // Filtered out: what auto-search skipped, and a way to have one read in full anyway (like a link the user sent)
+    if (data === 'fo:list') return P.filteredPage(readScreened(), loadSettings().filters.country)
+    if ((m = /^fo:look:([0-9a-f]{8})$/.exec(data))) {
+      const r = readScreened().reverse().find(x => code(x.job_id) === m![1])
+      if (!r || !/^https?:\/\//.test(r.url)) return 'That job is no longer on the list.'
+      const q = startJobUrl(r.url)
+      toast.text = q.existing ? 'Already in line.' : '👀 Reading it in full now.'
+      return
+    }
 
     // Forms: answered only after "Open" in Open Questions, which makes that form the one thing typed text goes to.
     if (data === 'F:list' || data.startsWith('f:job:')) return P.questionsPage(F.openForms()) // f:job: is on older messages
