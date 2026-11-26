@@ -546,6 +546,6 @@ export function createReview(d: Deps) {
   }
 
   setInterval(watchInput, 3000).unref()
-  return { send, press, approve, submitCode, quickEdit, recover, cancelAuto, readReview, resumeAuto, retryDeferred, _grace: grace, _later: later, _fireAuto: fireAuto }
+  return { send, press, approve, submitCode, quickEdit, recover, cancelAuto, readReview, resumeAuto, retryDeferred, sending: () => submitting != null, _grace: grace, _later: later, _fireAuto: fireAuto }
 }
 export type ReviewGate = ReturnType<typeof createReview>

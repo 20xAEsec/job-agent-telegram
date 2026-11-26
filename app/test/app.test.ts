@@ -44,7 +44,7 @@ const llmExec = (_a: string[], _in: string, onLine: (l: string) => void) => {
   return { pid: undefined, done: Promise.resolve({ code: 0, stderr: '' }) }
 }
 
-function makeApp(answer: (a: string[]) => any = () => undefined) {
+function makeApp(answer: (a: string[]) => any = () => undefined, extra: { restart?: () => void } = {}) {
   writeJson(join(DATA, 'settings.json'), { ...DEFAULT_SETTINGS, paired_user_id: 42 })
   const calls: { method: string; payload: any }[] = []
   const pyCalls: string[][] = []
@@ -59,7 +59,7 @@ function makeApp(answer: (a: string[]) => any = () => undefined) {
     if (a[0] === 'boards' && a[1] === 'list') return { ok: true, boards: { greenhouse: [] } }
     return { ok: true }
   }
-  const app = createApp({ token: '123:fake', exec, run, llmExec })
+  const app = createApp({ token: '123:fake', exec, run, llmExec, ...extra })
   app.bot.api.config.use(async (_prev, method, payload) => {
     calls.push({ method, payload })
     return { ok: true, result: { message_id: calls.length, chat: { id: 42 }, date: 0 } } as any
@@ -123,6 +123,34 @@ describe('v4 daily upkeep', () => {
     writeJson(join(DATA, 'upkeep.json'), { at: new Date().toISOString(), pruned: 1, expired: 1, trimmed: 0 }) // what maintain writes
     await app.upkeep()
     expect(pyCalls.filter(a => a[0] === 'maintain').length).toBe(1) // not again the same day
+    await app.stop()
+  })
+})
+
+describe('v4 one-tap update', () => {
+  const UPDATE = join(DATA, 'update.json')
+  const ctx: any = { chat: { id: 42 }, callbackQuery: { message: { message_id: 9 } } }
+  test('Update and restart notes the version and exits for the start script; afterwards it says how it went', async () => {
+    rmSync(UPDATE, { force: true })
+    const plain = makeApp().app
+    expect(await plain.route(ctx, 'up:go', {})).toContain('start script') // no start-script loop: no exit
+    await plain.stop()
+    let restarts = 0
+    const { app, calls } = makeApp(undefined, { restart: () => { restarts++ } })
+    const p = (await app.route(ctx, 'up:go', {})) as any
+    expect(p.text).toContain('Updating')
+    const from = readJson<any>(UPDATE, {}).from
+    expect(from).toMatch(/^[0-9a-f]{40}$/)
+    await wait(1100)
+    expect(restarts).toBe(1)
+    await app.afterUpdate() // same version after the restart: the pull failed
+    expect(calls.filter(c => c.method === 'sendMessage').at(-1)?.payload.text).toContain("didn't go through")
+    expect(existsSync(UPDATE)).toBe(false)
+    writeJson(UPDATE, { at: Date.now(), from: '0'.repeat(40), n: 2 })
+    await app.afterUpdate()
+    expect(calls.filter(c => c.method === 'sendMessage').at(-1)?.payload.text).toContain('JobAgent is updated')
+    await app.afterUpdate() // read once
+    expect(calls.filter(c => c.method === 'sendMessage').filter(c => /updated|go through/.test(c.payload.text)).length).toBe(2)
     await app.stop()
   })
 })

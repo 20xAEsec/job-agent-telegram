@@ -36,6 +36,7 @@ const WEEK_FILE = join(DATA, 'weekly.json')
 const DAILY_FILE = join(DATA, 'daily.json') // when the daily digest last went out
 const EXPECT_KEY = 'salary_expectation', EXPECT_Q = 'What are your salary expectations? (expected yearly salary)' // v4 AP4, a private saved answer
 const UPKEEP_FILE = join(DATA, 'upkeep.json') // the last `jobagent maintain` counts
+const UPDATE_FILE = join(DATA, 'update.json') // written just before exiting 75 for an update; read once after the restart
 const TIP_FILE = join(DATA, 'suggestion.json')
 // One suggestion on Home from the user's own decisions, until they apply or dismiss it.
 const tipFor = (s: Settings) => {
@@ -121,7 +122,7 @@ const SummarySchema = z.object({
   related_titles: z.array(z.string().min(1).max(80)).max(8).optional(),
 })
 
-export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeof createAgent>[0]['exec']; llmExec?: LLM.LlmExec; onReady?: (bot: string) => void }) {
+export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeof createAgent>[0]['exec']; llmExec?: LLM.LlmExec; onReady?: (bot: string) => void; restart?: () => void }) {
   const bot = new Bot(o.token)
   const api = bot.api
   const run = o.run ?? runJobagent
@@ -212,15 +213,35 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
     for (const j of due) { const p = P.followUpPage(j, s.apply.followup_days); void sendTo(p.text, p.rows, { kind: 'followups' }).catch(e => log(`follow-up failed: ${e}`)) }
   }
 
-  // ---- Updates: once a day, compare this copy with GitHub (clone installs). It only tells the user; it never pulls. ----
+  // ---- Updates: once a day, compare this copy with GitHub (clone installs). It pulls only when the user taps Update (v4 AP7). ----
   let updates = 0
+  const git = async (...a: string[]) => {
+    const p = Bun.spawn(['git', '-C', join(import.meta.dir, '..', '..'), ...a], { stdout: 'pipe', stderr: 'ignore' })
+    const t = setTimeout(() => p.kill(), 60_000)
+    const out = await new Response(p.stdout).text(); clearTimeout(t)
+    return (await p.exited) === 0 ? out.trim() : null
+  }
+  // Tapped "Update and restart": note the version, then exit 75 so the start script pulls and starts again.
+  async function updateNow(): Promise<string | Page> {
+    if (review.sending() || agent.live('work')) return "I'm in the middle of something. Try again in a few minutes."
+    if (!o.restart) return 'Updating needs JobAgent started with its start script.'
+    const from = await git('rev-parse', 'HEAD').catch(() => null)
+    if (!from) return "This copy wasn't installed with git, so I can't update it myself."
+    writeJson(UPDATE_FILE, { at: Date.now(), from, n: updates })
+    log(`updating from ${from.slice(0, 7)}`)
+    setTimeout(() => o.restart?.(), 1000).unref() // the message edit goes out first
+    return { text: `${heading('⬆️', 'Updating')}\n${note("I'll be back in a minute or two and tell you when I am.")}`, rows: [] }
+  }
+  // After a restart for an update: tell the user whether the version changed (a failed pull starts the old one).
+  async function afterUpdate() {
+    const u = readJson<{ from?: string; n?: number } | null>(UPDATE_FILE, null)
+    if (!u?.from) return
+    rmSync(UPDATE_FILE, { force: true })
+    const now = await git('rev-parse', 'HEAD').catch(() => null)
+    if (now && now !== u.from) { updates = 0; refresh(); return void sendTo(`${heading('✅', 'JobAgent is updated')}\n${note('Everything picks up where it was.')}`, [[{ text: '🏠 Home', data: 'm:home' }]], { loud: false }).catch(() => {}) }
+    void sendTo(`${heading('⚠️', "The update didn't go through")}\nI started the version you had, so nothing changed. The JobAgent window on your computer shows why.\n${note('Try again later from Health.')}`, [[{ text: '🩺 Health', data: 'm:health' }]], { kind: 'health' }).catch(() => {})
+  }
   async function checkUpdate() {
-    const repo = join(import.meta.dir, '..', '..'), git = async (...a: string[]) => {
-      const p = Bun.spawn(['git', '-C', repo, ...a], { stdout: 'pipe', stderr: 'ignore' })
-      const t = setTimeout(() => p.kill(), 60_000)
-      const out = await new Response(p.stdout).text(); clearTimeout(t)
-      return (await p.exited) === 0 ? out.trim() : null
-    }
     try {
       if ((await git('fetch', '--quiet')) == null) return
       const n = parseInt((await git('rev-list', '--count', 'HEAD..@{u}')) ?? '0', 10) || 0
@@ -939,12 +960,13 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
       return P.home(homeCtx())
     }
     if ((m = /^sg:no:(\d{1,3})$/.exec(data))) { writeJson(TIP_FILE, { dismissed: parseInt(m[1], 10) }); return P.home(homeCtx()) }
-    if (data === 'm:health') return P.healthPage(health?.checks ?? null, health?.at)
+    if (data === 'm:health') return P.healthPage(health?.checks ?? null, health?.at, [], updates)
     if (data === 'm:dash') return P.dashPage(dash?.link ?? null, phoneUrl())
     if (data === 'm:dash:ph') { if (!dash) return 'The dashboard is not running.'; pending = { kind: 'dashurl', chat, msg, at: Date.now() }; return P.phoneSetupPage(dash.port) }
     if (data === 'm:dash:off') { setPhoneUrl(null); toast.text = '🚫 Phone access is off'; return P.dashPage(dash?.link ?? null, null) }
     if (data === 'm:upd') return P.updatePage(updates)
-    if (data === 'm:hc') { await checkHealth(); return P.healthPage(health?.checks ?? null, health?.at) }
+    if (data === 'up:go') return updateNow()
+    if (data === 'm:hc') { await checkHealth(); return P.healthPage(health?.checks ?? null, health?.at, [], updates) }
     if ((m = /^h:(\w+)$/.exec(data))) return P.helpPage(m[1])
     if (data === 'm:settings') return ST.settingsRoot(s, boardCount())
     if (data === 'm:prof') return profileHome()
@@ -1591,7 +1613,7 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
   bot.command('jobs', ctx => show(ctx, P.jobsPage(allJobs(), 'a', 0, readOutcomes())))
   bot.command('settings', ctx => show(ctx, ST.settingsRoot(loadSettings(), boardCount())))
   bot.command('help', ctx => show(ctx, P.helpPage()))
-  bot.command('health', ctx => show(ctx, P.healthPage(health?.checks ?? null, health?.at)))
+  bot.command('health', ctx => show(ctx, P.healthPage(health?.checks ?? null, health?.at, [], updates)))
   bot.command('snooze', ctx => shortcut(ctx, 'snooze'))
   bot.command(['review', 'search'], async ctx => {
     if (!loadSettings().onboarded) return void ctx.reply(note('Finish the setup first.'), OPTS)
@@ -1765,6 +1787,7 @@ ${note(`No notification sounds until ${clock(snoozeUntil)}. Work continues.`)}`,
             syncQueued()
             refresh()
             void review.recover()
+            void afterUpdate().catch(e => logError('after update', e))
             setInterval(discoveryCheck, 60_000).unref()
             setInterval(refresh, 30_000).unref() // relative times on Home and the status bar
             setTimeout(() => void checkHealth(), 10_000).unref()
@@ -1789,5 +1812,5 @@ ${note(`No notification sounds until ${clock(snoozeUntil)}. Work continues.`)}`,
     }
   }
 
-  return { bot, agent, cards, review, start, handleTool, route, capture, refresh, askForm, upkeep, stop: () => { bridge.stop(); return bot.stop() }, _bridge: bridge }
+  return { bot, agent, cards, review, start, handleTool, route, capture, refresh, askForm, upkeep, afterUpdate, stop: () => { bridge.stop(); return bot.stop() }, _bridge: bridge }
 }

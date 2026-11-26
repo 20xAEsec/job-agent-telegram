@@ -369,6 +369,17 @@ describe('upgrade: digest, receipts and health', () => {
     expect(datas(home)).toContain('m:health')
     fits(P.healthPage(checks, Date.now()))
   })
+  test('an update is one tap from Health or the update screen, and only when there is one', () => {
+    const checks = [{ name: 'bun', ok: true, detail: '1', required: true }]
+    const h = P.healthPage(checks, Date.now(), [], 3)
+    fits(h)
+    expect(h.text).toContain('An update is available (3 changes)')
+    expect(datas(h)).toContain('up:go')
+    expect(datas(P.healthPage(checks, Date.now()))).not.toContain('up:go')
+    fits(P.updatePage(3))
+    expect(datas(P.updatePage(3))).toEqual(['up:go', 'm:home'])
+    expect(datas(P.updatePage(0))).not.toContain('up:go')
+  })
 })
 
 describe('upgrade: chat shortcuts', () => {

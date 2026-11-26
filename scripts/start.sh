@@ -10,4 +10,11 @@ if ! echo "$check" | grep -q '"ok": true, "checks"'; then
   echo; echo "Run the setup to fix it:  scripts/setup.sh"; exit 1
 fi
 [ "${1:-}" = "--practice" ] && export JOBAGENT_DRY_RUN=1
-exec bun run app/src/main.ts
+# Exit code 75 means the user tapped "Update and restart": pull, refresh the dependencies, start again.
+# If the pull fails, the old version starts and the app tells the user (it compares versions with data/update.json).
+while true; do
+  code=0; bun run app/src/main.ts || code=$?
+  [ "$code" -eq 75 ] || exit "$code"
+  echo "Updating JobAgent..."
+  if git pull --ff-only; then (cd app && bun install --silent >/dev/null) && uv sync --project agent --quiet || echo "The update did not finish."; fi
+done

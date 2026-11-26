@@ -32,11 +32,11 @@ const CHECK_TEXT: Record<string, [label: string, fix: string]> = {
 export const problemsFrom = (checks: Check[], docxResume: boolean) =>
   checks.filter(c => !c.ok && (c.required || c.name === 'disk space' || (c.name === 'docx->pdf converter' && docxResume))).map(c => CHECK_TEXT[c.name]?.[1] ?? `${esc(c.name)}: ${esc(c.detail)}`)
 
-export function healthPage(checks: Check[] | null, at?: number, extra: string[] = []): Page {
+export function healthPage(checks: Check[] | null, at?: number, extra: string[] = [], updates = 0): Page {
   const lines = checks ? checks.map(c => `${c.ok ? '✅' : c.required ? '❌' : '⚠️'} ${CHECK_TEXT[c.name]?.[0] ?? esc(c.name)}${c.ok ? '' : `\n     ${note(CHECK_TEXT[c.name]?.[1] ?? esc(c.detail))}`}`) : [note('Checking…')]
   return {
-    text: [heading('🩺', 'Health'), '', ...lines, ...extra, '', note(at ? `Checked ${ago(at)}.` : 'Not checked yet.')].join('\n'),
-    rows: [[{ text: '🔄 Check again', data: 'm:hc' }], nav()],
+    text: [heading('🩺', 'Health'), '', ...lines, ...extra, ...(updates ? [`⬆️ An update is available (${plural(updates, 'change')}).`] : []), '', note(at ? `Checked ${ago(at)}.` : 'Not checked yet.')].join('\n'),
+    rows: [...(updates ? [[UPDATE_BTN]] : []), [{ text: '🔄 Check again', data: 'm:hc' }], nav()],
   }
 }
 
@@ -131,7 +131,7 @@ export function home(c: HomeCtx, now = Date.now()): Page {
   ].filter(b => b.data !== first.data))
   rows.push([{ text: '⚙️ Settings', data: 'm:settings' }, { text: '👤 Profile', data: 'm:prof' }])
   if (c.hold) rows.push([{ text: '▶ Resume auto-apply', data: 'ap:resume', style: 'success' }])
-  if (c.updates) rows.push([{ text: '⬆️ How to update', data: 'm:upd' }])
+  if (c.updates) rows.push([{ text: '⬆️ Update', data: 'm:upd' }])
   if (c.tip) rows.push([{ text: `📊 Set it to ${c.tip.min}`, data: `sg:ms:${c.tip.min}` }, { text: '✖ No thanks', data: `sg:no:${c.tip.min}` }])
   rows.push([{ text: '❔ Help', data: 'm:help' }, ...(c.filtered ? [{ text: '🔎 Filtered out', data: 'fo:list' }] : []), ...(c.problems?.length ? [{ text: '🩺 Health', data: 'm:health' }] : []), ...(c.jobs.length ? [{ text: '🖥 Dashboard', data: 'm:dash' }] : [])]) // no Refresh: Home updates itself
   return { text: lines.join('\n'), rows }
@@ -248,11 +248,13 @@ export function followUpPage(j: Job, days: number): Page {
   }
 }
 
+// v4 AP7: one tap updates. The app exits with code 75 and the start script pulls, refreshes the dependencies and starts again.
+export const UPDATE_BTN: Btn = { text: '⬆️ Update and restart', data: 'up:go', style: 'success' }
 export const updatePage = (n: number): Page => ({
   text: n
-    ? `${heading('⬆️', 'Update available')}\n${plural(n, 'change')} since your copy. On your computer, in the JobAgent folder, run:\n<code>git pull</code>\nthen restart JobAgent (or run the setup again if it asks).\n\n${note('I never update myself: you decide when.')}`
+    ? `${heading('⬆️', 'Update available')}\n${plural(n, 'change')} since your copy.\n\nTap below and I stop for a minute, update and start again. Work in progress picks up where it was.\n\n${note('I never update myself: you decide when.')}`
     : `${heading('⬆️', 'Up to date')}\n${note('You have the newest version.')}`,
-  rows: [nav()],
+  rows: [...(n ? [[UPDATE_BTN]] : []), nav()],
 })
 
 // On the computer the dashboard is a link to open there (Telegram refuses 127.0.0.1 buttons). With phone access on, it

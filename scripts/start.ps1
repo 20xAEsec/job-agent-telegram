@@ -16,4 +16,16 @@ if (-not $r.ok) {
     exit 1
 }
 if ($Practice) { $env:JOBAGENT_DRY_RUN = '1' }
-bun run app/src/main.ts
+# Exit code 75 means the user tapped "Update and restart": pull, refresh the dependencies, start again.
+# If the pull fails, the old version starts and the app tells the user (it compares versions with data/update.json).
+$root = Split-Path $PSScriptRoot -Parent
+while ($true) {
+    Set-Location $root
+    bun run app/src/main.ts
+    if ($LASTEXITCODE -ne 75) { exit $LASTEXITCODE }
+    Write-Host 'Updating JobAgent...'
+    try {
+        git pull --ff-only
+        if ($LASTEXITCODE -eq 0) { Set-Location app; bun install --silent | Out-Null; Set-Location $root; uv sync --project agent --quiet }
+    } catch { Write-Host "The update did not finish: $_" -ForegroundColor Yellow }
+}

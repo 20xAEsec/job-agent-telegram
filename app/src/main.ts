@@ -55,16 +55,17 @@ if (import.meta.main) {
       '',
     ].join('\n'))
   }
-  const app = createApp({ token: token(), onReady })
+  // Exit code 75: the start script pulls the update and starts JobAgent again (v4 AP7).
+  const app = createApp({ token: token(), onReady, restart: () => shutdown(75) })
   let stopping = false
-  const shutdown = () => {
+  const shutdown = (code = 0) => {
     if (stopping) return
     stopping = true
-    log('shutting down')
-    void app.stop().finally(() => process.exit(0))
-    setTimeout(() => process.exit(0), 3000).unref()
+    log(code === 75 ? 'restarting to update' : 'shutting down')
+    void app.stop().finally(() => process.exit(code))
+    setTimeout(() => process.exit(code), 3000).unref()
   }
-  process.on('SIGINT', shutdown)
-  process.on('SIGTERM', shutdown)
+  process.on('SIGINT', () => shutdown())
+  process.on('SIGTERM', () => shutdown())
   void app.start().then(why => { if (why) { log(why); process.exit(1) } })
 }
