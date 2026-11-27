@@ -164,7 +164,10 @@ def _dispatch(a) -> dict:
     if a.cmd == "login":
         return {"ok": True, "sites": accounts.status(d)} if a.site == "status" else accounts.login(d, a.site)
     if a.cmd == "credentials":
-        return accounts.credentials_set(a.site) if a.op == "set" else accounts.credentials_delete(a.site)
+        r = accounts.credentials_set(a.site) if a.op == "set" else accounts.credentials_delete(a.site)
+        if r["ok"]:
+            accounts.cache(d, a.site, saved=r["saved"])
+        return r
     if a.cmd == "job":
         if a.sub == "new":
             return store.new_job(d, a.url, a.source)

@@ -70,6 +70,9 @@ describe('settings catalog', () => {
     fits(lp)
     expect(lp.rows[0][0]).toMatchObject({ text: '🔄 Retry 3 jobs that needed this login', data: 'L:rt:linkedin' })
     expect(ST.loginsPage(null, undefined, { site: 'linkedin', n: 0 }).rows[0][0].data).toBe('L:in:linkedin')
+    const seen = ST.loginsPage({ linkedin: { logged_in: true, saved: true, at: new Date().toISOString() } })
+    expect(seen.text).toContain('<b>LinkedIn</b>: ✅ logged in · password saved · checked just now')
+    expect(seen.text).toContain('<b>Indeed</b>: ❔ not checked yet')
   })
   test('settings files from before related titles still load, and the list is capped', () => {
     writeJson(SETTINGS_FILE, { version: 2, filters: { titles: ['X'] }, discovery: { enabled: true } })

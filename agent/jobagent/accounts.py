@@ -130,6 +130,7 @@ def login(d: Path, site: str, wait: int = 300) -> dict:
     try:
         with browser.session(d, None, headless=False, profile=True) as ctx:
             if _logged_in(ctx, site):
+                _remember(d, site, ok=True)
                 return {"ok": True, "site": site, "logged_in": True, "already": True}
             pg = ctx.pages[0] if ctx.pages else ctx.new_page()
             pg.goto(SITES[site]["login"], wait_until="domcontentloaded", timeout=30000)
@@ -161,13 +162,23 @@ def status(d: Path, sites: list[str] | None = None) -> dict:
                 out[k] = {"name": SITES[k]["name"], "logged_in": (last.get(k) or {}).get("ok") if v is None else v, "saved": saved(k) is not None}
     except Exception:  # noqa: BLE001 - the login window is open (it holds the profile)
         return {k: {"name": SITES[k]["name"], "logged_in": None, "saved": saved(k) is not None} for k in sites or SITES}
+    for k, v in out.items():
+        cache(d, k, logged_in=v["logged_in"], saved=v["saved"], at=store.now())
     return out
+
+
+def cache(d: Path, site: str, **kv) -> None:
+    """data/login_status.json: what the app's Job site logins screen shows without opening a browser."""
+    c = store._load(d / "login_status.json") or {}
+    c[site] = {**(c.get(site) or {}), **kv}
+    atomic_write_json(d / "login_status.json", c)
 
 
 def _remember(d: Path, site: str, ok: bool) -> None:
     st = store._load(d / "logins.json") or {}
     st[site] = {"at": store.now(), "ok": ok}
     atomic_write_json(d / "logins.json", st)
+    cache(d, site, logged_in=ok, at=store.now())
 
 
 def _auto_login(d: Path, ctx, site: str) -> bool:
@@ -212,5 +223,6 @@ def page_text(d: Path, url: str) -> str:
         if text is None and _auto_login(d, ctx, site):
             text = _read(pg, url)
     if text is None:
+        cache(d, site, logged_in=False, at=store.now())
         raise NeedsLogin(site)
     return text

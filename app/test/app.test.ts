@@ -233,8 +233,8 @@ describe('setup wizard', () => {
 describe('typed input goes to what asked for it', () => {
   const PROFILE = 'https://www.linkedin.com/in/jane-doe'
   const JOB = 'https://job-boards.greenhouse.io/acme/jobs/1'
-  function chat() {
-    const m = makeApp()
+  function chat(answers?: (a: string[]) => any) {
+    const m = makeApp(answers)
     writeJson(join(DATA, 'settings.json'), { ...DEFAULT_SETTINGS, paired_user_id: 42, onboarded: true })
     rmSync(join(DATA, 'forms'), { recursive: true, force: true })
     m.app.bot.botInfo = { id: 1, is_bot: true, first_name: 'B', username: 'testbot' } as any
@@ -266,6 +266,26 @@ describe('typed input goes to what asked for it', () => {
     const sent = t.calls.find(c => String(c.payload.text).includes('Open Questions'))!
     expect(sent.payload.reply_markup.inline_keyboard.flat().map((b: any) => b.callback_data)).toEqual(['F:list'])
     expect(((await t.tap('F:list')) as any).rows[0][0]).toMatchObject({ text: 'Open · Acme · Analyst', data: `f:${code('f1')}:open` })
+    await t.done()
+  })
+
+  test('v3 P4: the question and login screens start no Python, and confirming does not wait for it', async () => {
+    const t = chat(a => a[1] === 'answer' ? new Promise(() => {}) // saving never finishes
+      : a[0] === 'login' ? { ok: true, sites: { linkedin: { logged_in: true, saved: false } } } : undefined)
+    F.saveForm(F.newForm('f1', 'job-x', 'x', F.validateQuestions([{ qid: 'q1', text: 'Anything else?', kind: 'text', save_key: 'anything_else' }], true)))
+    const before = t.pyCalls.length
+    await t.open()
+    await t.tap('L:show')
+    expect(t.pyCalls.length).toBe(before)
+    const check = await t.tap('L:check') // the real check runs behind the screen
+    expect(check).toBeUndefined()
+    await wait()
+    expect(t.pyCalls.slice(before)).toContainEqual(['login', 'status'])
+    await t.open()
+    await t.send('No')
+    expect(await Promise.race([t.tap(`f:${code('f1')}:c`), wait(250).then(() => 'slow')])).toBeUndefined()
+    await wait()
+    expect(t.pyCalls.some(a => a[1] === 'answer' && a[2] === 'set')).toBe(true)
     await t.done()
   })
 

@@ -64,6 +64,20 @@ def test_login_cli_shapes(tmp_path, monkeypatch, capsys):
     assert '"cancelled"' in capsys.readouterr().out
 
 
+def test_the_screen_cache_follows_what_python_learns(tmp_path, monkeypatch, capsys):
+    cached = lambda: store._load(tmp_path / "login_status.json")
+    accounts._remember(tmp_path, "linkedin", ok=True)
+    assert cached()["linkedin"]["logged_in"] is True and cached()["linkedin"]["at"]
+    monkeypatch.setattr(accounts, "_ask", lambda name: ("u@x.test", "pw"))
+    monkeypatch.setattr("keyring.set_password", lambda *a: None)
+    assert cli.main(["--data-dir", str(tmp_path), "credentials", "set", "linkedin"]) == 0
+    assert cached()["linkedin"] == {**cached()["linkedin"], "logged_in": True, "saved": True}
+    monkeypatch.setattr("keyring.delete_password", lambda *a: None)
+    assert cli.main(["--data-dir", str(tmp_path), "credentials", "delete", "linkedin"]) == 0
+    assert cached()["linkedin"]["saved"] is False and "pw" not in (tmp_path / "login_status.json").read_text("utf-8")
+    capsys.readouterr()
+
+
 def test_indeed_links_use_the_app_api_then_the_browser(tmp_path, monkeypatch):
     jid = store.new_job(tmp_path, "https://www.indeed.com/jobs?q=analyst&vjk=72ec85f03f607d5c")["job_id"]
     monkeypatch.setattr(fetch, "_indeed", lambda url: "# Analyst\nCompany: Acme\n\n" + "Build dashboards. " * 20)

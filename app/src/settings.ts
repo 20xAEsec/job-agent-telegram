@@ -1,6 +1,6 @@
 // Settings screens, table-driven. Every setting says in plain words what it does, shows its current value,
 // and opens an editor that fits its type (choices, chips, toggle, list or typed value). Callback codes stay short.
-import { COUNTRIES, CURRENCIES, esc, heading, label, money, nav, note, pairs, short, type Btn, type Page } from './kit'
+import { ago, COUNTRIES, CURRENCIES, esc, heading, label, money, nav, note, pairs, short, type Btn, type Page } from './kit'
 import { getPath, practiceForced, practiceOn, SOURCES, type Settings } from './state'
 
 type Opt = [value: string, label: string, desc?: string]
@@ -307,16 +307,17 @@ export function boardSlug(text: string): string | null {
 
 // "🔑 Job site logins": the LinkedIn / Indeed logins kept in JobAgent's own browser on the computer (agent/jobagent/accounts.py).
 export const JOB_SITES: Record<string, string> = { linkedin: 'LinkedIn', indeed: 'Indeed' }
-export type SiteLogin = { logged_in: boolean | null; saved: boolean }
+// As cached by Python (data/login_status.json): showing the screen never opens a browser. "Check now" does.
+export type SiteLogin = { logged_in?: boolean | null; saved?: boolean; at?: string }
 
 export function loginsPage(sites: Record<string, SiteLogin> | null, msg?: string, retry?: { site: string; n: number }): Page {
-  const state = (x?: SiteLogin) => !x || x.logged_in === null ? '❔ can\'t check right now' : x.logged_in ? '✅ logged in' : '⚪ not logged in'
+  const state = (x?: SiteLogin) => x?.logged_in === undefined ? '❔ not checked yet' : x.logged_in === null ? '❔ can\'t tell' : x.logged_in ? '✅ logged in' : '⚪ not logged in'
+  const when = (x?: SiteLogin) => x?.at ? ` · checked ${ago(x.at)}` : ''
   const lines = [
     heading('🔑', 'Job site logins'),
     'LinkedIn hides many postings from people who are not logged in. Log in once in my browser window on your computer and I stay logged in. Indeed links work without logging in; your Indeed login is a backup.', '',
-    ...Object.entries(JOB_SITES).map(([k, n]) => `<b>${n}</b>: ${state(sites?.[k])}${sites?.[k]?.saved ? ' · password saved' : ''}`),
+    ...Object.entries(JOB_SITES).map(([k, n]) => `<b>${n}</b>: ${state(sites?.[k])}${sites?.[k]?.saved ? ' · password saved' : ''}${when(sites?.[k])}`),
     '', note('A saved password lets me log back in by myself when a login runs out. It stays on your computer, in its password vault, never in this chat. In my window, log in with email and password: "Sign in with Google" does not work there.'),
-    ...(sites ? [] : ['', note('Is a JobAgent browser window still open on your computer? Close it, then tap 🔄.')]),
     ...(msg ? ['', msg] : []),
   ]
   return {
@@ -327,7 +328,7 @@ export function loginsPage(sites: Record<string, SiteLogin> | null, msg?: string
         { text: `🌐 Log in to ${n}`, data: `L:in:${k}` },
         sites?.[k]?.saved ? { text: '🗑 Forget password', data: `L:rm:${k}` } : { text: '🔐 Save password', data: `L:pw:${k}` },
       ]),
-      [{ text: '🔄 Check again', data: 'L:show' }],
+      [{ text: '🔄 Check now', data: 'L:check' }],
       nav('m:settings'),
     ],
   }

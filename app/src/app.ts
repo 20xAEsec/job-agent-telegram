@@ -737,7 +737,8 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
     F.saveForm(step.form)
     const to = paired()
     if (step.form.message_id && to != null) await editAt(to, step.form.message_id, F.render(step.form))
-    if (step.event) await onFormEvent(step.event)
+    // Saving the answers starts Python, so the tap does not wait for it; the job continues once they are saved (v3 P4).
+    if (step.event) void onFormEvent(step.event).catch(e => logError('form answers', e))
     refresh()
   }
 
@@ -939,10 +940,9 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
   let loginOpen = false // one login window at a time: they share JobAgent's browser profile
   // Jobs that failed because a job site wanted a login (fetch's detail starts with the site name), so a login can retry them.
   const needLogin = (site: string) => allJobs().filter(j => j.status === 'FAILED' && /\blogged in\b/i.test(lastDetail(j)) && lastDetail(j).startsWith(ST.JOB_SITES[site]))
-  const loginsNow = async (note?: string, site?: string) => {
-    const r = loginOpen ? null : await run(['login', 'status'])
-    return ST.loginsPage(r?.ok ? r.sites : null, note, site ? { site, n: needLogin(site).length } : undefined)
-  }
+  // From Python's cache: checking for real opens a browser, which takes seconds (v3 P4).
+  const loginsNow = (note?: string, site?: string) =>
+    ST.loginsPage(readJson<Record<string, ST.SiteLogin>>(join(DATA, 'login_status.json'), {}), note, site ? { site, n: needLogin(site).length } : undefined)
 
   // ---- Callback router: returns the page to show in place, a short toast, or nothing ----
   async function route(ctx: Context, data: string, toast: { text?: string }): Promise<Page | string | undefined> {
@@ -1160,6 +1160,18 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
 
     // Job site logins: windows open on the computer and can take minutes, so they run in the background and edit this page when done.
     if (data === 'L:show') return loginsNow()
+    if (data === 'L:check') {
+      if (loginOpen) return 'A login window is already open on your computer. Finish or close it first.'
+      loginOpen = true
+      void (async () => {
+        const r = await run(['login', 'status'])
+        loginOpen = false
+        const stuck = !r.ok || Object.values((r.sites ?? {}) as Record<string, ST.SiteLogin>).every(x => x.logged_in === null)
+        await editAt(chat, msg, loginsNow(stuck ? "⚠️ I couldn't check. Is a JobAgent browser window still open on your computer? Close it, then tap 🔄." : undefined))
+      })()
+      toast.text = '🔄 Checking…'
+      return
+    }
     if ((m = /^L:rt:(linkedin|indeed)$/.exec(data))) {
       const busy = new Set([agent.live('work')?.task, ...agent.queued()].map(t => t?.job_id))
       const list = needLogin(m[1]).filter(j => !busy.has(j.id)).slice(0, 5) // each retry is a Claude task: a few at a time
@@ -1183,7 +1195,7 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
           note = r.ok ? `✅ Logged in to ${name}.` : r.code === 'busy' ? '⚠️ Another JobAgent browser window is open. Close it and try again.' : `⚪ The ${name} login wasn't finished. Tap "Log in to ${name}" to try again.`
         }
         loginOpen = false
-        await editAt(chat, msg, await loginsNow(note, note.startsWith('✅') ? site : undefined))
+        await editAt(chat, msg, loginsNow(note, note.startsWith('✅') ? site : undefined))
       })()
       return ST.loginWaitPage(site, op === 'pw')
     }
