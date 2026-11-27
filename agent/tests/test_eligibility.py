@@ -112,8 +112,10 @@ def test_screen_accept(tmp_path):
     (d / "run").mkdir()
     (d / "run" / "poll.json").write_text(json.dumps({"candidates": cands}))
     ids = {"ids": ["j1", "j2", "j3"]}
+    (d / "feedback.jsonl").write_text(json.dumps({"job_id": "x", "decision": "skip_reason", "reason": "kind of work"}) + "\n")
     inp = json.loads(Path(llm.build_input(d, "screen", None, ids)["file"]).read_text("utf-8"))
     assert "<untrusted_content" in inp["jobs"] and "Must know SQL" in inp["jobs"]
+    assert inp["feedback"]["skip_reasons"] == {"kind of work": 1}  # v3 P2
     with pytest.raises(Exception):
         llm.build_input(d, "screen", None, {"ids": ["nope"]})
 

@@ -1,11 +1,11 @@
 // Behaviour: question forms, the Claude task runner (with a fake `claude`), the local bridge, and the review gate.
 import { beforeEach, describe, expect, test } from 'bun:test'
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { createAgent, promptFor, type Outcome, type Task } from '../src/agent'
 import { startBridge } from '../src/bridge'
 import * as F from '../src/forms'
-import { code } from '../src/jobs'
+import { code, readDecisions } from '../src/jobs'
 import { autoGate, createReview, planRecovery } from '../src/review'
 import { DATA, DEFAULT_SETTINGS, readJson, writeJson } from '../src/state'
 
@@ -169,6 +169,20 @@ describe('review gate', () => {
     const g = createReview({ api, to: () => 1, silent: () => false, refresh: () => {}, revise: id => log.revised.push(id), onResult: (_i, s) => log.results.push(s), setPending: () => {}, run })
     return { g, st, log, sent }
   }
+
+  test('after Skip, one tap says why, and it is stored for the feedback summary (v3 P2)', async () => {
+    rmSync(join(DATA, 'feedback.jsonl'), { force: true })
+    const { g } = setup('AWAITING_APPROVAL')
+    const p = (await g.press('sk', code(ID), 1, 1)) as any
+    expect(p.text).toContain('What was off?')
+    expect(p.rows.flat().map((b: any) => b.data).slice(0, 6)).toEqual([0, 1, 2, 3, 4, 5].map(i => `r:sk:${code(ID)}:${i}`))
+    expect(p.rows.flat().every((b: any) => Buffer.byteLength(b.data) <= 64)).toBe(true)
+    expect(((await g.press('sk', code(ID), 1, 1, '0')) as any).text).toContain('Noted: pay')
+    expect(await g.press('sk', code(ID), 1, 1, '9')).toBeUndefined()
+    const rows = readFileSync(join(DATA, 'feedback.jsonl'), 'utf8').trim().split('\n').map(l => JSON.parse(l))
+    expect(rows.map(r => [r.decision, r.reason])).toEqual([['skip', undefined], ['skip_reason', 'pay']])
+    expect(readDecisions().find(r => r.job_id === ID)?.decision).toBe('skip') // the reason row doesn't hide the skip
+  })
 
   test('approve writes approval.json bound to the hash, then submits (practice: nothing sent)', async () => {
     writeJson(join(DATA, 'settings.json'), DEFAULT_SETTINGS)

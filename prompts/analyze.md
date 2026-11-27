@@ -17,7 +17,7 @@ Judge title fit by the work, not the words: when the title differs from all of t
 
 `breakdown` gives each of title, seniority, skills, location and pay its own 0 to 100 (`pay` is 50 when the posting gives no pay). `must_haves`: up to 8 requirements the posting marks as required, each `met` (the profile clearly shows it), `partial` (related experience) or `missing`. Judge only from the profile; never mark something `met` the profile does not show.
 
-**Calibrate with `feedback`.** It reports the score bands this user approves and the title words they keep skipping. Treat it as a hint about taste (for example lower `title` for words they always skip), not as a rule, and never let it override a dealbreaker.
+**Calibrate with `feedback`.** It reports the score bands this user approves, the title words they keep skipping and `skip_reasons` (how often they said pay, location, kind of work, company, level or other was off). Treat it as a hint about taste (for example lower `title` for words they always skip), not as a rule, and never let it override a dealbreaker.
 
 `skip_detail`: one plain-words line (at most 120 characters) the user reads if this job is skipped: the main reason, like "Match 48/100: pay tops out at $153k, below your $220k minimum" or "Contract role; you asked for full time". Always fill it.
 

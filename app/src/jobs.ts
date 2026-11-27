@@ -30,18 +30,18 @@ export const mustHavesOf = (m: any): MustHave[] =>
 
 // The user's decisions, for calibration (jobagent feedback summary) and the Home suggestion. Job features only:
 // never posting text or answers.
-export type Decision = 'approve' | 'skip' | 'never' | 'apply_anyway' | 'applied_self' | `outcome_${string}`
-export function logDecision(id: string, decision: Decision) {
+export type Decision = 'approve' | 'skip' | 'never' | 'apply_anyway' | 'applied_self' | 'skip_reason' | `outcome_${string}`
+export function logDecision(id: string, decision: Decision, reason?: string) {
   const j = readJob(id)
   if (!j) return
-  const row = { at: new Date().toISOString(), job_id: id, decision, score: j.score, role: j.role.slice(0, 120), source: j.source, breakdown: j.breakdown }
+  const row = { at: new Date().toISOString(), job_id: id, decision, ...(reason ? { reason } : {}), score: j.score, role: j.role.slice(0, 120), source: j.source, breakdown: j.breakdown }
   try { appendFileSync(join(DATA, 'feedback.jsonl'), JSON.stringify(row) + '\n') } catch { /* best effort */ }
 }
 export function readDecisions(): { job_id: string; decision: string; score: number | null }[] {
   let text = ''
   try { text = readFileSync(join(DATA, 'feedback.jsonl'), 'utf8') } catch { return [] }
   const last = new Map<string, any>()
-  for (const l of text.split('\n')) { try { const r = JSON.parse(l); if (r?.job_id && !String(r.decision).startsWith('outcome_')) last.set(r.job_id, r) } catch { /* skip */ } }
+  for (const l of text.split('\n')) { try { const r = JSON.parse(l); if (r?.job_id && !String(r.decision).startsWith('outcome_') && r.decision !== 'skip_reason') last.set(r.job_id, r) } catch { /* skip */ } }
   return [...last.values()]
 }
 

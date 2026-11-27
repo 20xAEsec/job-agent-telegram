@@ -128,6 +128,8 @@ export function editValue(row: { action: string; value: unknown }, options: stri
 // deferred: jobs the daily cap held back on `deferred_on`, offered again (through autoGate) on a later day.
 export type Autopilot = { fails?: number; hold?: { at: string; why: string } | null; deferred?: string[]; deferred_on?: string }
 export type ApState = { sent: number; hold: boolean; real?: Record<string, number> }
+// v3 P2: the reasons offered after Skip (the first item is what feedback.jsonl stores; feedback.REASONS in Python must match)
+export const SKIP_REASONS = [['pay', '💵 Pay'], ['location', '📍 Location'], ['kind of work', '🧭 Kind of work'], ['company', '🏢 Company'], ['level', '📶 Level'], ['other', '💬 Other']] as const
 // v3 P3: real submissions so far per form type. A submitted job later CLOSED still counts.
 export const FIRST_REAL = 3
 export function realSent(now = Date.now()): Record<string, number> {
@@ -454,6 +456,12 @@ export function createReview(d: Deps) {
         rows: [[{ text: '🚫 Yes, never', data: `r:nx:${c}`, style: 'danger' }, { text: '↩ Keep reviewing', data: `r:rv:${c}` }]] }
     }
     if (act === 'nx') act = 'nv'
+    if (act === 'sk' && arg !== undefined) { // v3 P2: why, tapped on the Skipped message; it feeds the feedback summary
+      const r = SKIP_REASONS[parseInt(arg, 10)]
+      if (!r) return undefined
+      logDecision(id, 'skip_reason', r[0])
+      return done('⏭', 'Skipped', note(`Noted: ${r[0]}. I'll weigh that for the next ones.`))
+    }
     if (act === 'sk' || act === 'nv') {
       cancelAuto(id)
       if (act === 'nv' && rv.company) {
@@ -463,7 +471,10 @@ export function createReview(d: Deps) {
       const s = await run(['job', 'set-status', id, 'SKIPPED', '--detail', act === 'nv' ? 'never this company' : 'you skipped it'])
       if (s.ok) logDecision(id, act === 'nv' ? 'never' : 'skip')
       d.refresh()
-      return s.ok ? done(act === 'nv' ? '🚫' : '⏭', act === 'nv' ? 'Never this company' : 'Skipped', note(act === 'nv' ? `I won't apply to ${esc(rv.company)} again. Undo under Settings → What I look for → Companies to avoid.` : 'Skipped.')) : `Could not skip: ${s.error}`
+      if (!s.ok) return `Could not skip: ${s.error}`
+      if (act === 'nv') return done('🚫', 'Never this company', note(`I won't apply to ${esc(rv.company)} again. Undo under Settings → What I look for → Companies to avoid.`))
+      const p = done('⏭', 'Skipped', '<b>What was off?</b> One tap helps me pick better ones.')
+      return { ...p, rows: [...pairs(SKIP_REASONS.map(([, label], i) => ({ text: label, data: `r:sk:${c}:${i}` })), 3), ...p.rows] }
     }
     return undefined
   }

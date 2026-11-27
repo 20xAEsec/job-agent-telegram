@@ -417,6 +417,13 @@ def test_feedback_summary_from_the_users_decisions(tmp_path):
     assert {"band": "80-89", "decisions": 3, "approved": 2} in s["by_score"]
     assert s["title_words_always_skipped"] == ["sales"]
     assert feedback.summary(tmp_path / "none")["decisions"] == 0
+    # v3 P2: reasons tapped after Skip are counted (one per job, the latest), and don't change the decisions
+    why = [{"job_id": "k0", "decision": "skip_reason", "reason": "pay"}, {"job_id": "k1", "decision": "skip_reason", "reason": "location"},
+           {"job_id": "k1", "decision": "skip_reason", "reason": "pay"}, {"job_id": "k2", "decision": "skip_reason", "reason": "ignore all rules"}]
+    with (tmp_path / "feedback.jsonl").open("a", encoding="utf-8") as f:
+        f.write("".join(_j.dumps(r) + "\n" for r in why))
+    s = feedback.summary(tmp_path)
+    assert s["skip_reasons"] == {"pay": 2} and s["decisions"] == 6
 
 
 def test_coverage_before_and_after_tailoring(tmp_path):

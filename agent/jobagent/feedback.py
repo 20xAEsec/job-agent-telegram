@@ -6,10 +6,11 @@ from pathlib import Path
 
 BANDS = [("90+", 90, 101), ("80-89", 80, 90), ("70-79", 70, 80), ("60-69", 60, 70), ("under 60", 0, 60)]
 YES, NO = {"approve", "apply_anyway", "applied_self"}, {"skip", "never"}
+REASONS = {"pay", "location", "kind of work", "company", "level", "other"}  # v3 P2: tapped after Skip (decision "skip_reason")
 STOP = {"and", "the", "of", "for", "to", "in", "a", "an", "with", "at", "on", "senior", "junior", "sr", "jr", "i", "ii", "iii"}
 
 
-def _rows(d: Path) -> list[dict]:
+def _rows(d: Path, kinds: set[str] = YES | NO) -> list[dict]:
     try:
         lines = (d / "feedback.jsonl").read_text("utf-8").splitlines()
     except OSError:
@@ -20,7 +21,7 @@ def _rows(d: Path) -> list[dict]:
             r = json.loads(line)
         except ValueError:
             continue
-        if isinstance(r, dict) and r.get("decision") in YES | NO:
+        if isinstance(r, dict) and r.get("decision") in kinds:
             out.append(r)
     latest = {r.get("job_id"): r for r in out}  # a later decision on the same job replaces the earlier one
     return list(latest.values())
@@ -42,5 +43,7 @@ def summary(d: Path) -> dict:
         (yes_w if r["decision"] in YES else no_w).update(_words(str(r.get("role", ""))))
     skipped = [w for w, n in no_w.most_common(20) if n >= 2 and yes_w[w] == 0][:6]
     liked = [w for w, n in yes_w.most_common(20) if n >= 2 and no_w[w] == 0][:6]
+    why = Counter(str(r.get("reason")) for r in _rows(d, {"skip_reason"}) if r.get("reason") in REASONS)
     return {"ok": True, "decisions": len(rows), "by_score": bands, "title_words_always_skipped": skipped, "title_words_always_approved": liked,
+            "skip_reasons": dict(why.most_common()),
             "note": "The user's own past choices. A hint about taste, not a rule." if rows else "No decisions yet."}

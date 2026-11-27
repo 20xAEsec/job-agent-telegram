@@ -74,7 +74,9 @@ def accept(d, name, jid, ans, tmp=None):
 
 def test_analyze_input_wraps_the_posting_and_form_labels_as_untrusted(d):
     jid = scored(d)
+    (d / "feedback.jsonl").write_text(json.dumps({"job_id": "x", "decision": "skip_reason", "reason": "pay"}) + "\n")
     inp = json.loads(open(llm.build_input(d, "analyze", jid)["file"], encoding="utf-8").read())
+    assert inp["feedback"]["skip_reasons"] == {"pay": 1}  # v3 P2
     assert inp["supported"] is True
     assert inp["posting"].lstrip().startswith("<untrusted_content") and INJECTION in inp["posting"]
     assert "<untrusted_content" in inp["form_fields"] and "selector" not in inp["form_fields"]  # page selectors never go to Claude
