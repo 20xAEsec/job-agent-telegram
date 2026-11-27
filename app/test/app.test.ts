@@ -44,7 +44,7 @@ const llmExec = (_a: string[], _in: string, onLine: (l: string) => void) => {
   return { pid: undefined, done: Promise.resolve({ code: 0, stderr: '' }) }
 }
 
-function makeApp(answer: (a: string[]) => any = () => undefined, extra: { restart?: () => void } = {}) {
+function makeApp(answer: (a: string[]) => any = () => undefined, extra: { restart?: () => void; llmExec?: typeof llmExec } = {}) {
   writeJson(join(DATA, 'settings.json'), { ...DEFAULT_SETTINGS, paired_user_id: 42 })
   const calls: { method: string; payload: any }[] = []
   const pyCalls: string[][] = []
@@ -139,6 +139,37 @@ describe('v3 P1: the resume bank is built when a resume is added', () => {
     app.agent.enqueue({ kind: 'job', job_id: ID, title: 'x', payload: {} })
     await wait(2000)
     expect(asked.filter(n => n !== 'cover_letter')).toEqual(['tailor_ats'])
+    await app.stop()
+  }, 10_000)
+})
+
+describe('v3 P5: cost per job', () => {
+  test("a job's rows carry the step, and its page and Insights show what it cost", async () => {
+    const ID = 'greenhouse-acme-3', input = join(DATA, 'run', 'llm', 'cost.in.json'), log = join(DATA, 'usage_log.jsonl')
+    writeJson(input, {})
+    writeJson(join(jobDir(ID), 'status.json'), { status: 'AWAITING_APPROVAL', updated_at: new Date().toISOString(), history: [{ status: 'AWAITING_APPROVAL', at: new Date().toISOString() }] })
+    writeJson(join(jobDir(ID), 'meta.json'), { id: ID, url: 'https://x', source: 'manual' })
+    writeJson(join(DATA, 'usage.json'), { five_hour: 0.1, at: Date.now() })
+    rmSync(log, { force: true })
+    let status = 'FETCHED'
+    const llmUsing = (_a: string[], _in: string, onLine: (l: string) => void) => {
+      onLine(JSON.stringify({ type: 'rate_limit_event', rate_limit_info: { unifiedWindows: { five_hour: { utilization: 0.14 } } } }))
+      return llmExec(_a, _in, onLine)
+    }
+    const { app } = makeApp(a => {
+      const [c, s] = a
+      if (c === 'llm') return s === 'input' ? { ok: true, file: input } : { ok: true, score: 10 }
+      if (c === 'job' && s === 'get') return { ok: true, status, files: [] }
+      if (c === 'job' && s === 'set-status') { status = a[3]; return { ok: true } }
+      return undefined
+    }, { llmExec: llmUsing })
+    app.agent.enqueue({ kind: 'job', job_id: ID, title: 'x', payload: {} })
+    await wait(2000)
+    const rows = readFileSync(log, 'utf8').trim().split('\n').map(l => JSON.parse(l))
+    expect(rows.find(r => r.step === 'analyze')).toMatchObject({ job_id: ID, model: 'sonnet' })
+    const tap = async (d: string) => (await app.route({ chat: { id: 42 }, callbackQuery: { message: { message_id: 9 } } } as any, d, {})) as any
+    expect((await tap(`j:o:${code(ID)}:i`)).text).toContain('used about 4% of your 5-hour Claude limit')
+    expect((await tap('I:0')).text).toContain('A prepared application used about 4%')
     await app.stop()
   }, 10_000)
 })

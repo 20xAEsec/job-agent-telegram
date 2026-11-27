@@ -2,7 +2,7 @@
 import { heading, bar, esc, nav, note, plural, type Btn, type Page } from './kit'
 import type { Job } from './jobs'
 
-const APPLIED = ['SUBMITTED', 'APPLIED_SELF']
+const APPLIED = ['SUBMITTED', 'APPLIED_SELF'], PREPARED = ['AWAITING_APPROVAL', 'KIT_READY']
 const reached = (j: Job, st: string[]) => st.includes(j.status) || j.history.some(h => st.includes(h.status))
 const BANDS: [string, number, number][] = [['90+', 90, 101], ['80–89', 80, 90], ['70–79', 70, 80], ['under 70', 0, 70]]
 const MIN_FOR_SUGGESTIONS = 10 // applications with a known result before any suggestion is made
@@ -13,7 +13,7 @@ export function funnel(jobs: Job[], out: Record<string, string>, since = 0): Fun
   const applied = js.filter(j => reached(j, APPLIED))
   return {
     found: js.length,
-    prepared: js.filter(j => reached(j, ['AWAITING_APPROVAL', 'KIT_READY'])).length,
+    prepared: js.filter(j => reached(j, PREPARED)).length,
     applied: applied.length,
     replied: applied.filter(j => ['interview', 'offer', 'rejected'].includes(out[j.id])).length,
     interview: applied.filter(j => out[j.id] === 'interview' || out[j.id] === 'offer').length,
@@ -47,7 +47,13 @@ export function suggestion(jobs: Job[], out: Record<string, string>, minScore: n
 
 const pct = (a: number, b: number) => (b ? `${Math.round((a / b) * 100)}%` : '—')
 
-export function insightsPage(jobs: Job[], out: Record<string, string>, minScore: number, now = Date.now(), weekly = false): Page {
+// The average share of the five-hour limit a prepared application used (v3 P5). `used`: job id -> fraction of the window.
+export function avgCost(jobs: Job[], used: Record<string, number>): { pct: number; n: number } | null {
+  const xs = jobs.filter(j => reached(j, PREPARED) && used[j.id] > 0).map(j => used[j.id])
+  return xs.length ? { pct: Math.max(1, Math.round((xs.reduce((a, b) => a + b, 0) / xs.length) * 100)), n: xs.length } : null
+}
+
+export function insightsPage(jobs: Job[], out: Record<string, string>, minScore: number, now = Date.now(), weekly = false, used: Record<string, number> = {}): Page {
   const all = funnel(jobs, out), wk = funnel(jobs, out, now - 7 * 86_400_000)
   const step = (label: string, n: number, of: number) => `${bar(n, Math.max(1, all.found), 8)} <b>${n}</b> ${label}${of ? note(` · ${pct(n, of)}`) : ''}`
   const bySource = (['discovery', 'manual'] as const).map(src => {
@@ -55,7 +61,7 @@ export function insightsPage(jobs: Job[], out: Record<string, string>, minScore:
     return `${src === 'discovery' ? '🔭 Auto-search' : '🔗 Links you sent'}: ${plural(a.length, 'application')}, ${pct(a.filter(j => ['interview', 'offer', 'rejected'].includes(out[j.id])).length, a.length)} replied`
   })
   const bands = byBand(jobs, out).filter(b => b.n)
-  const s = suggestion(jobs, out, minScore)
+  const s = suggestion(jobs, out, minScore), cost = avgCost(jobs, used)
   return {
     text: [
       heading('📊', weekly ? 'Your week' : 'Insights'), '',
@@ -65,6 +71,7 @@ export function insightsPage(jobs: Job[], out: Record<string, string>, minScore:
       step('interviews', all.interview, all.applied), step('offers', all.offer, all.interview),
       '', '<b>Where replies come from</b>', ...bySource,
       ...(bands.length ? ['', '<b>Interviews by match score</b>', ...bands.map(b => `${esc(b.name)}: ${b.interviews} of ${b.n}`)] : []),
+      ...(cost ? ['', `⚡ A prepared application used about ${cost.pct}% of your 5-hour Claude limit (average of ${cost.n}).`] : []),
       ...(s ? ['', `💡 ${esc(s.text)}`] : ['', note(all.applied < MIN_FOR_SUGGESTIONS ? `Suggestions appear after ${MIN_FOR_SUGGESTIONS} applications with a result. Mark results under Jobs → Applied.` : 'Nothing to suggest right now.')]),
     ].join('\n'),
     rows: [...(s?.btn ? [[s.btn]] : []), [{ text: '📋 Jobs', data: 'J:d:0' }, ...nav()]],

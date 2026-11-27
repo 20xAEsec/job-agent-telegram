@@ -178,7 +178,7 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
     const week = now.toISOString().slice(0, 10), f = readJson<{ last?: string }>(WEEK_FILE, {})
     if (f.last && Date.now() - Date.parse(f.last) < 6 * 86_400_000) return
     writeJson(WEEK_FILE, { last: week })
-    const p = insightsPage(allJobs(), readOutcomes(), s.apply.min_match_score, Date.now(), true)
+    const p = insights(true)
     if (s.notify.weekly !== 'off' && !/This week:<\/b> 0 found/.test(p.text)) void sendTo(p.text, p.rows, { kind: 'weekly' }).catch(e => log(`weekly failed: ${e}`))
   }
   // The daily digest (v4 AP8): the first hourly check of a day outside quiet hours sends it, silently. Covers the time since the last one.
@@ -529,12 +529,18 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
     refresh()
   }
   const lastUrls = new Map<string, string>()
-  const usedBy = (id: string) => {
+  // The share of the five-hour limit each job's tasks used (the `delta` rows). `kinds`: count only those tasks.
+  const usedByJob = (kinds?: string[]) => {
+    const sums: Record<string, number> = {}
     let text = ''
-    try { text = readFileSync(join(DATA, 'usage_log.jsonl'), 'utf8') } catch { return undefined }
-    const sum = text.split('\n').filter(l => l.includes(`"job_id":"${id}"`)).reduce((n, l) => { try { return n + (JSON.parse(l).delta ?? 0) } catch { return n } }, 0)
-    return sum > 0 ? Math.max(1, Math.round(sum * 100)) : undefined
+    try { text = readFileSync(join(DATA, 'usage_log.jsonl'), 'utf8') } catch { return sums }
+    for (const l of text.split('\n')) {
+      try { const r = JSON.parse(l); if (r.job_id && r.delta > 0 && (!kinds || kinds.includes(r.kind))) sums[r.job_id] = (sums[r.job_id] ?? 0) + r.delta } catch { /* skip */ }
+    }
+    return sums
   }
+  const usedBy = (id: string) => { const sum = usedByJob()[id]; return sum ? Math.max(1, Math.round(sum * 100)) : undefined }
+  const insights = (weekly = false) => insightsPage(allJobs(), readOutcomes(), loadSettings().apply.min_match_score, Date.now(), weekly, usedByJob(['job', 'revise']))
   // A job that ended at KIT_READY: send its kit once (files first, then the steps and answers).
   const kitSent = new Set<string>()
   async function sendKitFiles(id: string) {
@@ -962,7 +968,7 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
       return { ...pg, rows: [...pg.rows, [{ text: i > 0 ? '◀' : ' ', data: i > 0 ? `Q:${i - 1}` : 'noop' }, { text: `${i + 1} of ${list.length}`, data: 'noop' }, { text: i < list.length - 1 ? '▶' : ' ', data: i < list.length - 1 ? `Q:${i + 1}` : 'noop' }], nav()] }
     }
     if (data === 'm:help') return P.helpPage()
-    if (data === 'I:0') return insightsPage(allJobs(), readOutcomes(), s.apply.min_match_score)
+    if (data === 'I:0') return insights()
     if ((m = /^sg:ms:(\d{1,3})$/.exec(data))) {
       const n = parseInt(m[1], 10)
       if (n > 100) return 'That is not a score.'
