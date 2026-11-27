@@ -49,7 +49,7 @@ export const SOURCES = { companies: 'Companies I watch', linkedin: 'LinkedIn', i
 type Source = keyof typeof SOURCES
 
 export const DEFAULT_SETTINGS = {
-  version: 2,
+  version: 4,
   paired_user_id: null as number | null,
   onboarded: false,
   agent_on: true,
@@ -94,13 +94,13 @@ export function loadSettings(): Settings {
   const raw = readJson<Record<string, unknown>>(SETTINGS_FILE, {})
   const f = raw.filters as Record<string, unknown> | undefined
   if (isObj(f) && typeof f.posted_within_days === 'number') { f.posted_within_hours ??= f.posted_within_days * 24; delete f.posted_within_days } // older files counted days
-  return deepMerge(DEFAULT_SETTINGS, raw)
+  return deepMerge(DEFAULT_SETTINGS, { ...raw, version: DEFAULT_SETTINGS.version }) // a 2.x file only lacks keys the defaults fill
 }
 
 const str = (max = 100) => z.string().trim().min(1).max(max)
 const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/)
 export const SettingsSchema = z.object({
-  version: z.literal(2),
+  version: z.literal(4),
   paired_user_id: z.number().int().nullable(),
   onboarded: z.boolean(),
   agent_on: z.boolean(),

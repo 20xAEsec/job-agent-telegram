@@ -77,7 +77,7 @@ describe('settings catalog', () => {
   test('settings files from before related titles still load, and the list is capped', () => {
     writeJson(SETTINGS_FILE, { version: 2, filters: { titles: ['X'] }, discovery: { enabled: true } })
     const s = loadSettings()
-    expect([s.filters.related_titles, s.discovery.related_jobs]).toEqual([[], 'few'])
+    expect([s.version, s.filters.related_titles, s.discovery.related_jobs]).toEqual([4, [], 'few'])
     expect(SettingsSchema.safeParse(s).success).toBe(true)
     expect(SettingsSchema.safeParse({ ...s, filters: { ...s.filters, related_titles: Array.from({ length: 16 }, (_, i) => `T${i}`) } }).success).toBe(false)
   })

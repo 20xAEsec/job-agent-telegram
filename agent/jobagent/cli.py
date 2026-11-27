@@ -3,7 +3,7 @@ import json
 import sys
 from pathlib import Path
 
-from . import accounts, bench, canary, check, errlog, feedback, fetch, fill, formplan, llm, log, maintain, pair, profile, repair, resolve, resume, review, safety, store, submit, tailor
+from . import accounts, bench, canary, check, errlog, feedback, fetch, fill, formplan, llm, log, maintain, migrate, pair, profile, repair, resolve, resume, review, safety, store, submit, tailor
 from .discover import ats_api, boards
 from .docs.plan import DocError
 from .paths import default_data_dir
@@ -51,6 +51,8 @@ def _parser() -> argparse.ArgumentParser:
     ll.add_argument("--extra", default="{}", help="a small JSON object (tier, errors, the change request)")
     sub.add_parser("plan").add_subparsers(dest="sub", required=True).add_parser("build").add_argument("job_id")
     sub.add_parser("maintain")  # the daily upkeep (app only, denied to Claude): prune old job files, expire unanswered auto-search jobs
+    # the user's one-off upgrade (denied to Claude): copy a 2.x data folder into this one; the old folder is only read
+    sub.add_parser("migrate").add_argument("--from", dest="src", required=True, help="the old JobAgent's data folder")
     bn = sub.add_parser("bench").add_subparsers(dest="sub", required=True).add_parser("screen")  # the maintainer's replay: counts only
     bn.add_argument("--data", required=True, help="a data folder to read (never written)")
     bn.add_argument("--llm", action="store_true", help="also run the quick sort (uses Claude)")
@@ -159,6 +161,8 @@ def _dispatch(a) -> dict:
         return bench.screen(Path(a.data), a.llm)
     if a.cmd == "maintain":
         return maintain.run(d)
+    if a.cmd == "migrate":
+        return migrate.run(d, Path(a.src))
     if a.cmd == "repair":
         return repair.run(d, a.op, a.repair_id)
     if a.cmd == "login":

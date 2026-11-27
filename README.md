@@ -42,6 +42,18 @@ Keep that window open (minimizing is fine). Closing it turns JobAgent off.
 On Windows you can instead run it in the background (starts at login, no window, restarts if it crashes): `scripts\background.ps1` (turn off with `-Remove`, check with `-Status`).
 Add `-Practice` (Windows) or `--practice` (Mac/Linux) to lock practice mode on.
 
+## Upgrading from 2.x
+
+Your jobs, resumes, saved answers, settings and Telegram connection come with you. The old folder is only read, never changed.
+
+1. **Stop JobAgent 2:** close its window, or run `scripts\background.ps1 -Remove` in its folder. Never run both at once: they use the same Telegram bot.
+2. **Download the new version** into a new folder next to the old one.
+3. **Copy your data over, before running setup.** In a terminal in the new folder (`..\job-agent-v2` is the old one):
+   `uv run --project agent jobagent migrate --from ..\job-agent-v2\data`
+4. **Run the setup** (`scripts\setup.ps1`, or `scripts/setup.sh`). It finds your bot and your connection, installs what is missing and starts JobAgent.
+
+Step 3 comes first because it only works into a folder with no jobs yet. Afterwards, check **⚙️ Settings → What I look for → Country**. LinkedIn and Indeed passwords stay in your computer's password vault; **🔑 Job site logins** says "not checked yet" until you tap **Check now**.
+
 ## Using it
 
 | You want to… | Do this |
