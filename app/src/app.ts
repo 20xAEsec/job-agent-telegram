@@ -37,6 +37,7 @@ const DAILY_FILE = join(DATA, 'daily.json') // when the daily digest last went o
 const EXPECT_KEY = 'salary_expectation', EXPECT_Q = 'What are your salary expectations? (expected yearly salary)' // v4 AP4, a private saved answer
 const UPKEEP_FILE = join(DATA, 'upkeep.json') // the last `jobagent maintain` counts
 const UPDATE_FILE = join(DATA, 'update.json') // written just before exiting 75 for an update; read once after the restart
+const WELCOME_FILE = join(DATA, 'welcome4.json') // the one-time "what changed in 4.0" message went out (or was never due)
 const TIP_FILE = join(DATA, 'suggestion.json')
 // One suggestion on Home from the user's own decisions, until they apply or dismiss it.
 const tipFor = (s: Settings) => {
@@ -241,6 +242,15 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
     const now = await git('rev-parse', 'HEAD').catch(() => null)
     if (now && now !== u.from) { updates = 0; refresh(); return void sendTo(`${heading('✅', 'JobAgent is updated')}\n${note('Everything picks up where it was.')}`, [[{ text: '🏠 Home', data: 'm:home' }]], { loud: false }).catch(() => {}) }
     void sendTo(`${heading('⚠️', "The update didn't go through")}\nI started the version you had, so nothing changed. The JobAgent window on your computer shows why.\n${note('Try again later from Health.')}`, [[{ text: '🩺 Health', data: 'm:health' }]], { kind: 'health' }).catch(() => {})
+  }
+  // v3 V3: once, tell a user who upgraded what changed. A new install is not set up at its first start, so it never sees this.
+  async function firstStart() {
+    if (existsSync(WELCOME_FILE)) return
+    const s = loadSettings()
+    if (s.paired_user_id != null && s.onboarded) {
+      await sendTo(`${heading('✨', 'JobAgent 4.0')}\nI now drop jobs you can't take before spending your Claude limit, and the Filtered out list shows why.\n${note('To let me work on my own: Settings → How I apply → Autopilot.')}`, [[{ text: '🏠 Home', data: 'm:home' }]], { loud: false })
+    }
+    writeJson(WELCOME_FILE, { at: Date.now() }) // after the send: a failed one is tried again at the next start
   }
   async function checkUpdate() {
     try {
@@ -1818,6 +1828,7 @@ ${note(`No notification sounds until ${clock(snoozeUntil)}. Work continues.`)}`,
             refresh()
             void review.recover()
             void afterUpdate().catch(e => logError('after update', e))
+            void firstStart().catch(e => logError('first start', e))
             setInterval(discoveryCheck, 60_000).unref()
             setInterval(refresh, 30_000).unref() // relative times on Home and the status bar
             setTimeout(() => void checkHealth(), 10_000).unref()
@@ -1842,5 +1853,5 @@ ${note(`No notification sounds until ${clock(snoozeUntil)}. Work continues.`)}`,
     }
   }
 
-  return { bot, agent, cards, review, start, handleTool, route, capture, refresh, askForm, upkeep, afterUpdate, stop: () => { bridge.stop(); return bot.stop() }, _bridge: bridge }
+  return { bot, agent, cards, review, start, handleTool, route, capture, refresh, askForm, upkeep, afterUpdate, firstStart, stop: () => { bridge.stop(); return bot.stop() }, _bridge: bridge }
 }

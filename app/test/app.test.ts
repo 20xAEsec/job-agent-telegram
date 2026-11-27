@@ -191,6 +191,29 @@ describe('v4 daily upkeep', () => {
   })
 })
 
+describe('v3 V3: the first-start note', () => {
+  test('an upgraded user gets it once, silently, with Home; a new install never does', async () => {
+    const FLAG = join(DATA, 'welcome4.json')
+    rmSync(FLAG, { force: true })
+    const { app, calls } = makeApp()
+    const notes = () => calls.filter(c => c.method === 'sendMessage' && String(c.payload.text).includes('JobAgent 4.0'))
+    writeJson(join(DATA, 'settings.json'), { ...DEFAULT_SETTINGS, version: 2, paired_user_id: 42, onboarded: true })
+    await app.firstStart()
+    await app.firstStart()
+    expect(notes().length).toBe(1)
+    expect(notes()[0].payload.disable_notification).toBe(true)
+    expect(notes()[0].payload.text).toContain('Filtered out')
+    expect(notes()[0].payload.reply_markup.inline_keyboard.flat().map((b: any) => b.callback_data)).toEqual(['m:home'])
+    rmSync(FLAG)
+    writeJson(join(DATA, 'settings.json'), { ...DEFAULT_SETTINGS, paired_user_id: null, onboarded: false })
+    await app.firstStart()
+    writeJson(join(DATA, 'settings.json'), { ...DEFAULT_SETTINGS, paired_user_id: 42, onboarded: true }) // setup finished later
+    await app.firstStart()
+    expect(notes().length).toBe(1)
+    await app.stop()
+  })
+})
+
 describe('v4 one-tap update', () => {
   const UPDATE = join(DATA, 'update.json')
   const ctx: any = { chat: { id: 42 }, callbackQuery: { message: { message_id: 9 } } }
