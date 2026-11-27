@@ -322,7 +322,7 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
   function syncQueued() {
     const s = loadSettings()
     for (const t of agent.queued('work')) {
-      if (t.kind === 'discover' || t.payload.parent) continue // background work, or a line on its search card
+      if (t.kind === 'discover' || t.payload.parent || bankTask(t)) continue // background work, or a line on its search card
       cards.update(t.id, c => { c.position = agent.position(t.id); c.state = !s.agent_on ? 'paused' : t.not_before && t.not_before > Date.now() && limitUntil > Date.now() ? 'waiting' : 'queued' }, () => newCard(t, t.reply_to))
     }
   }
@@ -332,6 +332,12 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
     syncQueued()
     refresh()
     return r
+  }
+  // v3 P1: index the resume lines as soon as a resume is added, so tailoring never has to. One waiting task is enough; a
+  // running one may have read the old set of resumes, so another still queues behind it.
+  const bankTask = (t: Task) => t.kind === 'resume' && !!t.payload.bank
+  const buildBank = () => {
+    if (loadSettings().apply.tailoring === 'ats' && !agent.queued('work').some(bankTask)) startTask({ kind: 'resume', title: 'Indexing your resume lines', payload: { bank: true } }, false)
   }
   const startJobUrl = (url: string, reply_to?: number) => startTask({ kind: 'job', title: hostTitle(url), payload: { url }, reply_to })
   const hostTitle = (u: string) => { try { return `New job · ${new URL(u).hostname.replace(/^www\./, '')}` } catch { return 'New job' } }
@@ -454,7 +460,8 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
       if (!l && typingTimer) { clearInterval(typingTimer); typingTimer = null }
       return
     }
-    if (l?.task.kind === 'resume') {
+    if (l && bankTask(l.task)) { /* background: no card, nothing on the setup screen */ }
+    else if (l?.task.kind === 'resume') {
       const ob = OB.loadOb()
       if (ob.step === 'reading' && ob.doing !== l.doing) { ob.doing = l.doing; OB.saveOb(ob); void renderOb(ob) }
     } else if (l?.task.payload.parent) {
@@ -479,6 +486,7 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
     logUsage(t)
     if (out.kind === 'limit') {
       limitUntil = out.resets_at ?? Date.now() + 3600_000
+      if (bankTask(t)) return refresh()
       if (t.kind === 'resume') { const ob = OB.loadOb(); ob.doing = `Claude's usage limit is reached. I'll continue at ${clock(limitUntil)}.`; OB.saveOb(ob); void renderOb(ob) }
       else if (t.kind !== 'chat') cards.update(String(t.payload.parent ?? t.id), c => { c.state = 'waiting'; c.wait_until = limitUntil })
       else await sendTo(`${heading('⏳', 'Claude usage limit reached')}\n${note(`I'll answer at ${clock(limitUntil)}, automatically.`)}`)
@@ -494,6 +502,7 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
       return refresh()
     }
     spoke.delete(t.id)
+    if (bankTask(t)) return refresh() // if it failed, tailoring builds the bank itself
     if (out.kind === 'retrying') { cards.update(t.id, c => { c.state = 'queued'; c.note = out.text }); syncQueued(); return refresh() }
     if (t.kind === 'repair') return finishRepair(t, out)
     if (t.kind === 'resume') return finishResume(out)
@@ -763,6 +772,7 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
   async function finishResume(out: Outcome) {
     const ob = OB.loadOb()
     if (out.kind === 'done' && ob.summary) {
+      buildBank()
       ob.step = 'profile'; ob.doing = null
       OB.saveOb(ob)
       await renderOb(ob)
@@ -923,6 +933,7 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
   }
   async function addVersion(path: string): Promise<string | null> {
     const r = await run(['resume', 'import', path, '--version'])
+    if (r.ok) buildBank()
     return r.ok ? null : r.code === 'no_text' ? "I couldn't find any text in it (is it a scan?). Send a text-based PDF or a .docx." : r.code === 'too_many' ? 'You have the most versions I keep. Remove one first.' : 'I couldn\'t open that file. Try saving it again as PDF.'
   }
   let loginOpen = false // one login window at a time: they share JobAgent's browser profile

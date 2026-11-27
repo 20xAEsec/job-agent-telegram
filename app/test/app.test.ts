@@ -5,7 +5,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { claims, createApp, discoverTitles, extractUrls, isAllowed, tryPair } from '../src/app'
 import * as F from '../src/forms'
-import { code } from '../src/jobs'
+import { code, jobDir } from '../src/jobs'
 import * as OB from '../src/onboarding'
 import { DATA, DEFAULT_SETTINGS, PAIR_FILE, loadSettings, logError, readJson, writeJson } from '../src/state'
 
@@ -106,6 +106,39 @@ describe('tools Claude can call', () => {
     expect(card).toContain('82/100')
     expect(card).toContain('Checking how well it fits')
     ;(hold as (() => void) | null)?.()
+    await app.stop()
+  }, 10_000)
+})
+
+describe('v3 P1: the resume bank is built when a resume is added', () => {
+  test('after a resume import the first tailoring makes one call', async () => {
+    const ID = 'greenhouse-acme-2', input = join(DATA, 'run', 'llm', 'bank.in.json')
+    writeJson(input, {})
+    writeJson(join(jobDir(ID), 'analysis.json'), { supported: true, match: { score: 90, dealbreakers: [] }, questions: [] })
+    rmSync(join(jobDir(ID), 'resume.pdf'), { force: true })
+    const asked: string[] = []
+    let bank = 'missing', status = 'READY'
+    const { app, calls } = makeApp(a => {
+      const [c, s, n] = a
+      if (c === 'llm') {
+        if (s === 'input') { asked.push(n); return { ok: true, file: input } }
+        if (n === 'resume_bank') bank = 'ready'
+        return n === 'resume_profile' ? { ok: true, summary: { name: 'Jane', headline: 'Data Analyst', level: 'mid', skills: ['SQL'], suggested_titles: ['Data Analyst'] } } : { ok: true }
+      }
+      if (c === 'resume' && s === 'bank') return { ok: true, status: bank }
+      if (c === 'job' && s === 'get') return { ok: true, status, files: [], company: 'Acme', role: 'Data Analyst', url: 'https://x' }
+      if (c === 'job' && s === 'set-status') { status = a[3]; return { ok: true } }
+      if (c === 'plan') return { ok: false, code: 'stop_here' } // far enough: the resume is tailored
+      return undefined
+    })
+    app.agent.enqueue({ kind: 'resume', title: 'Reading your resume', payload: { path: 'x.pdf' } })
+    await wait(2000)
+    expect(asked).toEqual(['resume_profile', 'resume_bank'])
+    expect(calls.some(c => String(c.payload.text).includes('Indexing your resume lines'))).toBe(false) // silent: no card
+    asked.length = 0
+    app.agent.enqueue({ kind: 'job', job_id: ID, title: 'x', payload: {} })
+    await wait(2000)
+    expect(asked.filter(n => n !== 'cover_letter')).toEqual(['tailor_ats'])
     await app.stop()
   }, 10_000)
 })
