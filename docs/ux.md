@@ -26,6 +26,11 @@ Every screen is built from `app/src/kit.ts`. Use its helpers (`heading`, `note`,
 - Typed text has **one listener**: the screen the user opened last (`pending` in `app.ts`). A message the app sends on its own never starts listening (the emailed verification code is the one exception). Questions are answered only through ❓ Open Questions.
 - Pictures (a resume preview, the filled form) go before the card as a silent album. Files go behind a `📎 Files` button.
 
+## Skipped and filtered out
+
+- **After ⏭ Skip** the review card becomes "Skipped" with one row of reasons (Pay, Location, Kind of work, Company, Level, Other). Answering is optional: the usual buttons stay below.
+- **🔎 Filtered out** (`filteredPage`): what auto-search skipped before a full read, grouped by reason with counts, then the 10 newest, each with "👀 Look at it anyway", which reads it like a link the user sent.
+
 ## Home
 
 Home's first button is `nextAction()` (`pages.ts`): finish setup → review → apply yourself → answer questions → fix stuck jobs → search now or turn on Auto-search.
