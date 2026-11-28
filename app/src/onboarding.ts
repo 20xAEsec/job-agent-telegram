@@ -60,7 +60,7 @@ export const START_OPTS = ['Immediately', '2 weeks', '1 month']
 export const keyFor = (country: string) => `work_auth_${country.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 28) || 'home'}`
 
 export const PROFILE_FIELDS: [key: string, label: string][] = [
-  ['full_name', 'Name'], ['email', 'Email'], ['phone', 'Phone'], ['location', 'Location'], ['linkedin', 'LinkedIn'], ['portfolio', 'Website'],
+  ['full_name', 'Name'], ['email', 'Email'], ['phone', 'Phone'], ['location', 'Location'], ['linkedin', 'LinkedIn'], ['github', 'GitHub'], ['portfolio', 'Website'],
 ]
 
 export function obPage(o: Ob, s: Settings, fields: Record<string, string> = {}): Page {

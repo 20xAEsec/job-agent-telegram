@@ -29,7 +29,7 @@ def next_allowed(d: Path, job_id: str, now: datetime) -> datetime | None:
     DRY_RUN_DONE never counts. Pure over files + `now`, so a restart cannot lose it."""
     hours = ((_json(d / "settings.json") or {}).get("apply") or {}).get("company_cooldown_hours", 3)
     key, until = company_key(d, job_id), None
-    for x in store.list_jobs(d):
+    for x in store.list_jobs(d, deleted=True):
         if x["job_id"] == job_id or x["status"] not in ("SUBMITTING", "SUBMITTED") or company_key(d, x["job_id"]) != key:
             continue
         t = now + timedelta(minutes=5) if x["status"] == "SUBMITTING" else datetime.fromisoformat(x["updated_at"]) + timedelta(hours=hours)

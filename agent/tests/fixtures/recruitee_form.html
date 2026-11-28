@@ -1,0 +1,40 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Acme - Data Analyst - Application</title>
+<style>.vh{position:absolute;opacity:0;width:1px;height:1px} label{display:block}</style></head>
+<body>
+<!-- Structure of a Recruitee application page (<co>.recruitee.com/o/<slug>/c/new), hand-built from its live markup (not a byte-for-byte
+     recording). Sections are fieldsets that hold several questions; a choice question is its own fieldset with a legend. The live page also
+     shows an hCaptcha box under the form (tests add it). Submit and Enter spies must never fire. -->
+<form id="offer-application-form" novalidate>
+  <section><fieldset><legend>My information</legend><p>Fill out the information below</p>
+    <div><label for="n1">Full name<span aria-hidden="true">&nbsp;<span>*</span></span></label><input type="text" id="n1" required maxlength="255" name="candidate.name"></div>
+    <div><label for="e1">Email address<span aria-hidden="true">&nbsp;<span>*</span></span></label><input type="email" id="e1" required maxlength="255" name="candidate.email"></div>
+    <div><label for="p1">Phone number<span aria-hidden="true">&nbsp;<span>*</span></span></label>
+      <div><button type="button" role="combobox" aria-haspopup="listbox" id="cc1" aria-label="Select country calling code: Netherlands"><span>Netherlands</span></button>
+        <div role="listbox" id="cc1-menu"></div></div>
+      <input type="tel" required name="candidate.phone" id="p1" value="+31">
+      <fieldset><div><input type="checkbox" id="candidateTextingConsent" name="candidate.textingConsent"><label for="candidateTextingConsent"><span>I consent to be contacted via text messages.</span></label></div></fieldset></div>
+  </fieldset></section>
+  <section><label for="cv1">CV or resume<span aria-hidden="true">&nbsp;<span>*</span></span></label>
+    <input type="file" required name="candidate.cv" id="cv1"></section>
+  <section><fieldset><legend>Questions</legend>
+    <div><input type="hidden" name="candidate.openQuestionAnswers.101.openQuestionId" value="101">
+      <fieldset><legend>Do you have the right to work in the country where this role is based?<span aria-hidden="true">&nbsp;<span>*</span></span></legend>
+        <div><input class="vh" required type="radio" id="r1" name="candidate.openQuestionAnswers.101.flag" value="true"><label for="r1"><span>Yes</span></label></div>
+        <div><input class="vh" required type="radio" id="r2" name="candidate.openQuestionAnswers.101.flag" value="false"><label for="r2"><span>No</span></label></div></fieldset></div>
+    <div><input type="hidden" name="candidate.openQuestionAnswers.102.openQuestionId" value="102">
+      <label for="t1">Please state your desired annual salary (gross)<span aria-hidden="true">&nbsp;<span>*</span></span></label>
+      <input type="text" id="t1" required maxlength="40" name="candidate.openQuestionAnswers.102.content"></div>
+    <section><fieldset><legend>What is your preferred work location?<span aria-hidden="true">&nbsp;<span>*</span></span></legend>
+      <div><input required type="checkbox" id="l1" name="candidate.locations.value" value="1"><label for="l1"><span>Amsterdam</span></label></div>
+      <div><input required type="checkbox" id="l2" name="candidate.locations.value" value="2"><label for="l2"><span>Cologne</span></label></div></fieldset></section>
+  </fieldset></section>
+  <div id="captcha-slot"></div>
+  <div><button type="submit" data-testid="submit-application-form-button">Send</button></div>
+</form>
+<script>
+  const spy = k => { window['__' + k] = (window['__' + k] || 0) + 1; fetch('/__spy?k=' + k) }
+  document.querySelector('form').addEventListener('submit', e => { e.preventDefault(); spy('submitted') })
+  document.addEventListener('keydown', e => { if (e.key === 'Enter') spy('enter') })
+</script>
+</body></html>

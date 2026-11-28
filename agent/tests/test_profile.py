@@ -91,6 +91,27 @@ def test_write_draft_keeps_existing_saved_answers(tmp_path):
         profile.write_draft(tmp_path, bad)
 
 
+def test_new_resume_without_links_keeps_the_ones_the_user_gave(tmp_path):
+    write(tmp_path, SAMPLE)
+    profile.set_field(tmp_path, "Contact", "github", "https://github.com/janedoe")
+    draft = tmp_path / "draft.md"
+    draft.write_text("# Profile\n## Contact\n- full_name: New Name\n- github: \n## Skills\n- languages: Python", encoding="utf-8")
+    profile.write_draft(tmp_path, draft)
+    assert profile.show(tmp_path, "Contact")["fields"]["github"] == "https://github.com/janedoe"
+
+
+def test_new_resume_keeps_fact_bank_and_confirmed_skills(tmp_path):
+    write(tmp_path, SAMPLE)
+    profile.set_field(tmp_path, "Confirmed skills", "confirmed", "Looker")
+    profile.set_field(tmp_path, "Achievements", "a1", "At Acme I built " + "x" * 400)
+    draft = tmp_path / "draft.md"
+    draft.write_text("# Profile\n## Contact\n- full_name: New Name", encoding="utf-8")
+    profile.write_draft(tmp_path, draft)
+    assert profile.show(tmp_path, "Confirmed skills")["fields"]["confirmed"] == "Looker"
+    assert len(profile.show(tmp_path, "Achievements")["fields"]["a1"]) == 416
+    assert profile.answer_get(tmp_path, "a_key")["answer"]["answer"] == "No"
+
+
 def test_resume_import_docx_and_pdf(tmp_path):
     d = tmp_path / "data"
     src = tmp_path / "r.docx"

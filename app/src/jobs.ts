@@ -1,6 +1,6 @@
 // Read-only view of data/jobs/<id>/ for the screens (fast: no Python). All writes go through `jobagent`.
 import { createHash } from 'crypto'
-import { appendFileSync, mkdirSync, readdirSync, readFileSync, statSync, watch } from 'fs'
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, watch } from 'fs'
 import { join } from 'path'
 import { DATA, readJson } from './state'
 
@@ -15,6 +15,7 @@ export type Job = {
   url: string; source: string; company: string; role: string; location: string; salary: string
   ats?: string // the form type (meta.json): greenhouse, lever, ashby, generic
   score: number | null; reasons: string[]; dealbreakers: string[]
+  deleted?: boolean // sent, then deleted by the user: only the send limits still see it
   breakdown: Breakdown; must_haves: MustHave[]
 }
 export type Breakdown = Partial<Record<'title' | 'seniority' | 'skills' | 'location' | 'pay', number>>
@@ -71,7 +72,7 @@ function watchJobs() {
   if (watching) return
   try {
     mkdirSync(join(DATA, 'jobs'), { recursive: true })
-    watch(join(DATA, 'jobs'), { recursive: true }, (_e, f) => { if (f) dirty.add(String(f).split(/[\/]/)[0]) }).unref?.()
+    watch(join(DATA, 'jobs'), { recursive: true }, (_e, f) => { if (f) dirty.add(String(f).split(/[\\/]/)[0]) }).unref?.()
     watching = true
   } catch { /* no watcher: readJob checks file times every time */ }
 }
@@ -99,17 +100,18 @@ function loadJob(id: string): Job | null {
     id, status: st.status, updated_at: st.updated_at ?? '', history: Array.isArray(st.history) ? st.history : [],
     url: s(m.canonical_url) || s(m.url), source: s(m.source), ats: s(m.ats) || 'generic', company: s(a.company), role: s(a.role), location: s(a.location), salary: s(a.salary),
     score: typeof match.score === 'number' ? match.score : null,
+    ...(m.deleted_at ? { deleted: true } : {}),
     reasons: Array.isArray(match.reasons) ? match.reasons.map(String).slice(0, 4) : [],
     dealbreakers: Array.isArray(match.dealbreakers) ? match.dealbreakers.map(String).slice(0, 3) : [],
     breakdown: breakdownOf(match), must_haves: mustHavesOf(match),
   }
 }
 
-export function allJobs(now = Date.now()): Job[] {
+export function allJobs(now = Date.now(), withDeleted = false): Job[] {
   watchJobs()
   const trusted = watching && now - verifiedAt < 60_000
   if (!trusted) verifiedAt = now
-  return jobIds().map(id => readJob(id, trusted)).filter((j): j is Job => !!j).sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+  return jobIds().map(id => readJob(id, trusted)).filter((j): j is Job => !!j && (withDeleted || !j.deleted)).sort((a, b) => b.updated_at.localeCompare(a.updated_at))
 }
 const codes = new Map<string, string>() // id -> code: sha1 once per id, not once per id per tap
 export const findJob = (c: string) => jobIds().find(i => { let k = codes.get(i); if (!k) codes.set(i, (k = code(i))); return k === c })
@@ -118,6 +120,10 @@ export const jobTitle = (j: Pick<Job, 'company' | 'role' | 'url' | 'id'>) =>
   j.company || j.role ? `${j.company || 'Unknown company'} · ${j.role || 'Unknown role'}` : hostOf(j.url) || j.id
 export const hostOf = (u: string) => { try { return new URL(u).hostname.replace(/^www\./, '') } catch { return '' } }
 export const lastDetail = (j: Job) => j.history.at(-1)?.detail ?? ''
+// A stuck job whose form answers are ready can be reopened filled in (`jobagent handoff`). Not when it may already have
+// gone out: sending it again from that window would apply twice.
+export const canOpenForm = (id: string, status: string, detail: string) =>
+  (status === 'NEEDS_HUMAN' || status === 'FAILED') && !/may or may not/i.test(detail) && existsSync(join(jobDir(id), 'plan.json'))
 
 // What each status means to a person, and whether it needs them.
 export const STATUS: Record<string, { emoji: string; text: string; needsYou?: boolean; done?: boolean }> = {

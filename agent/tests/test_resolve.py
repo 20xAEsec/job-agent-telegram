@@ -81,6 +81,9 @@ def test_match_is_conservative():
     assert resolve.match([c("Data Analyst", "Austin"), c("Data Analyst", "Berlin")], "Data Analyst") is None  # ambiguous: no guess
     assert resolve.match([c("Data Analyst", "Austin"), c("Data Analyst", "Berlin")], "Data Analyst", "Berlin, Germany")["location"] == "Berlin"
     assert resolve.match([c("Chef", "Austin")], "Data Analyst") is None
+    us, mx = c("Data Analyst", "Remote - US: Select locations"), c("Data Analyst", "Remote - Mexico")
+    assert resolve.match([mx, us], "Data Analyst", "Remote, USA") == us
+    assert resolve.match([mx], "Data Analyst", "Remote, USA") is None  # the only posting is for another country
     assert resolve.slugs_for("Acme Robotics, Inc.") == ["acmerobotics", "acme-robotics"] and resolve.slugs_for("The Co") == []
 
 

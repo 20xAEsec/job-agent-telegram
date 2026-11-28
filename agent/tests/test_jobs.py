@@ -143,6 +143,33 @@ def test_fields_from_api():
     assert f["gender"]["section"] == "compliance" and f["resume"]["type"] == "file" and f["question_103"]["type"] == "textarea"
 
 
+# A Greenhouse form with what the API never lists: an Employment section whose end date greys out when "Current role" is
+# ticked, a searchable dropdown, and an upload's own buttons (which are not a question).
+PAGE_ONLY = """<!doctype html><html><body><form id="application-form">
+  <div class="field-wrapper"><label for="first_name">First Name*</label><input id="first_name" type="text"></div>
+  <div class="file-upload"><button type="button">Attach</button><button type="button">Dropbox</button><input id="resume" type="file"></div>
+  <div class="employment-form"><div class="header-row">Employment</div>
+    <label for="title-0">Title*</label><input id="title-0" type="text" required>
+    <label for="end-date-year-0">End date year*</label><input id="end-date-year-0" type="text" required>
+    <label for="current-role-0_1">Current role</label><input id="current-role-0_1" name="current-role-0" type="checkbox"
+      onchange="document.getElementById('end-date-year-0').disabled = this.checked"></div>
+  <div class="select__control"><label for="degree--0">Degree*</label><input id="degree--0" role="combobox" type="text" required
+    onclick="const m = document.createElement('div'); m.id = 'menu'; m.innerHTML = '<div role=option>Bachelor</div><div role=option>Master</div>'; document.body.appendChild(m)"
+    onkeydown="if (event.key === 'Escape') document.getElementById('menu')?.remove()"></div>
+</form></body></html>"""
+
+
+def test_inspect_adds_what_only_the_page_shows(tmp_path):
+    api = [{"fid": "first_name", "label": "First Name", "type": "text", "required": True, "options": [], "selector": '[id="first_name"]', "section": "main"},
+           {"fid": "resume", "label": "Resume/CV", "type": "file", "required": True, "options": [], "selector": '[id="resume"]', "section": "main"}]
+    serve = lambda c: c.route(lambda u: "embed/job_app" in u, lambda r: r.fulfill(status=200, content_type="text/html", body=PAGE_ONLY))  # noqa: E731
+    got = {f["fid"]: f for f in Greenhouse().page_fields({"board": "acme", "posting_id": "123", "url": URL}, api, tmp_path, serve)}
+    assert set(got) == {"title-0", "end-date-year-0", "current-role-0", "degree--0"}  # nothing the API had, no upload buttons
+    assert got["title-0"]["label"] == "Employment: Title" and got["title-0"]["required"]
+    assert not got["end-date-year-0"]["required"] and "Current role" in got["end-date-year-0"]["label"]  # greyed out by the tick
+    assert got["degree--0"]["options"] == ["Bachelor", "Master"] and all("filled" not in f and "group" not in f for f in got.values())
+
+
 def test_location_question_maps_to_the_autocomplete_combobox():
     api = {"location_questions": [
         {"label": "Longitude", "required": True, "fields": [{"name": "longitude", "type": "input_hidden", "values": []}]},
@@ -159,6 +186,7 @@ def _fake_get(monkeypatch, status=200, body=None):
 
 def test_fetch_wraps_posting_as_untrusted_and_inspect_writes_fields(tmp_path, monkeypatch):
     _fake_get(monkeypatch)
+    monkeypatch.setattr(Greenhouse, "page_fields", lambda *a, **k: None)  # no live page here: the API alone
     jid = store.new_job(tmp_path, URL)["job_id"]
     r = fetch.fetch(tmp_path, jid)
     assert r["ok"] and store.status(tmp_path, jid)["status"] == "FETCHED"
@@ -453,3 +481,24 @@ def test_concurrent_writes_lose_no_rows(tmp_path):
     assert sorted(r["job_id"] for r in log.export(tmp_path)["rows"]) == sorted(ids)
     assert all(store.status(tmp_path, i)["status"] == "FETCHED" for i in ids)
     assert not list(tmp_path.rglob("*.lock")) and not list(tmp_path.rglob("*.tmp"))
+
+
+def test_delete_removes_a_job_but_remembers_one_that_was_sent(tmp_path):
+    from jobagent.discover import boards
+
+    jid = mkjob(tmp_path)  # READY, never sent
+    assert store.delete_job(tmp_path, jid) == {"ok": True, "job_id": jid, "sent": False}
+    assert not store.jdir(tmp_path, jid).exists() and log.export(tmp_path)["rows"] == [] and jid in boards.seen(tmp_path)
+    assert store.new_job(tmp_path, URL)["duplicate"] is False  # the user's own link starts fresh
+    with pytest.raises(store.JobError):
+        store.delete_job(tmp_path, "greenhouse-acme-999")
+
+    mkjob(tmp_path / "s", "APPROVED")
+    with pytest.raises(store.JobError) as e:
+        store.delete_job(tmp_path / "s", jid)
+    assert e.value.code == "sending"
+    advance(tmp_path / "s", jid, "SUBMITTING", "SUBMITTED")
+    assert store.delete_job(tmp_path / "s", jid)["sent"] is True
+    assert sorted(p.name for p in store.jdir(tmp_path / "s", jid).iterdir()) == ["analysis.json", "meta.json", "status.json"]  # no plan, resume or screenshots
+    assert store.list_jobs(tmp_path / "s") == [] and len(store.list_jobs(tmp_path / "s", deleted=True)) == 1
+    assert log.export(tmp_path / "s")["rows"] == [] and store.new_job(tmp_path / "s", URL)["duplicate"] is True  # never sent twice

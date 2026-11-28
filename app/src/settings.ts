@@ -163,8 +163,9 @@ export const autopilotText = (s: Settings) => [
   note(`Odd forms, unusual questions, private answers and your first 3 real applications on each form type still wait for you. At most ${s.apply.daily_max} a day.${practiceOn(s) ? ' Practice mode stays on: nothing is really sent until you turn it off.' : ''}`),
   '', '👀 <b>I review each one</b>: nothing is sent until you tap Approve.',
 ].join('\n')
+// Tapping the ticked Autopilot turns it off. "I review each one" is ticked only when nothing is sent on its own.
 export const autopilotRows = (s: Settings, prefix: string): Btn[][] => [
-  [{ text: `${autopilotOn(s) ? '✅ ' : ''}🤖 Autopilot`, data: `${prefix}:on`, style: 'success' }, { text: `${autopilotOn(s) ? '' : '✅ '}👀 I review each one`, data: `${prefix}:off` }],
+  [{ text: `${autopilotOn(s) ? '✅ ' : ''}🤖 Autopilot`, data: `${prefix}:${autopilotOn(s) ? 'off' : 'on'}`, style: 'success' }, { text: `${s.apply.mode === 'auto' ? '' : '✅ '}👀 I review each one`, data: `${prefix}:off` }],
 ]
 
 export function categoryPage(key: string, s: Settings): Page {

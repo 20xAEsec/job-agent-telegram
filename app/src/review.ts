@@ -3,7 +3,7 @@
 import { InputFile, type Api } from 'grammy'
 import { existsSync, rmSync } from 'fs'
 import { basename, join } from 'path'
-import { allJobs, code, findJob, jobDir, jobIds, JOB_RE, logDecision } from './jobs'
+import { allJobs, canOpenForm, code, findJob, jobDir, jobIds, JOB_RE, logDecision } from './jobs'
 import { readSection } from './profile'
 import { breakdownLines, clock, esc, heading, kb, mustHaveLine, note, pairs, plural, quote, short, splitMsg, type Btn, type Page } from './kit'
 import type { Breakdown, MustHave } from './jobs'
@@ -39,6 +39,11 @@ const SRC: Record<string, string> = { profile: '👤', generated: '✍️', user
 const cut = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + '…' : s)
 const scorePill = (n: number | null) => (n == null ? '' : n >= 80 ? `🟢 ${n}/100` : n >= 60 ? `🟡 ${n}/100` : `🟠 ${n}/100`)
 
+function answerLine(a: Review['answers'][number], labelMax: number, valueMax: number): string {
+  const v = cut(a.value, valueMax)
+  return `${a.sensitive ? '🔒' : (SRC[a.source] ?? '👤')} ${esc(cut(a.label, labelMax))}\n      <b>${a.sensitive ? `<tg-spoiler>${esc(v)}</tg-spoiler>` : esc(v)}</b>`
+}
+
 export function reviewText(rv: Review, practice: boolean, extra?: string): string {
   const head = [
     heading('📋', `${esc(rv.company || 'Unknown company')} · ${esc(rv.role || 'Unknown role')}`),
@@ -70,8 +75,7 @@ export function reviewText(rv: Review, practice: boolean, extra?: string): strin
   let budget = 3800 - [...head, ...tail, ...extras, legend].join('\n').length
   const rows: string[] = []
   for (const [i, a] of rv.answers.entries()) {
-    const v = cut(a.value, 80)
-    const line = `${a.sensitive ? '🔒' : (SRC[a.source] ?? '👤')} ${esc(cut(a.label, 50))}\n      <b>${a.sensitive ? `<tg-spoiler>${esc(v)}</tg-spoiler>` : esc(v)}</b>`
+    const line = answerLine(a, 50, 80)
     if (budget - line.length < 80) { rows.push(note(`…and ${rv.answers.length - i} more in the screenshot`)); break }
     budget -= line.length + 1
     rows.push(line)
@@ -91,6 +95,7 @@ export function reviewPage(rv: Review, practice: boolean, extra?: string): Page 
       [...(editable(rv).length ? [{ text: '✏️ Edit an answer', data: `r:ea:${c}` }] : []), { text: '💬 Ask for a change', data: `r:ch:${c}` }],
       [...(rv.resume.fallback ? [] : [{ text: '📄 Use my original', data: `r:or:${c}` }]), { text: '📎 Files', data: `r:fl:${c}` }, ...(more ? [{ text: '📝 All changes', data: `r:df:${c}` }] : [])],
       ...(rv.coverage?.missing?.length ? [[{ text: '✋ I have a missing skill', data: `r:hv:${c}` }]] : []),
+      ...(rv.screenshots?.length ? [[{ text: '🖼 Show the form', data: `r:ss:${c}` }]] : []),
       [{ text: '⏭ Skip', data: `r:sk:${c}` }, { text: '🚫 Never this company', data: `r:nv:${c}`, style: 'danger' }],
       ...(rv.url ? [[{ text: '🔗 Open posting', url: rv.url }]] : []),
     ],
@@ -133,8 +138,8 @@ export const SKIP_REASONS = [['pay', '💵 Pay'], ['location', '📍 Location'],
 // v3 P3: real submissions so far per form type. A submitted job later CLOSED still counts.
 export const FIRST_REAL = 3
 export function realSent(now = Date.now()): Record<string, number> {
-  const out: Record<string, number> = { greenhouse: 0, lever: 0, ashby: 0 }
-  for (const j of allJobs(now)) if (j.history.some(h => h.status === 'SUBMITTED')) out[j.ats ?? 'generic'] = (out[j.ats ?? 'generic'] ?? 0) + 1
+  const out: Record<string, number> = { greenhouse: 0, lever: 0, ashby: 0, breezy: 0, recruitee: 0, rippling: 0 }
+  for (const j of allJobs(now, true)) if (j.history.some(h => h.status === 'SUBMITTED')) out[j.ats ?? 'generic'] = (out[j.ats ?? 'generic'] ?? 0) + 1
   return out
 }
 export const HOLD_AFTER = 2
@@ -144,7 +149,7 @@ const saveAutopilot = (a: Autopilot) => writeJson(AP_FILE(), a)
 // Real applications that reached employers today (local day), whoever approved them.
 export function sentToday(now = Date.now()): number {
   const day = new Date(now).toDateString()
-  return allJobs(now).filter(j => j.history.some(h => h.status === 'SUBMITTED' && new Date(h.at).toDateString() === day)).length
+  return allJobs(now, true).filter(j => j.history.some(h => h.status === 'SUBMITTED' && new Date(h.at).toDateString() === day)).length
 }
 export const apState = (now = Date.now()): ApState => ({ sent: sentToday(now), hold: !!loadAutopilot().hold, real: realSent(now) })
 export const capText = (s: Settings) => `today's ${s.apply.daily_max} are sent; the rest go tomorrow`
@@ -228,7 +233,7 @@ export function createReview(d: Deps) {
       const shot = join(jobDir(id), 'screenshots', 'submitted.png'), to = d.to()
       if (to != null && existsSync(shot)) void d.api.sendPhoto(to, new InputFile(shot), { caption: '🧾 The confirmation page', disable_notification: true }).catch(e => log(`receipt shot failed: ${e}`))
     }
-    else say(`${heading('🙋', 'This one needs you')}\n${name(id)}\n${esc(short(detail || 'The application could not be sent.', 300))}`, true, [[{ text: '📥 Open in Jobs', data: `j:v:${code(id)}` }]])
+    else say(`${heading('🙋', 'This one needs you')}\n${name(id)}\n${esc(short(detail || 'The application could not be sent.', 300))}`, true, [[...(canOpenForm(id, st, detail) ? [{ text: '🖥 Open filled form', data: `j:of:${code(id)}`, style: 'success' as const }] : []), { text: '📥 Open in Jobs', data: `j:v:${code(id)}` }]])
     if (!practiceOn(loadSettings())) breaker(st)
     d.onResult(id, st, detail)
     d.refresh()
@@ -391,6 +396,12 @@ export function createReview(d: Deps) {
       return '🖼 Sent below'
     }
     if (act === 'fl') { await sendFiles(id, rv); return '📎 Sent below' }
+    if (act === 'an') {
+      // one line per value, so splitting a long message never cuts a tag in half
+      const lines = rv.answers.map(a => answerLine({ ...a, value: String(a.value).replace(/\s+/g, ' ') }, 200, 2000))
+      for (const part of splitMsg(`${heading('🧾', 'Saved answers')}\n${esc(rv.company)} · ${esc(rv.role)}\n\n${lines.join('\n') || '—'}`, 3900)) await d.api.sendMessage(chat, part, { ...OPTS, disable_notification: true }).catch(e => log(`send failed: ${e}`))
+      return '🧾 Sent below'
+    }
     if (act === 'df') {
       const all = changeLines(rv.changes ?? [], 1e9).text
       for (const part of splitMsg(`${heading('📝', 'Every change to your resume')}\n${esc(rv.company)} · ${esc(rv.role)}\n\n${all}`, 3900)) await d.api.sendMessage(chat, part, { ...OPTS, disable_notification: true }).catch(e => log(`send failed: ${e}`))
@@ -409,7 +420,7 @@ export function createReview(d: Deps) {
     if (act === 'hv') {
       const miss = rv.coverage?.missing ?? []
       if (arg == null) return {
-        text: `${heading('✋', 'Which of these do you really have?')}\n${esc(rv.company)} · ${esc(rv.role)}\n\n${miss.map((x, i) => `<b>${i + 1}.</b> ${esc(x)}`).join('\n')}\n\n${note('I add it to your profile as a confirmed skill and rework the resume to mention it. Only pick what is true.')}`,
+        text: `${heading('✋', 'Which of these do you really have?')}\n${esc(rv.company)} · ${esc(rv.role)}\n\n${miss.map((x, i) => `<b>${i + 1}.</b> ${esc(x)}`).join('\n')}\n\n${note('I add it to your Fact bank as a confirmed skill, use it on future applications and rework this resume to mention it. Only pick what is true.')}`,
         rows: [...pairs(miss.map((_, i) => ({ text: String(i + 1), data: `r:hv:${c}:${i}` })), 6), [{ text: '✖ Cancel', data: `r:rv:${c}` }]],
       }
       const skill = miss[parseInt(arg, 10)]
@@ -422,7 +433,7 @@ export function createReview(d: Deps) {
       if (!r.ok) return `Could not save it: ${r.error}`
       cancelAuto(id)
       d.revise(id, `SYSTEM: the user confirmed a skill from the review's missing keywords; it is the last item of "confirmed" under "## Confirmed skills" in profile.md. Re-tailor the resume so it truthfully mentions it where it fits, re-run the dry fill, rebuild the review and send it again.`)
-      return done('✋', 'Got it', note('Saved to your profile. I am reworking the resume; a fresh review follows.'))
+      return done('✋', 'Got it', note('Saved to your Fact bank. I am reworking the resume; a fresh review follows.'))
     }
     if (act === 'or') {
       if (busy.has(id)) return 'Already updating it…'

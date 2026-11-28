@@ -54,6 +54,13 @@ def _upsert(d: Path, job_id: str, x: dict) -> dict:
     return {"ok": True, "job_id": job_id}
 
 
+def remove(d: Path, job_id: str) -> None:
+    with locked(d / "applications.csv"):
+        rows = _rows(d)
+        if any(r["job_id"] == job_id for r in rows):
+            _write(d, [r for r in rows if r["job_id"] != job_id])
+
+
 def outcome(d: Path, job_id: str, value: str) -> dict:
     if value not in OUTCOMES:
         raise store.JobError("bad_outcome", "outcome must be interview, rejected, offer, ghosted or empty")

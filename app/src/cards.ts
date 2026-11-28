@@ -2,7 +2,7 @@
 // A job task shows a stepper; an auto-search task lists each job it found on one line. renderCard is pure.
 import type { Api } from 'grammy'
 import { join } from 'path'
-import { code } from './jobs'
+import { canOpenForm, code } from './jobs'
 import { bar, clock, elapsed, esc, heading, kb, note, pairs, short, type Btn, type Page } from './kit'
 import { DATA, log, readJson, writeJson } from './state'
 
@@ -100,6 +100,7 @@ export function renderCard(c: Card, now = Date.now()): Page {
 // Final line for a job, from its status once the task is over (status.json is the truth, not what the agent said).
 export function finalFor(status: string, detail: string, jobId: string): Final | undefined {
   const c = code(jobId), d = detail.trim()
+  const open: Btn[] = canOpenForm(jobId, status, d) ? [{ text: '🖥 Open filled form', data: `j:of:${c}` }] : []
   switch (status) {
     case 'AWAITING_APPROVAL': case 'FILLED_DRY': return { emoji: '🔔', text: 'Ready for your review (below).' }
     case 'NEEDS_ANSWERS': return { emoji: '❓', text: 'I need a few answers from you (see Open Questions below).' }
@@ -107,10 +108,10 @@ export function finalFor(status: string, detail: string, jobId: string): Final |
     case 'APPLIED_SELF': return { emoji: '✅', text: 'You applied.' }
     case 'SKIPPED': return { emoji: '⏭', text: `Skipped${d ? `: ${d}` : ''}`, buttons: [{ text: '↩ Apply anyway', data: `j:any:${c}` }] }
     case 'CLOSED': return { emoji: '🚪', text: 'This posting is closed. Nothing to do.' }
-    case 'NEEDS_HUMAN': return { emoji: '🙋', text: `Needs you${d ? `: ${d}` : ''}`, buttons: [{ text: '✅ I applied myself', data: `j:ap:${c}` }, { text: '🔄 Try again', data: `j:rt:${c}` }] }
+    case 'NEEDS_HUMAN': return { emoji: '🙋', text: `Needs you${d ? `: ${d}` : ''}`, buttons: [...open, { text: '✅ I applied myself', data: `j:ap:${c}` }, { text: '🔄 Try again', data: `j:rt:${c}` }] }
     case 'FAILED': { // fetch's needs-login detail ("LinkedIn only shows this posting to people who are logged in...") gets a log-in button
       const site = /\blogged in\b/i.test(d) ? (/^Indeed\b/.test(d) ? 'indeed' : /^LinkedIn\b/.test(d) ? 'linkedin' : null) : null
-      return { emoji: '⚠️', text: d || 'Something went wrong.', buttons: [...(site ? [{ text: `🔑 Log in to ${site === 'indeed' ? 'Indeed' : 'LinkedIn'}`, data: `L:in:${site}` }] : []), { text: '🔄 Try again', data: `j:rt:${c}` }] }
+      return { emoji: '⚠️', text: d || 'Something went wrong.', buttons: [...open, ...(site ? [{ text: `🔑 Log in to ${site === 'indeed' ? 'Indeed' : 'LinkedIn'}`, data: `L:in:${site}` }] : []), { text: '🔄 Try again', data: `j:rt:${c}` }] }
     }
     case 'DRY_RUN_DONE': return { emoji: '🧪', text: 'Practice run done. Nothing was sent.', buttons: [{ text: '🚀 Apply for real', data: `j:go:${c}` }] }
     case 'SUBMITTED': return { emoji: '✅', text: 'Applied.' }

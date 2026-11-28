@@ -2,7 +2,7 @@
 from the page. Shapes follow Lever's public postings API and apply page; the submit/confirmation path is NOT verified live."""
 import httpx
 
-from .base import Closed
+from .base import Closed, place
 from .formscan import DomAdapter
 
 API = "https://api{eu}.lever.co/v0/postings/{board}"
@@ -47,6 +47,11 @@ class Lever(DomAdapter):
         head = [f"# {j.get('text', '')}", f"Company: {meta['board']}", f"Location: {where}{f' ({wp})' if wp and wp != 'unspecified' else ''}",
                 f"Type: {c.get('commitment', '')}", pay_line(j.get("salaryRange")) or j.get("salaryDescriptionPlain") or ""]
         return "\n".join(x for x in head if x.split(": ")[-1]) + f"\n\n{j.get('descriptionPlain', '')}\n\n{lists}\n\n{j.get('additionalPlain', '')}".rstrip()
+
+    def _one(self, page, loc, f, act, value, jdir):
+        if f["fid"] == "location" and act == "fill":
+            return place(page, loc.first, str(value), ".dropdown-location")  # "Current location" keeps only a suggested place
+        return super()._one(page, loc, f, act, value, jdir)
 
     def confirmed(self, page):
         return "/thanks" in page.url or super().confirmed(page)

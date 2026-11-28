@@ -37,9 +37,11 @@ Judge title fit by the work, not the words: when the title differs from all of t
 | class | when | value |
 |---|---|---|
 | `profile` | comes directly from a profile fact or a saved answer whose meaning matches the question (a `scope: job` answer only for this job) | the value exactly as the form needs it (for a select, one of its `options`, spelled exactly; for a checkbox, true or false) |
-| `generated` | free text you can write from the posting plus the profile, only when `settings.draft_free_text` is true | your draft, 1 to 3 sentences, facts from the profile only |
+| `generated` | free text you can write from the posting plus the profile, only when `settings.draft_free_text` is true | your draft, 1 to 3 sentences, facts from the profile only, at most `max_chars` characters when the field has it |
 | `document` | resume and cover letter file uploads, and their "enter manually" text boxes | none |
 | `must_ask` | no match, OR a sensitive category with no saved answer of exactly the same meaning, OR unusual | none |
+
+A `date` field's value is written YYYY-MM-DD, a `month` field's YYYY-MM.
 
 Sensitive categories, never guessed: work authorization, visa sponsorship, salary or compensation, EEO and demographics (gender, race, veteran status, disability), criminal history, age or date of birth, relocation, security clearance, non-compete or prior agreements, legal attestations or certifications, references. Mark them `sensitive: true`. A sensitive field is `profile` only from a saved answer with exactly the same meaning: give that answer's `key` as `save_key`. Watch for questions asked the other way round ("Can you work here *without* sponsorship?" when the saved answer is about *needing* sponsorship): pick the option that carries the saved meaning, or use `must_ask` when unsure.
 

@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 
 from . import fill, store
-from .ats.base import match_option
+from .ats.base import iso_date, match_option
 from .llm import is_sensitive, question_for
 from .paths import atomic_write_json
 
@@ -31,7 +31,12 @@ def _row(f: dict, v, source: str) -> dict | None:
         if f.get("options"):
             vs = [match_option(f["options"], x) or x for x in vs]  # the page's own spelling; fill.check_plan refuses the rest
         return {"fid": f["fid"], "action": "select", "value": vs if t == "multiselect" else vs[0], "source": source}
-    return {"fid": f["fid"], "action": "fill", "value": v if isinstance(v, str) else ", ".join(map(str, v)) if isinstance(v, list) else str(v), "source": source}
+    v = v if isinstance(v, str) else ", ".join(map(str, v)) if isinstance(v, list) else str(v)
+    if t in ("date", "month"):
+        v = iso_date(v, t) or v  # the box takes only its own format; anything else fails at fill time with the field named
+    if f.get("max_chars"):
+        v = v[: f["max_chars"]]  # the page would cut it anyway, and then the read-back check calls it lost
+    return {"fid": f["fid"], "action": "fill", "value": v, "source": source}
 
 
 def _document(f: dict, j: Path) -> dict | None:
@@ -68,7 +73,7 @@ def build(d: Path, job_id: str) -> dict:
             r = _row(f, c.get("value"), "generated")
         else:
             r = None
-        if r is None and f.get("required") and f["fid"] not in docs:
+        if r is None and f.get("required") and f["fid"] not in docs and not f.get("prefilled"):  # the page's own answer stays
             missing.append(f["fid"])
         rows.append(r or {"fid": f["fid"], "action": "skip", "value": None, "source": "none"})
     if docs:

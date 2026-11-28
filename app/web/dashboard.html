@@ -475,7 +475,7 @@ function stepper(line, running) {
     return `<div class="step ${st ? 'step--' + st : ''}"><i></i>${l}${line.details?.[k] ? `<em>${esc(line.details[k])}</em>` : ''}</div>`
   }).join('')}</div>`
 }
-const btns = (list = [], ctx = '') => list.map(b => `<button class="btn btn--sm ${b.style === 'success' ? 'btn--solid' : b.style === 'danger' ? 'btn--danger' : ''}" data-${/^(r:rv|j:kit|j:rc|F:list)/.test(b.data) ? 'nav' : 'tap'}="${esc(b.data)}" ${ctx}>${esc(b.text)}</button>`).join('')
+const btns = (list = [], ctx = '') => list.map(b => `<button class="btn btn--sm ${b.style === 'success' ? 'btn--solid' : b.style === 'danger' ? 'btn--danger' : ''}" data-${/^(r:rv|j:kit|j:rc|F:list)/.test(b.data) ? 'nav' : 'tap'}="${esc(b.data)}" ${ctx}${b.confirm ? ` data-confirm="${esc(b.confirm)}" data-ok="Delete"` : ''}>${esc(b.text)}</button>`).join('')
 function cardHtml(c, i) {
   const live = c.state === 'running', now = Date.now(), job = c.jobs[0]
   const chip = live ? `<span class="pill"><span class="dot dot--live"></span>${c.started ? dur(now - c.started) : 'Working'}</span>`
@@ -747,10 +747,11 @@ async function profileView() {
           <p class="faint" style="margin-top:0">Versions aimed at other kinds of roles. For each job I pick the lines from all of them that fit it best.</p>
           <div class="chips">${p.versions.map(v => `<span class="tag">${esc(v)}<button aria-label="Remove ${esc(v)}" data-tap="p:rv:rm:${esc(v)}" data-confirm="Remove the resume version “${esc(v)}”?" data-ok="Remove">×</button></span>`).join('')}${p.versions.length < p.versions_max ? '<button class="btn btn--sm" data-upload="version">＋ Add a version</button>' : ''}</div>
           ${p.skills ? `<p class="faint" style="margin-top:14px">Confirmed skills: ${esc(p.skills)}</p>` : ''}</section>
-        <section class="panel pad rise" style="--i:3"><h2 class="h">Achievements <span class="n">${p.achievements.length}/${p.ach_max}</span></h2>
+        <section class="panel pad rise" style="--i:3"><h2 class="h">Fact bank <span class="n">${p.achievements.length}/${p.ach_max}</span></h2>
           <p class="faint" style="margin-top:-6px">Wins that are not on your resume yet. I may use them when I tailor it, never made bigger.</p>
-          ${p.achievements.map((a, i) => `<div class="ans" style="grid-template-columns:22px 1fr auto"><span class="faint">${i + 1}.</span><span class="small">${esc(a.text)}</span><button class="btn btn--ghost btn--sm" data-tap="p:ach:rm:${esc(a.key)}" data-confirm="Remove this achievement?" data-ok="Remove" aria-label="Remove achievement ${i + 1}">Remove</button></div>`).join('')}
-          ${p.achievements.length < p.ach_max ? `<form data-ach class="stack" style="gap:8px;margin-top:12px"><textarea class="input" name="t" rows="2" placeholder="A result you are proud of, with a number if you have one."></textarea><div><button class="btn btn--sm">Add</button></div></form>` : ''}</section>
+          ${p.achievements.map((a, i) => `<div class="ans" style="grid-template-columns:22px 1fr auto"><span class="faint">${i + 1}.</span><span class="small">${esc(a.text)}</span><button class="btn btn--ghost btn--sm" data-tap="p:ach:rm:${esc(a.key)}" data-confirm="Remove this fact?" data-ok="Remove" aria-label="Remove fact ${i + 1}">Remove</button></div>`).join('')}
+          ${p.achievements.length < p.ach_max ? `<form data-ach class="stack" style="gap:8px;margin-top:12px"><textarea class="input" name="t" rows="2" maxlength="600" aria-label="New fact" placeholder="Something you did at a job that your resume leaves out. Name the job."></textarea><div><button class="btn btn--sm">Add</button></div></form>` : ''}
+          ${p.achievements.length ? '<button class="btn btn--ghost btn--sm" style="margin-top:8px" data-tap="p:ach:use" data-confirm="Rework every application waiting for review with your newest facts? This uses some of your Claude limit." data-ok="Rework">Use on waiting reviews</button>' : ''}</section>
       </div>
     </div>
     <section class="panel pad rise" style="--i:4"><div class="row" style="margin-bottom:10px"><h2 class="h grow" style="margin:0">Saved answers <span class="n">${p.answers.length}</span></h2><input class="input" id="ansQ" placeholder="Search, like salary or visa" style="width:240px" aria-label="Search saved answers"></div>
@@ -922,6 +923,7 @@ document.addEventListener('click', async e => {
     if (t.dataset.confirm && !(await ask({ title: t.dataset.title || t.textContent.trim().replace(/^[^\w]+/, ''), body: t.dataset.confirm, ok: t.dataset.ok || 'Yes', danger: /btn--danger/.test(t.className) || /^P:yes|^r:nx|^a:dd/.test(t.dataset.tap) }))) return
     const next = t.dataset.next
     await tap(t.dataset.tap, t, t.dataset.say)
+    if (t.dataset.tap.startsWith('j:dx')) { closeJob(); render(true) }
     if (next && view === 'review') { param = ''; render(true) }
     if (t.dataset.tap.startsWith('L:')) setTimeout(loadLogins, 1500)
     if (/^(P:|C:r:)/.test(t.dataset.tap) && view === 'settings') render(false)

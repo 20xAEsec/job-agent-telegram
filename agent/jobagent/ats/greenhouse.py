@@ -8,18 +8,20 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from .. import safety
+from .. import browser, safety
 from ..paths import atomic_write_json
-from .base import Adapter, Closed, Unexpected, match_option, read_back
+from .base import Adapter, Closed, Unexpected, fill_rows, match_option, pick
 
 API = "https://boards-api.greenhouse.io/v1/boards/{board}/jobs/{id}"
 TYPES = {"input_text": "text", "textarea": "textarea", "input_file": "file",
          "multi_value_single_select": "select", "multi_value_multi_select": "multiselect"}
 SUBMIT = 'button[type="submit"]'
+SKIP_IDS = r"^(?:g-recaptcha|h-captcha|cf-turnstile|iti-|react-select)"  # page controls that are not questions
 # Page-side scan for something a human has to deal with. The invisible reCAPTCHA badge (.grecaptcha-logo) is normal on Greenhouse.
 BLOCKER_JS = """() => {
   const vis = e => { const r = e.getBoundingClientRect(), s = getComputedStyle(e); return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none' }
-  const caps = [...document.querySelectorAll('iframe[src*="hcaptcha"], iframe[src*="recaptcha"], iframe[title*="challenge" i], .h-captcha, .g-recaptcha, [data-sitekey]')]
+  // any captcha frame (reCAPTCHA, hCaptcha, DataDome, a site's own), Cloudflare and Arkose challenges, PerimeterX's press-and-hold
+  const caps = [...document.querySelectorAll('iframe[src*="captcha"], iframe[title*="challenge" i], iframe[src*="challenges.cloudflare.com"], iframe[src*="arkoselabs"], iframe[src*="funcaptcha"], #px-captcha, .h-captcha, .g-recaptcha, [data-sitekey]')]
     .filter(e => !e.closest('.grecaptcha-badge, .grecaptcha-logo') && e.getAttribute('data-size') !== 'invisible' && vis(e))
   if (caps.length || /just a moment|verify you are human|are you a robot/i.test(document.title + ' ' + (document.body.innerText || '').slice(0, 400))) return 'captcha'
   if (/error=true/.test(location.search)) return 'closed'
@@ -31,6 +33,16 @@ EXTRA_JS = """() => [...document.querySelectorAll('form input:not([type=hidden])
   .filter(e => e.id && !/^(country|iti-|react-select|g-recaptcha)/.test(e.id)).map(e => [e.id, e.required || e.getAttribute('aria-required') === 'true'])"""
 
 
+DISABLED_JS = "() => [...document.querySelectorAll('form input, form select, form textarea')].filter(e => e.disabled).map(e => e.name || e.id)"
+# The nearest heading above a control inside the form (Employment, Education): the closest ancestor holding one wins.
+HEADING_JS = """(sel) => { const e = document.querySelector(sel), form = e && e.closest('form')
+  for (let x = e && e.parentElement; x && x !== form; x = x.parentElement) {
+    const hs = [...x.querySelectorAll('h1, h2, h3, h4, legend, [class*="header"]')].filter(h => h.compareDocumentPosition(e) & Node.DOCUMENT_POSITION_FOLLOWING)
+    const t = hs.length ? (hs[hs.length - 1].innerText || '').replace(/\\s+/g, ' ').trim() : ''
+    if (t) return t }
+  return '' }"""
+
+
 class Greenhouse(Adapter):
     name = "greenhouse"
 
@@ -40,7 +52,8 @@ class Greenhouse(Adapter):
 
     @staticmethod
     def apply_url(meta):
-        return f"https://job-boards.greenhouse.io/{meta['board']}/jobs/{meta['posting_id']}"
+        # The embed form never redirects: /{board}/jobs/{id} sends companies with their own careers site (Dropbox) there, behind Cloudflare.
+        return f"https://job-boards.greenhouse.io/embed/job_app?for={meta['board']}&token={meta['posting_id']}"
 
     @staticmethod
     def api_job(meta, questions=False) -> dict:
@@ -58,7 +71,50 @@ class Greenhouse(Adapter):
         return f"# {j.get('title', '')}\nCompany: {j.get('company_name', '')}\nLocation: {loc}\n\n{html_to_text(html.unescape(j.get('content', '')))}"
 
     def inspect(self, meta, d=None, prepare=None):
-        return fields_from_api(self.api_job(meta, questions=True))
+        """The API's questions (clean labels and options), plus every control the rendered form has that the API never lists:
+        country, employment, education, follow-ups. Without the page (blocked, down) the API alone, as before."""
+        api = fields_from_api(self.api_job(meta, questions=True))
+        try:
+            return api + (self.page_fields(meta, api, d, prepare) or [])
+        except Exception:  # noqa: BLE001 - the check after filling names any box this misses
+            return api
+
+    def scan(self, page):
+        from .formscan import scan_form  # formscan imports this module
+
+        return scan_form(page, ["form#application-form", "form"], ".field-wrapper, .file-upload, fieldset", ["label", "legend"], SKIP_IDS)
+
+    def page_fields(self, meta, api: list[dict], d=None, prepare=None) -> list[dict] | None:
+        from .formscan import as_fields, harvest
+
+        known = {f["selector"][5:-2] for f in api} | {f["fid"] for f in api}  # [id="x"] -> x
+        with browser.session(d, self.allowed_hosts(meta)) as ctx:
+            if prepare:
+                prepare(ctx)
+            page = ctx.new_page()
+            page.goto(self.apply_url(meta), wait_until="load", timeout=45000)
+            page.wait_for_selector("form input", state="attached", timeout=20000)
+            if self.detect_blockers(page):
+                return None
+            rows = [r for r in self.scan(page) or [] if r["fid"] not in known and not any(r["fid"].startswith(k + "_") for k in known)]
+            for r in rows:  # "Title" alone is ambiguous: say which part of the form it is in ("Employment: Title")
+                h = r["group"] or page.evaluate(HEADING_JS, r["selector"]) if ">>" not in r["selector"] else ""
+                if h and len(h) <= 40 and h.casefold() not in r["label"].casefold():
+                    r["label"] = f'{h}: {r["label"]}'
+            for c in [r for r in rows if r["type"] == "checkbox"]:  # boxes another answer greys out ("Current role" -> end date)
+                try:
+                    tick = page.locator(c["selector"]).first
+                    before = set(page.evaluate(DISABLED_JS))
+                    tick.set_checked(True)
+                    off = set(page.evaluate(DISABLED_JS)) - before
+                    tick.set_checked(False)
+                except Exception:  # noqa: BLE001 - left as the page shows it
+                    continue
+                for r in rows:
+                    if r["fid"] in off:
+                        r.update(required=False, label=f'{r["label"]} (leave empty when "{c["label"]}" is ticked)')
+            harvest(page, rows)
+        return as_fields(rows)
 
     def detect_blockers(self, page):
         return page.evaluate(BLOCKER_JS)
@@ -66,52 +122,44 @@ class Greenhouse(Adapter):
     def extra_on_page(self, page, fields: dict) -> tuple[list[str], list[str]]:
         """(ids the API did not list, the required ones among them)"""
         known = {f["selector"][5:-2] for f in fields.values()}  # [id="x"] -> x
-        x = [(i, r) for i, r in page.evaluate(EXTRA_JS) if i not in known]
+        x = [(i, r) for i, r in page.evaluate(EXTRA_JS) if i not in known and not any(i.startswith(k + "_") for k in known)]  # a known checkbox group's boxes
         return sorted(i for i, _ in x), sorted(i for i, r in x if r)
+
+    def empty_required(self, page, fields):
+        from .formscan import empty_required
+
+        return empty_required(self.scan(page) or [], fields)
 
     def fill(self, page, plan_fields, fields, jdir):
         """Type the plan into the form. Never presses Enter and never clicks a submit control."""
-        rep = {"filled": [], "errors": [], "missing_on_page": []}
-        for p in plan_fields:
-            f, act = fields.get(p["fid"]), p.get("action")
-            if f is None or act == "skip":
-                continue
-            loc = page.locator(f["selector"])
-            if loc.count() == 0:
-                rep["missing_on_page"].append(p["fid"])
-                continue
-            try:
-                self._one(page, loc.first, f, act, p.get("value"), jdir)
-                rep["filled"].append(p["fid"])
-            except Exception as e:  # noqa: BLE001 - report the field and the error type, never the value
-                rep["errors"].append({"fid": p["fid"], "error": type(e).__name__})
-        return read_back(page, plan_fields, fields, rep)
+        return fill_rows(page, plan_fields, fields, self._one, jdir)
 
     def _one(self, page, loc, f, act, value, jdir):
+        loc = loc.first
         if act == "upload":
-            loc.set_input_files(str(safety.upload_path(jdir, value)))
+            path = safety.upload_path(jdir, value)
+            loc.set_input_files(str(path))
+            try:  # taken: the upload buttons give way to the file's name. Refused: the field shows an error and no name
+                page.get_by_text(path.name, exact=True).first.wait_for(timeout=20000)
+            except Exception:  # noqa: BLE001
+                raise Unexpected("the site did not take the file") from None
         elif act == "check":
             loc.set_checked(bool(value))
         elif act == "select":
-            for v in [match_option(f["options"], v) or v for v in (value if isinstance(value, list) else [value])]:  # the page's own spelling
-                if loc.evaluate("e => e.tagName") == "SELECT":
-                    loc.select_option(label=str(v))
+            tag = loc.evaluate("e => e.tagName")
+            vals = [str(match_option(f["options"], v) or v) for v in (value if isinstance(value, list) else [value])]  # the page's own spelling
+            if tag == "SELECT":
+                loc.select_option(label=vals)  # all at once: one call per value would keep only the last
+                return
+            for v in vals:
+                if tag == "FIELDSET":  # "select all that apply" drawn as checkboxes
+                    loc.get_by_label(str(v), exact=True).set_checked(True)
                 else:
-                    self._pick(page, loc, str(v), exact=bool(f["options"]))
+                    pick(page, loc, str(v), exact=bool(f["options"]))
         elif act == "fill":
             loc.fill(str(value))
         else:
             raise Unexpected(f"unknown action {act!r}")
-
-    def _pick(self, page, loc, label, exact=True):
-        """react-select: focus, type to filter, click the option. No Enter key anywhere."""
-        if loc.get_attribute("role") != "combobox":
-            raise Unexpected("not a combobox")
-        loc.click()
-        loc.fill(label)
-        page.get_by_role("option", name=label, exact=exact).first.click(timeout=5000)
-        if label not in loc.locator("xpath=ancestor::*[contains(@class,'select__control')][1]").inner_text():
-            raise Unexpected("option not selected")
 
     # ---- submit side: only reachable through `jobagent submit` (safety.click_submit checks) ----
 

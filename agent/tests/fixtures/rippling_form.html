@@ -1,0 +1,52 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Apply - Data Analyst</title>
+<style>.opts div{padding:4px;border:1px solid #888;width:300px} [role=radio]{padding:4px;border:1px solid #888;width:300px} .vh{display:none}</style></head>
+<body>
+<!-- Structure of a Rippling application page (ats.rippling.com/<co>/jobs/<id>/apply), hand-built from its live markup (not a byte-for-byte
+     recording). Rendered by script like the real single-page app, with fresh random `name`s on every load: only data-testids are stable.
+     Dropdowns are drawn boxes (role=combobox), radios are drawn too. Submit and Enter spies must never fire. -->
+<div id="root"></div>
+<script>
+  const rnd = () => Math.random().toString(36).slice(2, 12)
+  const spy = k => { window['__' + k] = (window['__' + k] || 0) + 1; fetch('/__spy?k=' + k) }
+  const text = (t, n, label, req) => `<div data-testid="field"><div><span id="${n}-label">${label}</span>${req ? '<span>*</span>' : ''}</div>
+    <div><div data-testid="${t}"><input data-testid="input-${t}" id="${n}" ${req ? 'aria-required="true"' : ''} aria-labelledby="${n}-label" placeholder="${label}" name="${rnd()}"></div></div></div>`
+  const pickbox = (t, n, label) => `<div data-testid="field"><div><span id="${n}-label">${label}</span></div>
+    <div><div data-testid="${t}"><div data-testid="select-controller"><div id="${n}" role="combobox" aria-haspopup="listbox" aria-labelledby="${n}-label" aria-label="Select..." tabindex="0"><p>Select...</p></div><div class="opts"></div></div></div></div></div>`
+  setTimeout(() => {
+    document.getElementById('root').innerHTML = `<form><h1>Application: Data Analyst</h1>
+      <div data-testid="field"><div><span id="f4-label">Résumé</span><span>*</span></div>
+        <div><label data-testid="resume" aria-labelledby="f4-label"><input accept=".pdf" data-testid="input-resume" type="File" class="vh"><button type="button">Drop or select</button></label></div></div>
+      ${text('first_name', 'f8', 'First name', true)}${text('last_name', 'f12', 'Last name', true)}${text('email', 'f16', 'Email', true)}
+      <div data-testid="field"><div><span id="f20-label">Pronouns</span></div><div><div data-testid="pronouns_strategy"><div data-testid="select-search-input"><input data-testid="input-select-search-input" id="f20" aria-label="Search" aria-labelledby="f20-label" role="combobox" name="${rnd()}"></div></div></div></div>
+      <div data-testid="field"><div><span id="f31-label">Phone number</span><span>*</span></div><div>
+        <div data-testid="field"><div data-testid="phone_number-code"><div data-testid="select-search-input"><input data-testid="input-select-search-input" id="f34" aria-required="true" aria-label="Search" role="combobox" value="+1 US" name="${rnd()}"></div></div></div>
+        <div data-testid="phone_number"><input data-testid="input-phone_number" id="f31" aria-required="true" aria-labelledby="f31-label" name="${rnd()}"></div></div></div>
+      <div data-testid="field"><div><span id="f42-label">Location</span><span>*</span></div>
+        <div><div data-testid="location"><input data-testid="input-undefined" id="f42" aria-required="true" aria-label="textbox" aria-labelledby="f42-label" aria-autocomplete="list" aria-haspopup="listbox" name="${rnd()}"><div class="opts" id="places"></div></div></div></div>
+      <div data-testid="field"><div data-testid="externalPlaceId"><input type="hidden" name="${rnd()}" id="place-id"></div></div>
+      <p>U.S. Equal Opportunity Employment Information (Completion is voluntary)</p>
+      ${pickbox('eeoc.gender', 'f55', 'Gender')}${pickbox('eeoc.veteranStatus', 'f74', 'Veteran Status')}
+      <p>Check Yes or No to indicate your agreement to receive text message updates.</p>
+      <div data-testid="field"><div><div data-testid="sms_opt_in" id="f80" role="radiogroup">
+        <div data-testid="radio-label-sms_opt_in" role="radio" aria-labelledby="l83" aria-checked="false"><input aria-hidden="true" tabindex="-1" type="radio" value="true" name="sms_opt_in" class="vh"><div id="l83"><p>Yes - I consent to receiving text messages</p></div></div>
+        <div data-testid="radio-label-sms_opt_in" role="radio" aria-labelledby="l84" aria-checked="false"><input aria-hidden="true" tabindex="-1" type="radio" value="false" name="sms_opt_in" class="vh"><div id="l84"><p>No - I do not consent to receiving text messages</p></div></div>
+      </div></div></div>
+      <button data-testid="Apply" type="submit">Apply</button></form>`
+    document.querySelector('form').addEventListener('submit', e => { e.preventDefault(); spy('submitted') })
+    const g = document.getElementById('f55'), go = g.nextElementSibling
+    g.addEventListener('click', () => { go.innerHTML = ''; ['Female', 'Male', 'Decline to self-identify'].forEach(o => {
+      const d = document.createElement('div'); d.setAttribute('role', 'option'); d.textContent = o
+      d.addEventListener('click', () => { g.innerHTML = `<p>${o}</p>`; go.innerHTML = '' }); go.appendChild(d) }) })
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') go.innerHTML = '' })
+    const loc = document.getElementById('f42'), places = document.getElementById('places')
+    loc.addEventListener('input', () => { places.innerHTML = ''; document.getElementById('place-id').value = ''
+      ;['Austin, TX, USA', 'Boston, MA, USA'].filter(o => loc.value && o.toLowerCase().startsWith(loc.value.toLowerCase())).forEach(o => {
+        const d = document.createElement('div'); d.setAttribute('role', 'option'); d.textContent = o
+        d.addEventListener('click', () => { loc.value = o; places.innerHTML = ''; document.getElementById('place-id').value = 'p1' }); places.appendChild(d) }) })
+    document.querySelectorAll('[role=radio]').forEach(r => r.addEventListener('click', () => {
+      document.querySelectorAll('[role=radio]').forEach(x => { const on = x === r; x.setAttribute('aria-checked', String(on)); x.querySelector('input').checked = on }) }))
+  }, 200)
+  document.addEventListener('keydown', e => { if (e.key === 'Enter') spy('enter') })
+</script>
+</body></html>

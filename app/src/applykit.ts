@@ -54,3 +54,27 @@ export function kitPage(j: Job, kit: ReturnType<typeof readKit>): Page {
     rows,
   }
 }
+
+// "Open filled form": a browser window on the user's computer with the application typed in. They send it themselves.
+export function handoffPage(j: Job, practice: boolean): Page {
+  return {
+    text: [
+      heading('🖥', `Look at your computer · ${esc(short(jobTitle(j), 60))}`),
+      'A browser window is opening with the application filled in.',
+      '1️⃣ Do the "are you a human" check.', '2️⃣ Look over every answer.', '3️⃣ Press Submit, and leave the window open until you see the confirmation.',
+      ...(practice ? ['', '⚠️ <b>Pressing Submit there really sends it</b>, even in practice mode.'] : []),
+    ].join('\n'),
+    rows: j.url ? [[{ text: '🔗 Open the posting', url: j.url }]] : [],
+  }
+}
+export function handoffDonePage(j: Job, r: { ok?: boolean; code?: string; submitted?: boolean; unfilled?: unknown }): Page {
+  const c = code(j.id), name = esc(short(jobTitle(j), 60))
+  if (r.ok && r.submitted) return { text: `${heading('✅', 'Application sent')}\n${name}\n${note('I saw the confirmation page and marked it as applied.')}`, rows: [[{ text: '📋 Jobs', data: 'J:a:0' }, { text: '🏠 Home', data: 'm:home' }]] }
+  const unfilled = Array.isArray(r.unfilled) ? r.unfilled.slice(0, 8).map(x => `• ${esc(short(String(x), 80))}`) : []
+  const why = r.ok ? "I didn't see a confirmation page. If you sent it, tap I applied."
+    : r.code === 'busy' ? 'Another JobAgent browser window is open. Close it and try again.' : "I couldn't fill the form in this time. Try again, or apply from the posting."
+  return {
+    text: [heading('🖥', r.ok ? 'Window closed' : "Couldn't open it"), name, note(why), ...(unfilled.length ? ['', 'I could not fill these:', ...unfilled] : [])].join('\n'),
+    rows: [[{ text: '✅ I applied', data: `j:ap:${c}`, style: 'success' }, { text: '🖥 Open again', data: `j:of:${c}` }], ...(j.url ? [[{ text: '🔗 Open the posting', url: j.url }]] : [])],
+  }
+}

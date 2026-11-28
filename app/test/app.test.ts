@@ -372,6 +372,18 @@ describe('typed input goes to what asked for it', () => {
     await t.done()
   })
 
+  test('"remember:" saves a fact even while a question is open; other text still answers it', async () => {
+    const t = chat()
+    t.ask('Anything else?')
+    await t.open()
+    await t.send('Remember: At Acme I cut report time by 40 percent')
+    expect(t.answer()).toBeUndefined()
+    expect(t.pyCalls.find(a => a[1] === 'set-field')?.slice(2)).toEqual(['--', 'Achievements', 'a1', 'At Acme I cut report time by 40 percent'])
+    await t.send('Nothing else to add') // not a link: this question does not ask for one, so a link would not answer it
+    expect(t.answer()).toBe('Nothing else to add')
+    await t.done()
+  })
+
   test('a job link stays a job link; a profile link never becomes one', async () => {
     const t = chat()
     await t.send(PROFILE)

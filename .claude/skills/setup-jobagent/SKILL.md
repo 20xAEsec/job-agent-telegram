@@ -131,7 +131,7 @@ If they say yes:
 
 ## Never
 
-- Run `jobagent pair`, `credentials`, `login` or `submit` yourself, or `fill` without `--dry-run`.
+- Run `jobagent pair`, `credentials`, `login`, `handoff` or `submit` yourself, or `fill` without `--dry-run`.
 - Read, print or ask for the bot token or anything in `data/.env`; edit `data/settings.json` or any `approval.json`.
 - Read or print `data/dashboard.json` (it holds the dashboard's secret), or set the phone address yourself. Only `scripts\phone.ps1` in its own window, or the owner in Telegram, sets it.
 - Run the setup, start or phone scripts inside this session.

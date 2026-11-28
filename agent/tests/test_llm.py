@@ -98,6 +98,22 @@ def test_analyze_accept_keeps_only_what_the_checks_allow(d):
     assert an["injection_suspected"] is True and an["supported"] is True and "email_to" not in an
 
 
+@pytest.mark.parametrize("label,want", [
+    ("LinkedIn URL", "li"), ("LinkedIn Profile*", "li"), ("Please share your LinkedIn profile", "li"), ("GitHub URL", "gh"),
+    ("Website", "web"), ("Other website", "web"), ("Portfolio URL", "web"), ("Personal Website (optional)", "web"), ("GitHub / Portfolio", "gh"),
+    ("How did you hear about us? (LinkedIn)", None), ("Did you find this job on LinkedIn?", None), ("Company website", None), ("Portfolio password", None),
+])
+def test_links_are_filled_by_code_only_where_the_label_asks_for_them(label, want):
+    contact = {"linkedin": "li", "github": "gh", "portfolio": "web"}
+    assert llm._link({"type": "text", "label": label}, contact, {}) == want
+
+
+def test_link_falls_back_to_a_saved_answer_and_skips_choice_fields():
+    saved = {"github_url": {"answer": "gh-saved"}}
+    assert llm._link({"type": "text", "label": "GitHub"}, {"github": ""}, saved) == "gh-saved"
+    assert llm._link({"type": "select", "label": "LinkedIn"}, {"linkedin": "li"}, {}) is None
+
+
 def test_analyze_accept_refuses_leaks_bad_options_and_unknown_fields(d):
     jid = scored(d)
     j = store.jdir(d, jid)

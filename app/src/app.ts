@@ -10,10 +10,10 @@ import { createPipeline } from './pipeline'
 import { startBridge, type ToolResult } from './bridge'
 import { createCards, finalFor, recordStage, typicalMs, type Card, type Final, type JobLine, type Stage } from './cards'
 import * as F from './forms'
-import { allJobs, code, findJob, jobDir, jobTitle, JOB_RE, lastDetail, logDecision, readDecisions, readJob, readOutcomes, readScreened } from './jobs'
+import { allJobs, code, findJob, jobDir, jobTitle, JOB_RE, lastDetail, logDecision, readDecisions, readJob, readOutcomes, readScreened, canOpenForm } from './jobs'
 import { clock, CURRENCIES, esc, heading, isUS, kb, nav, note, parseList, parseNumber, plural, quote, short, splitMsg, type Btn, type Page } from './kit'
 import * as OB from './onboarding'
-import { kitPage, readKit } from './applykit'
+import { handoffDonePage, handoffPage, kitPage, readKit } from './applykit'
 import { insightsPage, scoreSuggestion } from './insights'
 import { looksLikeAddress, pageButtons, phoneUrl, plain, setPhoneUrl, startDashboard, TAPS, type DashDeps } from './dashboard'
 import * as P from './pages'
@@ -81,7 +81,7 @@ export function extractUrls(text: string): string[] {
 }
 
 // A posting on a job site or careers pages; and a LinkedIn person page, which is never a job.
-export const isJobLink = (u: string) => /greenhouse\.io|lever\.co|ashbyhq\.com|indeed\.com|glassdoor\.|ziprecruiter\.com|\/(jobs?|careers?)([/?]|$)/i.test(u)
+export const isJobLink = (u: string) => /greenhouse\.io|lever\.co|ashbyhq\.com|breezy\.hr|recruitee\.com|ats\.rippling\.com|indeed\.com|glassdoor\.|ziprecruiter\.com|\/(jobs?|careers?)([/?]|$)/i.test(u)
 export const isProfileLink = (u: string) => /^https?:\/\/([\w-]+\.)*linkedin\.com\/(in|pub)\//i.test(u)
 
 type Base = { chat: number; msg: number; at: number }
@@ -111,7 +111,7 @@ export function claims(p: Pending, text: string): boolean {
   }
   if (!urls.length || p.kind === 'company') return true // a company is added by its job board link
   if (urls.some(isJobLink)) return false
-  if (p.kind === 'contact') return p.key === 'linkedin' || p.key === 'portfolio'
+  if (p.kind === 'contact') return ['linkedin', 'github', 'portfolio'].includes(p.key)
   return p.kind === 'answer' || p.kind === 'edit' || p.kind === 'change' || p.kind === 'achievement'
 }
 
@@ -933,12 +933,19 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
     await run(['boards', 'add', c.ats ?? 'greenhouse', slug])
     return { company: String(c.company), open_jobs: c.open_jobs ?? undefined }
   }
-  async function addAchievement(text: string): Promise<string | null> {
+  const savedOf = (id: string) => existsSync(join(jobDir(id), 'review.json')) ? 'review' as const : existsSync(join(jobDir(id), 'kit.json')) ? 'kit' as const : undefined
+  // Waiting reviews were tailored without the newest facts. A job with a task running or queued is left to it.
+  const waitingReviews = () => allJobs().filter(j => j.status === 'AWAITING_APPROVAL' && !busyJob(j.id)).map(j => j.id)
+  const factsPage = (msg = '', pg = 0) => P.achievementsPage(achievements(), msg, pg, waitingReviews().length, readSection('Confirmed skills').confirmed ?? '')
+  const tidyFact = (text: string) => text.trim().replace(/^[-•*]+\s+/, '').replace(/\s+/g, ' ')
+  async function addAchievement(raw: string): Promise<string | null> {
+    const text = tidyFact(raw)
     const used = new Set(achievements().map(([k]) => k))
     const key = [...Array(P.ACH_MAX)].map((_, i) => `a${i + 1}`).find(k => !used.has(k))
     if (!key) return 'That is the most I keep. Remove one first.'
-    if (text.trim().length < 10) return 'Tell me a little more: what you did and what came of it.'
-    const r = await run(['profile', 'set-field', 'Achievements', key, text])
+    if (text.length < 10) return 'Tell me a little more: what you did and what came of it.'
+    if (text.length > P.FACT_CHARS) return `That is too long to keep whole (${P.FACT_CHARS} characters at most). Send one thing at a time.`
+    const r = await run(['profile', 'set-field', '--', 'Achievements', key, text]) // "--": a fact may start with a dash
     return r.ok ? null : r.error ?? 'could not save'
   }
   const rewriteAnswer = (a: P.AnswerRec, text: string) =>
@@ -954,6 +961,7 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
     return r.ok ? null : r.code === 'no_text' ? "I couldn't find any text in it (is it a scan?). Send a text-based PDF or a .docx." : r.code === 'too_many' ? 'You have the most versions I keep. Remove one first.' : 'I couldn\'t open that file. Try saving it again as PDF.'
   }
   let loginOpen = false // one login window at a time: they share JobAgent's browser profile
+  let formOpen = false // a filled form waiting for the user in a window (same browser profile)
   // Jobs that failed because a job site wanted a login (fetch's detail starts with the site name), so a login can retry them.
   const needLogin = (site: string) => allJobs().filter(j => j.status === 'FAILED' && /\blogged in\b/i.test(lastDetail(j)) && lastDetail(j).startsWith(ST.JOB_SITES[site]))
   // From Python's cache: checking for real opens a browser, which takes seconds (v3 P4).
@@ -1017,13 +1025,25 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
       await api.sendDocument(chat, new InputFile(r.path, 'jobagent-applications.csv'), { caption: `📋 ${(r.rows as unknown[]).length} jobs. Opens in Excel, Numbers or Google Sheets.`, disable_notification: true })
       return '⬇️ Sent below'
     }
-    if ((m = /^j:(v|rt|any|x|sk|o|ap|kit|rc|fu|zz|pr|go):([0-9a-f]{8})(?::([iorg]))?$/.exec(data))) {
+    if ((m = /^j:(v|rt|any|x|sk|o|ap|kit|rc|fu|zz|pr|go|of|dl|dx):([0-9a-f]{8})(?::([iorg]))?$/.exec(data))) {
       const id = findJob(m[2]), j = id ? readJob(id) : null
-      if (!id || !j) return 'That job no longer exists.'
+      if (!id || !j || j.deleted) return 'That job no longer exists.'
       const onCard = cards.all().some(c => c.msg === msg)
       const running = busyJob(id)
-      const detail = async () => P.jobPage(readJob(id)!, { usedPct: usedBy(id), running: busyJob(id), hasForm: F.openForms().some(f => f.job_id === id), outcome: readOutcomes()[id] })
+      const detail = async () => P.jobPage(readJob(id)!, { saved: savedOf(id), usedPct: usedBy(id), running: busyJob(id), hasForm: F.openForms().some(f => f.job_id === id), outcome: readOutcomes()[id] })
       if (m[1] === 'v') return detail()
+      if (m[1] === 'dl') return P.deletePage(j)
+      if (m[1] === 'dx') {
+        if (running) return 'I am working on it. Stop it first, then delete it.'
+        if (formOpen) return 'Close the filled form window first.'
+        review.cancelAuto(id)
+        const r = await run(['job', 'delete', id])
+        if (!r.ok) return `Could not delete it: ${r.error}`
+        for (const f of F.openForms()) if (f.job_id === id) F.saveForm({ ...f, status: 'skipped', updated_at: Date.now() })
+        readJob(id) // re-read now: the folder watcher reports the change a moment later
+        toast.text = '🗑 Deleted'; refresh()
+        return P.jobsPage(allJobs(), 'a', 0, readOutcomes())
+      }
       if (m[1] === 'kit') { await sendKitFiles(id); return kitPage(j, readKit(id)) }
       if (m[1] === 'zz') { writeJson(FOLLOW_FILE, { ...readJson<P.FollowState>(FOLLOW_FILE, {}), [id]: { snooze_until: new Date(Date.now() + 7 * 86_400_000).toISOString() } }); toast.text = '⏰ I will ask again in a week'; return { text: `${heading('⏰', 'Asking again in a week')}\n${esc(jobTitle(j))}`, rows: [nav('J:d:0')] } }
       if (m[1] === 'pr') {
@@ -1069,6 +1089,21 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
         if (!r.ok) return `Could not do that: ${r.error}`
         continueJob(id, 'retry'); toast.text = '🚀 Preparing it for real. You review it again before it is sent.'; return onCard ? undefined : detail()
       }
+      if (m[1] === 'of') {
+        if (running) return 'I am already working on it.'
+        if (formOpen) return 'A filled form is already open on your computer. Finish or close it first.'
+        if (!canOpenForm(id, j.status, lastDetail(j))) return 'There is no filled form to open for this one.'
+        formOpen = true
+        const wait = handoffPage(j, practiceOn(s))
+        const sent = await api.sendMessage(chat, wait.text, { ...OPTS, reply_markup: kb(wait) }).catch(e => { formOpen = false; throw e })
+        void run(['handoff', id]).then(async r => {
+          if (r.ok && r.submitted) logDecision(id, 'applied_self')
+          refresh()
+          await editAt(chat, sent.message_id, handoffDonePage(j, r))
+        }).catch(e => logError('handoff failed', e)).finally(() => { formOpen = false })
+        toast.text = '🖥 Opening it on your computer'
+        return onCard ? undefined : detail()
+      }
       if (m[1] === 'rt') { if (running) return 'I am already working on it.'; continueJob(id, 'retry'); toast.text = '🔄 On it. Watch the new card below.'; return onCard ? undefined : detail() }
       if (m[1] === 'any') {
         if (running) return 'I am already working on it.'
@@ -1092,7 +1127,7 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
     if ((m = /^x:([\w-]+)$/.exec(data))) { const k = m[1]; if (searching && k.startsWith('search-')) stoppedSearches.add(k); const hit = stopTasks(t => t.id === k || t.payload.parent === k); finishSearchIfDone(k); return hit || stoppedSearches.has(k) ? '✋ Stopping…' : 'That is already finished.' }
 
     // Review
-    if ((m = /^r:(ok|ch|sk|nv|nx|cx|rv|ss|ea|or|fl|df|hv):([0-9a-f]{8})(?::(\d{1,3}))?$/.exec(data))) return review.press(m[1], m[2], chat, msg, m[3])
+    if ((m = /^r:(ok|ch|sk|nv|nx|cx|rv|ss|ea|or|fl|df|hv|an):([0-9a-f]{8})(?::(\d{1,3}))?$/.exec(data))) return review.press(m[1], m[2], chat, msg, m[3])
 
     if (data === 'ap:resume') { review.resumeAuto(); toast.text = '▶ Auto-apply resumed'; return P.home(homeCtx()) }
     if (data === 'ap:on' || data === 'ap:off') { // Settings → How I apply
@@ -1218,7 +1253,15 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
 
     // Profile & saved answers
     if (data === 'p:edit') return P.contactEditPage(await contactFields(), OB.PROFILE_FIELDS)
-    if (data === 'p:ach') return P.achievementsPage(achievements())
+    if (data === 'p:ach') return factsPage()
+    if ((m = /^p:ach:pg:(\d{1,2})$/.exec(data))) return factsPage('', Number(m[1]))
+    if (data === 'p:ach:use') {
+      const ids = waitingReviews()
+      if (!ids.length) return 'Nothing is waiting for review right now.'
+      for (const id of ids) requestChange(id, 'SYSTEM: the user added to their fact bank ("## Achievements" in profile.md). Re-tailor the resume using any fact that fits, re-run the dry fill, rebuild the review and send it again.')
+      toast.text = `🔁 Reworking ${ids.length}. Fresh reviews follow.`
+      return factsPage(toast.text)
+    }
     if (data === 'p:ach:add') {
       const have = achievements()
       if (have.length >= P.ACH_MAX) return 'That is the most I keep. Remove one first.'
@@ -1227,7 +1270,7 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
     }
     if ((m = /^p:ach:rm:(a\d{1,2})$/.exec(data))) {
       const r = await run(['profile', 'set-field', 'Achievements', m[1], ''])
-      return r.ok ? P.achievementsPage(achievements(), '🗑 Removed.') : `Could not remove it: ${r.error}`
+      return r.ok ? factsPage('🗑 Removed.') : `Could not remove it: ${r.error}`
     }
     if (data === 'p:rv') return P.versionsPage(versions())
     if (data === 'p:rv:add') {
@@ -1305,10 +1348,10 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
       }
       case 'view:job': {
         const id = str(b.id, 80), j = readJob(id)
-        if (!j) throw new Error('That job no longer exists.')
+        if (!j || j.deleted) throw new Error('That job no longer exists.')
         const running = busyJob(id), hasForm = F.openForms().some(f => f.job_id === id)
-        const pg = P.jobPage(j, { usedPct: usedBy(id), running, hasForm, outcome: readOutcomes()[id] })
-        return { running, has_form: hasForm, used_pct: usedBy(id) ?? null, actions: pageButtons(pg.rows.flat()), kit: j.status === 'KIT_READY' ? readKit(id) : null, code: code(id) }
+        const pg = P.jobPage(j, { saved: savedOf(id), usedPct: usedBy(id), running, hasForm, outcome: readOutcomes()[id] })
+        return { running, has_form: hasForm, used_pct: usedBy(id) ?? null, actions: [...pageButtons(pg.rows.flat()), ...(pg.rows.flat().some(b => 'data' in b && b.data === `j:dl:${code(id)}`) ? [{ text: '🗑 Delete', data: `j:dx:${code(id)}`, style: 'danger', confirm: P.deleteWarning(j) }] : [])], kit: j.status === 'KIT_READY' ? readKit(id) : null, code: code(id) }
       }
       case 'view:settings': {
         const b2 = await boards(), learned = readJson<Record<string, unknown>>(join(DATA, 'boards_learned.json'), {})
@@ -1556,7 +1599,7 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
       const e = await addAchievement(text)
       if (e) { if (!e.startsWith('That is the most')) pending = p; return fail(e) }
       tidy()
-      await editAt(p.chat, p.msg, P.achievementsPage(achievements(), '✅ Saved.'))
+      await editAt(p.chat, p.msg, factsPage(`✅ Saved: ${note(esc(short(tidyFact(text), 100)))}`))
       return true
     }
     if (p.kind === 'contact') {
@@ -1698,6 +1741,19 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
 
   bot.on('message:text', async ctx => {
     const text = ctx.message.text, urls = extractUrls(text)
+    // "remember: …" is saved by code, whatever screen is open: it never goes to Claude as chat.
+    const fact = /^\s*(?:\/remember(?:@\w+)?(?=\s|:|$)\s*:?|remember\s*:)\s*([\s\S]*)$/i.exec(text)?.[1]
+    if (fact !== undefined && loadSettings().onboarded) {
+      if (!fact.trim()) {
+        const m = await show(ctx, P.achievementPrompt(achievements().length))
+        pending = { kind: 'achievement', chat: m.chat.id, msg: m.message_id, at: Date.now() }
+        return
+      }
+      const e = await addAchievement(fact)
+      if (e) await ctx.reply(`❌ ${esc(e)}`, { ...OPTS, reply_markup: kb([[{ text: '🧠 Fact bank', data: 'p:ach' }]]) })
+      else await show(ctx, P.rememberedPage(tidyFact(fact), waitingReviews().length))
+      return
+    }
     if (await capture(ctx, text)) return // the one screen the user has open, if any
     const s = loadSettings()
     if (urls.length) {
@@ -1813,6 +1869,7 @@ ${note(`No notification sounds until ${clock(snoozeUntil)}. Work continues.`)}`,
               { command: 'review', description: '🔔 Applications waiting for your OK' },
               { command: 'search', description: '🔎 Look for new jobs now' },
               { command: 'jobs', description: '📋 All your jobs and applications' },
+              { command: 'remember', description: '🧠 Add something you did to your fact bank' },
               { command: 'settings', description: '⚙️ What I look for and how I apply' },
               { command: 'pause', description: '⏸ Pause after the current step' },
               { command: 'resume', description: '▶️ Continue' },

@@ -10,7 +10,7 @@ How actions reach the app (`dashCall` in `app/src/app.ts`):
 - **Buttons** that mirror a Telegram button send its callback code to `POST /api/do {op:"tap"}`. Only codes matching
   `TAPS` in `dashboard.ts` are accepted, and they run through the same `route()` the chat uses. Pairing, onboarding,
   version and anything that would send a file into the chat are not on the list.
-- **Typed input** (a job link, a setting, a contact field, an achievement, a saved answer, a form, a code, a change
+- **Typed input** (a job link, a setting, a contact field, a fact, a saved answer, a form, a code, a change
   request, a resume upload) has its own `op`, which uses the same helpers as the chat and validates the same way.
 - **Approve** still goes through `POST /api/job/<id>/approve` with the `plan_hash` of the review the page showed, then
   `review.approve`, so practice mode and the plan check apply unchanged.

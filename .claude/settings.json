@@ -13,6 +13,8 @@
     ],
     "deny": [
       "Bash(uv run --project agent jobagent submit:*)",
+      "Bash(uv run --project agent jobagent handoff:*)",
+      "Bash(uv run --project agent jobagent job delete:*)",
       "Bash(uv run --project agent jobagent pair:*)",
       "Bash(uv run --project agent jobagent credentials:*)",
       "Bash(uv run --project agent jobagent login:*)",

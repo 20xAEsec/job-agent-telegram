@@ -6,10 +6,10 @@
     "not_a_resume": {"type": "boolean"},
     "contact": {
       "type": "object", "additionalProperties": false,
-      "required": ["full_name", "email", "phone", "location", "linkedin", "portfolio"],
+      "required": ["full_name", "email", "phone", "location", "linkedin", "github", "portfolio"],
       "properties": {
         "full_name": {"type": "string"}, "email": {"type": "string"}, "phone": {"type": "string"},
-        "location": {"type": "string"}, "linkedin": {"type": "string"}, "portfolio": {"type": "string"}
+        "location": {"type": "string"}, "linkedin": {"type": "string"}, "github": {"type": "string"}, "portfolio": {"type": "string"}
       }
     },
     "summary": {"type": "string"},

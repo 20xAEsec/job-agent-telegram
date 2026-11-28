@@ -62,7 +62,7 @@ _PATTERNS = [
     ("an email address", re.compile(r"[\w.+-]+@(?!example\.(?:com|org)\b|users\.noreply\.github\.com\b)[\w-]+(?:\.[\w-]+)+"), "<removed>"),
     ("a folder under your user name", re.compile(r"[A-Za-z]:\\Users\\[^\\\s]+|/Users/[^/\s]+|/home/[^/\s]+"), "~"),
 ]
-_PROFILE_LINE = re.compile(r"^- (?:full_name|email|phone|location|linkedin|portfolio):\s*(\S.*)$", re.M)
+_PROFILE_LINE = re.compile(r"^- (?:full_name|email|phone|location|linkedin|github|portfolio):\s*(\S.*)$", re.M)
 
 
 def _personal(d: Path) -> list[str]:

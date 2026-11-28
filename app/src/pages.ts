@@ -2,7 +2,7 @@
 import { createHash } from 'crypto'
 import type { Live, Usage } from './agent'
 import type { Form } from './forms'
-import { code, inProgress, jobTitle, lastDetail, needsYou, statusOf, type Job, type Screened } from './jobs'
+import { code, inProgress, jobTitle, lastDetail, needsYou, statusOf, type Job, type Screened, canOpenForm } from './jobs'
 import { ago, bar, breakdownLines, elapsed, esc, heading, kv, label, money, mustHaveLine, nav, note, pairs, plural, quote, short, until, type Btn, type Page } from './kit'
 import { practiceForced, practiceOn, SOURCES, type Settings } from './state'
 
@@ -32,7 +32,7 @@ const CHECK_TEXT: Record<string, [label: string, fix: string]> = {
 export const problemsFrom = (checks: Check[], docxResume: boolean) =>
   checks.filter(c => !c.ok && (c.required || c.name === 'disk space' || (c.name === 'docx->pdf converter' && docxResume))).map(c => CHECK_TEXT[c.name]?.[1] ?? `${esc(c.name)}: ${esc(c.detail)}`)
 
-const ATS_NAME: Record<string, string> = { greenhouse: 'Greenhouse', lever: 'Lever', ashby: 'Ashby' }
+const ATS_NAME: Record<string, string> = { greenhouse: 'Greenhouse', lever: 'Lever', ashby: 'Ashby', breezy: 'Breezy', recruitee: 'Recruitee', rippling: 'Rippling' }
 export const sentForReal = (real: Record<string, number>) => // v3 P3: the first 3 real sends on each form type wait for the user
   `📮 Sent for real: ${Object.entries(ATS_NAME).map(([k, n]) => `${n} ${real[k] ?? 0}`).join(' · ')}`
 export function healthPage(checks: Check[] | null, at?: number, extra: string[] = [], updates = 0): Page {
@@ -407,7 +407,12 @@ export function jobsPage(jobs: Job[], tab: string, pg: number, outcomes: Record<
 export const OUTCOMES: Record<string, string> = { i: 'interview', o: 'offer', r: 'rejected', g: 'ghosted' }
 const OUTCOME_LABEL: Record<string, string> = { interview: '🗣 Interview', offer: '🎉 Offer', rejected: '👎 Rejected', ghosted: '🦗 No reply' }
 
-export function jobPage(j: Job, x: { running: boolean; hasForm: boolean; outcome?: string; usedPct?: number }): Page {
+// The saved copy of a prepared or sent application: every answer, the filled form and the files, sent into the chat.
+const savedRows = (c: string): Btn[][] => [
+  [{ text: '🧾 Answers', data: `r:an:${c}` }, { text: '🖼 Show the form', data: `r:ss:${c}` }, { text: '📎 Files', data: `r:fl:${c}` }],
+]
+
+export function jobPage(j: Job, x: { running: boolean; hasForm: boolean; outcome?: string; usedPct?: number; saved?: 'review' | 'kit' }): Page {
   const c = code(j.id), st = statusOf(j.status)
   const timeline = j.history.slice(-5).reverse().map(h => `${statusOf(h.status).emoji} ${esc(statusOf(h.status).text)}${h.detail ? `: ${esc(short(h.detail, 80))}` : ''} ${note(`· ${ago(h.at)}`)}`)
   const text = [
@@ -427,10 +432,13 @@ export function jobPage(j: Job, x: { running: boolean; hasForm: boolean; outcome
   if (j.status === 'AWAITING_APPROVAL') act.push([{ text: '👀 Open the review', data: `r:rv:${c}`, style: 'success' }])
   if (j.status === 'KIT_READY') act.push([{ text: '🧰 Show my kit', data: `j:kit:${c}`, style: 'success' }, { text: '✅ I applied', data: `j:ap:${c}` }])
   if (j.status === 'NEEDS_ANSWERS' && x.hasForm) act.push([{ text: '❓ Open Questions', data: 'F:list', style: 'success' }])
+  if (!x.running && canOpenForm(j.id, j.status, lastDetail(j))) act.push([{ text: '🖥 Open filled form', data: `j:of:${c}`, style: 'success' }])
   if ((j.status === 'NEEDS_HUMAN' || j.status === 'FAILED') && !x.running) act.push([{ text: '🔄 Try again', data: `j:rt:${c}`, style: 'success' }, { text: '✅ I applied myself', data: `j:ap:${c}` }])
   if (j.status === 'SKIPPED' && !x.running) act.push([{ text: '↩ Apply anyway', data: `j:any:${c}` }])
   if (x.running) act.push([{ text: '✋ Stop working on it', data: `j:x:${c}`, style: 'danger' }])
   if (j.status === 'SUBMITTED' || j.status === 'DRY_RUN_DONE') act.push([{ text: j.status === 'SUBMITTED' ? '🧾 Receipt' : '🧾 Practice receipt', data: `j:rc:${c}` }])
+  if (x.saved === 'review' && ['SUBMITTED', 'APPLIED_SELF', 'DRY_RUN_DONE'].includes(j.status)) act.push(...savedRows(c))
+  if (x.saved === 'kit' && j.status === 'APPLIED_SELF') act.push([{ text: '🧰 Show my kit', data: `j:kit:${c}` }])
   if (x.outcome === 'interview' && !x.running) act.push([{ text: '🎤 Interview prep', data: `j:pr:${c}`, style: 'success' }])
   if ((j.status === 'SUBMITTED' || j.status === 'APPLIED_SELF') && !x.running && (!x.outcome || x.outcome === 'ghosted')) act.push([{ text: '✍️ Draft a follow-up email', data: `j:fu:${c}` }])
   if (j.status === 'DRY_RUN_DONE' && !x.running) act.push([{ text: '🚀 Apply for real', data: `j:go:${c}`, style: 'success' }, { text: '✅ I applied myself', data: `j:ap:${c}` }])
@@ -440,7 +448,20 @@ export function jobPage(j: Job, x: { running: boolean; hasForm: boolean; outcome
   }
   const links: Btn[] = [...(j.url ? [{ text: '🔗 Posting', url: j.url }] : [])]
   if (!st.done && j.status !== 'APPROVED' && j.status !== 'SUBMITTING' && !x.running) links.push({ text: '⏭ Skip it', data: `j:sk:${c}` })
+  if (!x.running && j.status !== 'APPROVED' && j.status !== 'SUBMITTING') links.push({ text: '🗑 Delete', data: `j:dl:${c}` })
   return { text, rows: [...act, ...(links.length ? [links] : []), nav('J:a:0')] }
+}
+
+// What Delete does, in the user's words: shown before it happens, on the phone and the dashboard.
+export const deleteWarning = (j: Job) => j.history.some(h => h.status === 'SUBMITTED')
+  ? 'This one was sent. Deleting removes it from your lists and clears its files, but it cannot unsend it: the employer still has your application. I keep a small hidden record so it is never sent twice.'
+  : 'Removes it and its files from this computer. Auto-search will not offer it again. If you send the link yourself, it starts fresh.'
+export function deletePage(j: Job): Page {
+  const c = code(j.id)
+  return {
+    text: [heading('🗑', 'Delete this job?'), `<b>${esc(jobTitle(j))}</b>`, '', esc(deleteWarning(j))].join('\n'),
+    rows: [[{ text: '🗑 Yes, delete', data: `j:dx:${c}`, style: 'danger' }, { text: 'Keep it', data: `j:v:${c}` }]],
+  }
 }
 
 export type Receipt = { at: string; url: string; plan_hash: string; practice: boolean; files: string[]; answers: number; screenshot?: string }
@@ -456,7 +477,7 @@ export function receiptPage(j: Job, r: Receipt | null): Page {
       kv('Files', esc(r.files.join(', ') || 'none')),
       kv('Fingerprint', `<code>${esc(r.plan_hash.slice(0, 12))}</code> ${note('matches what you approved')}`),
     ].join('\n'),
-    rows: [...(r.url ? [[{ text: '🔗 Posting', url: r.url }]] : []), ...back],
+    rows: [...savedRows(code(j.id)), ...(r.url ? [[{ text: '🔗 Posting', url: r.url }]] : []), ...back],
   }
 }
 
@@ -495,35 +516,49 @@ export function profilePage(s: Settings, contact: Record<string, string>, answer
     rows: [
       [{ text: '💾 Saved answers', data: 'a:l:0' }, { text: '✏️ Contact details', data: 'p:edit' }],
       [{ text: '📄 Replace resume', data: 'p:resume' }, { text: '🎯 What I look for', data: 'S:search' }],
-      [{ text: '🏆 Achievements', data: 'p:ach' }, { text: '📚 Resume versions', data: 'p:rv' }],
+      [{ text: '🧠 Fact bank', data: 'p:ach' }, { text: '📚 Resume versions', data: 'p:rv' }],
       nav(),
     ],
   }
 }
 
-// Wins the user never put on the resume: tailoring may use them as true facts (profile.md, ## Achievements).
-export const ACH_MAX = 12
+// The fact bank: things the user did that are on no resume. Tailoring may use them as true facts (profile.md, ## Achievements).
+export const ACH_MAX = 60, FACT_CHARS = 600
+const ACH_PER = 5 // five full-length facts fit one Telegram message
 const ACH_PROMPTS = [
   'A result you are proud of, with a number if you have one (saved time, money, users, speed).',
   'Something you built or launched, and who used it.',
   'A problem you fixed that others had given up on.',
   'A time you led people or a project, and how it went.',
+  'A tool or task you handled at work that your resume never mentions.',
 ]
-export function achievementsPage(items: [string, string][], msg = ''): Page {
+// Applications already waiting for review were tailored without the newest facts: offer to redo them.
+const useFactsRow = (waiting: number): Btn[][] => (waiting ? [[{ text: `🔁 Use on ${plural(waiting, 'waiting review')}`, data: 'p:ach:use' }]] : [])
+export function achievementsPage(items: [string, string][], msg = '', pg = 0, waiting = 0, skills = ''): Page {
+  const pages = Math.max(1, Math.ceil(items.length / ACH_PER)), p = Math.min(Math.max(pg, 0), pages - 1), from = p * ACH_PER
+  const slice = items.slice(from, from + ACH_PER)
   return {
-    text: [heading('🏆', 'Achievements'), note('Wins that are not on your resume yet. I may use them when I tailor your resume, word for word in meaning, never made bigger.'), '',
-      ...(items.length ? items.map(([, v], i) => `<b>${i + 1}.</b> ${esc(v)}`) : [note('None yet.')]),
+    text: [heading('🧠', 'Fact bank'), note('Things you did at work that your resume does not say. I use them when they fit a job, never made bigger. Add one any time by sending <code>remember: …</code> and name the job it was at.'),
+      ...(pages > 1 ? [note(`${plural(items.length, 'fact')} · page ${p + 1} of ${pages}`)] : []), '',
+      ...(items.length ? slice.map(([, v], i) => `<b>${from + i + 1}.</b> ${esc(v)}`) : [note('No facts yet.')]),
+      ...(skills ? ['', `✋ <b>Confirmed skills</b>: ${esc(skills)}`] : []),
       ...(msg ? ['', msg] : [])].join('\n'),
     rows: [
-      ...(items.length < ACH_MAX ? [[{ text: '➕ Add one', data: 'p:ach:add', style: 'primary' as const }]] : []),
-      ...pairs(items.map(([k], i) => ({ text: `🗑 ${i + 1}`, data: `p:ach:rm:${k}` })), 6),
+      ...(items.length < ACH_MAX ? [[{ text: '➕ Add a fact', data: 'p:ach:add', style: 'primary' as const }]] : []),
+      ...pairs(slice.map(([k], i) => ({ text: `🗑 ${from + i + 1}`, data: `p:ach:rm:${k}` })), 5),
+      ...(pages > 1 ? [[{ text: p > 0 ? '◀ Previous' : ' ', data: p > 0 ? `p:ach:pg:${p - 1}` : 'noop' }, { text: p < pages - 1 ? 'Next ▶' : ' ', data: p < pages - 1 ? `p:ach:pg:${p + 1}` : 'noop' }]] : []),
+      ...(items.length ? useFactsRow(waiting) : []),
       nav('m:prof'),
     ],
   }
 }
 export const achievementPrompt = (n: number): Page => ({
-  text: `${heading('🏆', 'Tell me one win')}\n${ACH_PROMPTS[n % ACH_PROMPTS.length]}\n\n${note('One or two sentences. Only what really happened.')}`,
+  text: `${heading('🧠', 'Tell me one thing you did')}\n${ACH_PROMPTS[n % ACH_PROMPTS.length]}\n\n${note('Name the job it was at, so it lands in the right place. One or two sentences. Only what really happened.')}`,
   rows: [[{ text: '✖ Cancel', data: 'p:ach' }]],
+})
+export const rememberedPage = (fact: string, waiting: number): Page => ({
+  text: `${heading('🧠', 'Remembered')}\n${quote(esc(fact))}\n${note('I will use it when it fits a job.')}`,
+  rows: [...useFactsRow(waiting), [{ text: '🧠 Fact bank', data: 'p:ach' }]],
 })
 
 // Other versions of the resume (another focus, an older one): the ATS rebuild picks the best lines from all of them.
@@ -624,8 +659,8 @@ const HELP: Record<string, [string, string]> = {
   approve: ['✅ Approving & auto-apply', 'By default <b>you approve every application</b>. An approval is tied to the exact answers and files you saw: if anything changes, I ask again.\n\n<b>Auto-apply</b> (Settings → How I apply) sends only very strong matches on its own, after a countdown with a Cancel button. Unusual forms and private questions always come to you.'],
   privacy: ['🔒 Your data', 'Everything (your profile, answers and resume) stays in the <code>data</code> folder on your computer. The thinking runs on your own Claude account.\n\nTelegram bot chats are not end-to-end encrypted, so private answers are hidden behind a tap. Job postings are treated as untrusted text and can never give me instructions.'],
   stop: ['⏸ Pausing & stopping', '<b>⏸ Pause</b> (Home) finishes nothing new: links you send wait in line until you resume.\n<b>✋ Stop</b> on a job card stops that job right away.\n/stop pauses and stops everything that is running.\n\nClosing the JobAgent window on your computer turns me off completely.'],
-  more: ['✨ Insights, prep & dashboard', '<b>📊 Insights</b> (Jobs → Insights): where your applications go and which matches get interviews. A weekly summary comes on Monday.\n<b>🎤 Interview prep</b>: mark a job Interview, then tap it for a prep pack built from your own profile.\n<b>✍️ Follow-ups</b>: after a week with no news I ask how it went and can draft a follow-up email for you.\n<b>🖥 Dashboard</b> (Home): your whole pipeline on one screen, on your computer.\n<b>🏆 Achievements</b> (Profile): wins that are not on your resume yet; I may use them when tailoring.'],
-  trouble: ['🛠 Troubleshooting', '<b>I don\'t answer:</b> is the JobAgent window still open on your computer, and is the computer awake?\n<b>"Usage limit reached":</b> your Claude plan\'s limit. I wait and continue by myself.\n<b>A job is "stuck":</b> it hit a login, CAPTCHA or an unusual page. Open it in Jobs and tap Try again, or apply by hand.\n<b>LinkedIn or Indeed wants a login:</b> ⚙️ Settings → 🔑 Job site logins. Log in once in the window that opens on your computer, then tap Try again.\n<b>Greenhouse, Lever and Ashby</b> application forms can be filled. For LinkedIn and Indeed links I look for the employer\'s own form first; other links are scored, and good matches get an application kit (your tailored resume and drafted answers) so you can apply yourself, then tap I applied.'],
+  more: ['✨ Insights, prep & dashboard', '<b>📊 Insights</b> (Jobs → Insights): where your applications go and which matches get interviews. A weekly summary comes on Monday.\n<b>🎤 Interview prep</b>: mark a job Interview, then tap it for a prep pack built from your own profile.\n<b>✍️ Follow-ups</b>: after a week with no news I ask how it went and can draft a follow-up email for you.\n<b>🖥 Dashboard</b> (Home): your whole pipeline on one screen, on your computer.\n<b>🧠 Fact bank</b>: send <code>remember: …</code> with something you did at a job that your resume leaves out; I use it when tailoring.'],
+  trouble: ['🛠 Troubleshooting', '<b>I don\'t answer:</b> is the JobAgent window still open on your computer, and is the computer awake?\n<b>"Usage limit reached":</b> your Claude plan\'s limit. I wait and continue by myself.\n<b>A job is "stuck":</b> it hit a login, CAPTCHA or an unusual page. Open it in Jobs and tap Try again, or apply by hand.\n<b>LinkedIn or Indeed wants a login:</b> ⚙️ Settings → 🔑 Job site logins. Log in once in the window that opens on your computer, then tap Try again.\n<b>Greenhouse, Lever, Ashby, Breezy, Recruitee and Rippling</b> application forms can be filled. For LinkedIn and Indeed links I look for the employer\'s own form first; other links are scored, and good matches get an application kit (your tailored resume and drafted answers) so you can apply yourself, then tap I applied.'],
 }
 export function helpPage(topic?: string): Page {
   const t = topic && HELP[topic]

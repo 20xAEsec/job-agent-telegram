@@ -1,0 +1,34 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Data Analyst - Acme</title></head>
+<body>
+<!-- Structure of a Breezy apply page (<co>.breezy.hr/p/<id>/apply), hand-built from its live markup (not a byte-for-byte recording).
+     No per-question box: each question is the heading above it. A honeypot box hides in an aria-hidden div. Submit and Enter spies must never fire. -->
+<form name="form" novalidate>
+  <div class="apply-container"><ul class="apply-buttons"><li><a class="button resume" href="#">Upload Resume</a></li><li><a class="button indeed" href="#">Use My Indeed Resume</a></li></ul></div>
+  <div class="section-header"><input id="resume_required" type="hidden" value="optional">
+    <div class="file-input-container"><input id="main-attachment" name="cResume" type="file" style="display:none"></div></div>
+  <div class="section"><div class="section-header"><h2>Personal Details</h2></div>
+    <h3><span>Full Name</span><span class="required" title="Required">*</span></h3>
+    <input required placeholder="Full Name" type="text" name="cName"><div class="form-divider"></div>
+    <h3><span>Email Address</span><span class="required" title="Required">*</span></h3>
+    <input required placeholder="Email Address" type="email" name="cEmail"><div class="form-divider"></div>
+    <h3><span>Phone Number</span></h3>
+    <input placeholder="Phone Number" type="text" name="cPhoneNumber">
+    <ul class="options"><li class="option consent-form"><input type="checkbox" name="smsConsent"><span>By providing your phone number you agree to receive text messages.</span></li></ul>
+  </div>
+  <div class="section"><div class="section-header"><h3><span>Experience Summary</span></h3></div><textarea name="cSummary" maxlength="500"></textarea></div>
+  <div class="section"><div class="section-header"><h3><span>Questionnaire</span></h3></div>
+    <h3><span>Are you legally authorized to work in the United States?</span><span class="required" title="Required">*</span></h3>
+    <ul class="options"><li class="option"><input type="radio" name="q_auth" value="0" required><span>Yes</span></li><li class="option"><input type="radio" name="q_auth" value="1" required><span>No</span></li></ul>
+    <h3><span>Earliest start date</span></h3><input type="date" name="q_start">
+  </div>
+  <div class="section"><div class="section-header"><h3><span>Cover Letter</span></h3></div><textarea name="cCoverLetter"></textarea></div>
+  <div class="apply-field-extra" aria-hidden="true"><label for="hp_7f2b"></label><input id="hp_7f2b" tabindex="-1" type="text" name="hp_7f2b"></div>
+  <div class="apply-container"><button class="button green" type="submit">Submit Application</button></div>
+</form>
+<script>
+  const spy = k => { window['__' + k] = (window['__' + k] || 0) + 1; fetch('/__spy?k=' + k) }
+  document.querySelector('form').addEventListener('submit', e => { e.preventDefault(); spy('submitted') })
+  document.addEventListener('keydown', e => { if (e.key === 'Enter') spy('enter') })
+</script>
+</body></html>

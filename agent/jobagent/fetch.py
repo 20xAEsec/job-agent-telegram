@@ -193,7 +193,7 @@ def inspect_job(d: Path, job_id: str, prepare=None) -> dict:
     m = store.meta(d, job_id)
     ad = detect.adapter_for(m)
     if ad is None:
-        return {"ok": False, "code": "no_adapter", "error": "only Greenhouse, Lever and Ashby forms can be filled; tell the user this job needs manual application"}
+        return {"ok": False, "code": "no_adapter", "error": "only Greenhouse, Lever, Ashby, Breezy, Recruitee and Rippling forms can be filled; tell the user this job needs manual application"}
     try:
         fields = ad.inspect(m, d, prepare)
     except Closed:

@@ -11,7 +11,9 @@ import { DEFAULT_SETTINGS, SETTINGS_FILE, SettingsSchema, getPath, inWindow, loa
 
 const S = (): Settings => structuredClone(DEFAULT_SETTINGS)
 const datas = (p: Page) => p.rows.flat().filter(b => !b.url).map(b => b.data ?? 'noop')
-const fits = (p: Page) => { for (const d of datas(p)) expect(Buffer.byteLength(d)).toBeLessThanOrEqual(64); expect(p.text.length).toBeLessThan(4096) }
+// Telegram's 4096 limit counts the text after entities are parsed: tags gone, "&amp;" is one character.
+const shown = (html: string) => html.replace(/<[^>]+>/g, '').replace(/&(lt|gt|amp);/g, '_')
+const fits = (p: Page) => { for (const d of datas(p)) expect(Buffer.byteLength(d)).toBeLessThanOrEqual(64); expect(shown(p.text).length).toBeLessThan(4096) }
 const setAt = (s: any, path: string[], v: unknown) => { let o = s; for (const k of path.slice(0, -1)) o = o[k]; o[path.at(-1)!] = v; return s }
 
 describe('kit', () => {
@@ -131,6 +133,9 @@ describe('settings catalog', () => {
     expect(changed(before, on)).toEqual(['apply.mode', 'discovery.enabled', 'notify.digest'])
     expect(ST.autopilotOn(on) && on.dry_run).toBe(true) // practice mode untouched
     expect(OB.obPage({ step: 'done', picks: [], locs: [] }, on).text).toContain('Strong matches go out after a short countdown')
+    expect(datas(ST.categoryPage('apply', on)).slice(0, 2)).toEqual(['ap:off', 'ap:off']) // tapping the ticked Autopilot turns it off
+    const partial = ST.categoryPage('apply', { ...on, discovery: { ...on.discovery, enabled: false } }) // still auto-applying
+    expect(partial.rows[0].map(b => b.text).join()).not.toContain('✅')
     expect(trySettingsUpdate(ST.AUTOPILOT.off).ok).toBe(true)
     expect(changed(on, loadSettings())).toEqual(['apply.mode', 'notify.digest']) // auto-search stays as it was
     expect(ST.autopilotOn(loadSettings())).toBe(false)
@@ -361,7 +366,15 @@ describe('upgrade: digest, receipts and health', () => {
     const p = P.receiptPage(JOBS[3], { at: '2026-11-20T10:00:00Z', url: 'https://x', plan_hash: 'abcdef1234567890', practice: true, files: ['resume.pdf'], answers: 9 })
     expect(p.text).toContain('Practice receipt')
     expect(p.text).toContain('abcdef123456')
+    expect(datas(p).map(d => d.slice(0, 4))).toEqual(expect.arrayContaining(['r:an', 'r:ss', 'r:fl'])) // the saved application
     fits(p)
+  })
+  test('a sent application keeps a saved copy on its job page', () => {
+    const sent = (status: string, saved?: 'review' | 'kit') => datas(P.jobPage({ ...JOBS[0], status }, { running: false, hasForm: false, saved })).map(d => d.slice(0, 5))
+    for (const s of ['SUBMITTED', 'APPLIED_SELF', 'DRY_RUN_DONE']) expect(sent(s, 'review')).toEqual(expect.arrayContaining(['r:an:', 'r:ss:', 'r:fl:']))
+    expect(sent('APPLIED_SELF', 'kit')).toContain('j:kit')
+    expect(sent('SKIPPED', 'review')).not.toContain('r:an:')
+    expect(sent('SUBMITTED')).not.toContain('r:an:')
   })
   test('health problems in plain words; the Word converter matters only for a .docx resume', () => {
     const checks = [{ name: 'claude login', ok: false, detail: 'x', required: true }, { name: 'docx->pdf converter', ok: false, detail: 'x', required: false }, { name: 'bun', ok: true, detail: '1', required: true }]
@@ -382,7 +395,7 @@ describe('upgrade: digest, receipts and health', () => {
     fits(P.updatePage(3))
     expect(datas(P.updatePage(3))).toEqual(['up:go', 'm:home'])
     expect(datas(P.updatePage(0))).not.toContain('up:go')
-    expect(P.sentForReal({ greenhouse: 2, generic: 4 })).toBe('📮 Sent for real: Greenhouse 2 · Lever 0 · Ashby 0') // v3 P3's Health line
+    expect(P.sentForReal({ greenhouse: 2, generic: 4 })).toBe('📮 Sent for real: Greenhouse 2 · Lever 0 · Ashby 0 · Breezy 0 · Recruitee 0 · Rippling 0') // v3 P3's Health line
   })
 })
 
@@ -472,9 +485,16 @@ describe('upgrade: keyword coverage', () => {
     expect(datas(R.reviewPage({ ...REVIEW, coverage: { before: 80, after: 100, missing: [] } }, true)).some(d => d.startsWith('r:hv:'))).toBe(false)
     fits(p)
   })
+  test('the review offers the form screenshot only when there is one', () => {
+    const { REVIEW } = require('../dev/preview') as typeof import('../dev/preview')
+    const R = require('../src/review') as typeof import('../src/review')
+    const has = (screenshots: string[]) => datas(R.reviewPage({ ...REVIEW, screenshots }, true)).some(d => d.startsWith('r:ss:'))
+    expect(has(['screenshots/filled.png'])).toBe(true)
+    expect(has([])).toBe(false)
+  })
 })
 
-describe('upgrade: achievements', () => {
+describe('fact bank', () => {
   test('list, add until the cap, remove by key, escaped', () => {
     const p = P.achievementsPage([['a1', 'Cut <b>report</b> time 40%'], ['a3', 'Led a team of 4']])
     expect(p.text).toContain('Cut &lt;b&gt;report&lt;/b&gt; time 40%')
@@ -482,6 +502,13 @@ describe('upgrade: achievements', () => {
     expect(datas(P.achievementsPage([...Array(P.ACH_MAX)].map((_, i) => [`a${i + 1}`, 'x'] as [string, string])))).not.toContain('p:ach:add')
     fits(p)
     expect(datas(P.profilePage(S(), {}, [], null))).toContain('p:ach')
+    const full = [...Array(P.ACH_MAX)].map((_, i) => [`a${i + 1}`, '&'.repeat(100) + 'x'.repeat(P.FACT_CHARS - 100)] as [string, string])
+    const last = P.achievementsPage(full, '✅ Saved.', 99, 3, 'Tableau, '.repeat(33))
+    expect(last.text).toContain('<b>Confirmed skills</b>: Tableau')
+    expect(datas(last)).toEqual(expect.arrayContaining(['p:ach:rm:a60', 'p:ach:pg:10', 'p:ach:use']))
+    expect(datas(last)).not.toContain('p:ach:rm:a1')
+    fits(last)
+    expect(datas(P.rememberedPage('Led a team of 4', 0))).not.toContain('p:ach:use')
   })
 })
 

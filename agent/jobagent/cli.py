@@ -42,6 +42,7 @@ def _parser() -> argparse.ArgumentParser:
     fl.add_argument("job_id")
     fl.add_argument("--dry-run", action="store_true")
     sub.add_parser("submit").add_argument("job_id")  # channel server only: denied to Claude
+    sub.add_parser("handoff").add_argument("job_id")  # app only: the filled form in a window the user finishes
     # The v4 engine (app only, denied to Claude): one tool-less judgment's input file, and the check that writes its answer.
     ll = sub.add_parser("llm")
     ll.add_argument("op", choices=["input", "accept"])
@@ -74,6 +75,7 @@ def _parser() -> argparse.ArgumentParser:
     js.add_argument("status")
     js.add_argument("--detail", default="")
     jb.add_parser("list").add_argument("--status")
+    jb.add_parser("delete").add_argument("job_id")  # app only: the user's Delete tap
     rv = sub.add_parser("review").add_subparsers(dest="sub", required=True)
     rv.add_parser("build").add_argument("job_id")
     rv.add_parser("hash").add_argument("job_id")
@@ -150,6 +152,8 @@ def _dispatch(a) -> dict:
         return fill.fill_job(d, a.job_id, a.dry_run)
     if a.cmd == "submit":
         return submit.run(d, a.job_id)
+    if a.cmd == "handoff":
+        return fill.handoff(d, a.job_id)
     if a.cmd == "llm":
         extra = json.loads(a.extra or "{}")
         if not isinstance(extra, dict):
@@ -177,6 +181,8 @@ def _dispatch(a) -> dict:
             return store.new_job(d, a.url, a.source)
         if a.sub == "get":
             return store.get_job(d, a.job_id)
+        if a.sub == "delete":
+            return store.delete_job(d, a.job_id)
         if a.sub == "set-status":
             return store.set_status(d, a.job_id, a.status, a.detail)
         return {"ok": True, "jobs": store.list_jobs(d, a.status)}

@@ -8,7 +8,12 @@ LEVER_HOST = re.compile(r"^jobs(\.eu)?\.lever\.co$")
 ASHBY_HOST = "jobs.ashbyhq.com"
 ASHBY_EMBED = re.compile(r"jobs\.ashbyhq\.com/([\w.-]+)/embed")
 UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
-ATS_NAMES = {"greenhouse": "Greenhouse", "lever": "Lever", "ashby": "Ashby"}
+# shortcut: Breezy and Recruitee only on their own subdomains; a company's custom careers domain stays generic (application kit)
+BREEZY_HOST = re.compile(r"^([a-z0-9][\w-]*)\.breezy\.hr$")
+RECRUITEE_HOST = re.compile(r"^([a-z0-9][\w-]*)\.recruitee\.com$")
+RIPPLING_HOST = "ats.rippling.com"
+ATS_NAMES = {"greenhouse": "Greenhouse", "lever": "Lever", "ashby": "Ashby"}  # the ones with a public board API (discovery, resolve)
+FORM_NAMES = {**ATS_NAMES, "breezy": "Breezy", "recruitee": "Recruitee", "rippling": "Rippling"}  # every form JobAgent can fill
 
 
 def _gh(board: str, posting_id: str) -> dict:
@@ -29,6 +34,12 @@ def from_url(url: str) -> dict:
         return {"ats": "lever", "board": m[1].lower(), "posting_id": m[2].lower(), **({"eu": True} if lv[1] else {})}
     if host == ASHBY_HOST and (m := re.match(rf"^/([\w.-]+)/({UUID})", u.path, re.I)):  # /acme/<uuid> or /acme/<uuid>/application
         return {"ats": "ashby", "board": m[1].lower(), "posting_id": m[2].lower()}
+    if (b := BREEZY_HOST.match(host)) and b[1] not in ("app", "www") and (m := re.match(r"^/p/([0-9a-f]{8,})", u.path, re.I)):  # /p/<id>-<slug>/apply
+        return {"ats": "breezy", "board": b[1], "posting_id": m[1].lower()}
+    if (b := RECRUITEE_HOST.match(host)) and b[1] not in ("app", "www") and (m := re.match(r"^/o/([\w-]+)", u.path)):  # /o/<slug>/c/new
+        return {"ats": "recruitee", "board": b[1], "posting_id": m[1].lower()}
+    if host == RIPPLING_HOST and (m := re.match(rf"^/(?:[a-z]{{2}}-[a-z]{{2}}/)?([\w.-]+)/jobs/({UUID})", u.path, re.I)):  # /en-GB/acme/jobs/<uuid>
+        return {"ats": "rippling", "board": m[1].lower(), "posting_id": m[2].lower()}
     return {"ats": "generic"}
 
 
@@ -38,6 +49,12 @@ def canonical(g: dict) -> str:
         return f"https://job-boards.greenhouse.io/{g['board']}/jobs/{g['posting_id']}"
     if g["ats"] == "lever":
         return f"https://jobs{'.eu' if g.get('eu') else ''}.lever.co/{g['board']}/{g['posting_id']}"
+    if g["ats"] == "breezy":
+        return f"https://{g['board']}.breezy.hr/p/{g['posting_id']}"
+    if g["ats"] == "recruitee":
+        return f"https://{g['board']}.recruitee.com/o/{g['posting_id']}"
+    if g["ats"] == "rippling":
+        return f"https://{RIPPLING_HOST}/{g['board']}/jobs/{g['posting_id']}"
     return f"https://{ASHBY_HOST}/{g['board']}/{g['posting_id']}"
 
 
@@ -55,7 +72,7 @@ def from_html(url: str, html: str) -> dict:
 def postings_in(html: str) -> list[dict]:
     """Every distinct fillable posting linked from a page (an employer page's "Apply" button), in page order."""
     out = []
-    for u in re.findall(r"""https?://[\w.-]+\.(?:greenhouse\.io|lever\.co|ashbyhq\.com)/[^\s"'<>\\]+""", html or ""):
+    for u in re.findall(r"""https?://[\w.-]+\.(?:greenhouse\.io|lever\.co|ashbyhq\.com|breezy\.hr|recruitee\.com|rippling\.com)/[^\s"'<>\\]+""", html or ""):
         g = from_url(u.replace("&amp;", "&"))
         if g["ats"] != "generic" and g not in out:
             out.append(g)
@@ -77,4 +94,8 @@ def adapter_for(meta: dict):
         from .ashby import Ashby
 
         return Ashby()
+    if meta.get("ats") in ("breezy", "recruitee", "rippling"):
+        from . import more
+
+        return {"breezy": more.Breezy, "recruitee": more.Recruitee, "rippling": more.Rippling}[meta["ats"]]()
     return None

@@ -27,6 +27,8 @@
   <button type="submit">Submit application</button>
 </form>
 <script>
+  // like the live form: once a file is taken, its name shows in the field
+  document.querySelectorAll('input[type=file]').forEach(f => f.addEventListener('change', () => { const s = document.createElement('span'); s.textContent = f.files[0].name; f.parentElement.appendChild(s) }))
   document.addEventListener('keydown', e => { if (e.key === 'Enter') { window.__enter = (window.__enter || 0) + 1; fetch('/__spy?k=enter') } })
   document.querySelectorAll('.select__input').forEach(inp => {
     const opts = JSON.parse(inp.dataset.options), ctl = inp.closest('.select__control')

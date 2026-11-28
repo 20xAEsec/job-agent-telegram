@@ -29,7 +29,7 @@ const TYPES: Record<string, string> = { pdf: 'application/pdf', docx: 'applicati
 
 // The Telegram buttons the page may press (same router, same checks). Buttons that open a screen, ask for typed text or
 // send files into the chat are left out: the page has its own screens and inputs for those.
-export const TAPS = /^(H:pause|H:resume|d:run|fix:go|m:hc|P:on|P:yes|m:dash:off|sg:(ms|no):\d{1,3}|fix:(ok|no):[\w-]{1,40}|j:(rt|any|x|sk|ap|fu|pr|go|zz):[0-9a-f]{8}|j:o:[0-9a-f]{8}:[iorg]|r:(sk|nx|or|cx):[0-9a-f]{8}|r:hv:[0-9a-f]{8}:\d{1,3}|C:r:[a-z0-9_-]{1,60}|L:(in|pw|rm|rt):(linkedin|indeed)|p:ach:rm:a\d{1,2}|p:rv:rm:[a-z0-9-]{1,40}|a:dd:[0-9a-f]{8}|fo:look:[0-9a-f]{8}|u:again:\w+|x:[\w-]{1,80})$/
+export const TAPS = /^(H:pause|H:resume|d:run|fix:go|m:hc|P:on|P:yes|m:dash:off|sg:(ms|no):\d{1,3}|fix:(ok|no):[\w-]{1,40}|j:(rt|any|x|sk|ap|fu|pr|go|zz|of|dx):[0-9a-f]{8}|j:o:[0-9a-f]{8}:[iorg]|r:(sk|nx|or|cx):[0-9a-f]{8}|r:hv:[0-9a-f]{8}:\d{1,3}|C:r:[a-z0-9_-]{1,60}|L:(in|pw|rm|rt):(linkedin|indeed)|p:ach:rm:a\d{1,2}|p:ach:use|p:rv:rm:[a-z0-9-]{1,40}|a:dd:[0-9a-f]{8}|fo:look:[0-9a-f]{8}|u:again:\w+|x:[\w-]{1,80})$/
 // Buttons the page answers itself by opening one of its own screens.
 export const NAVS = /^(r:rv:[0-9a-f]{8}|j:kit:[0-9a-f]{8}|j:rc:[0-9a-f]{8}|F:list)$/
 type Button = { text: string; data?: string; style?: string }
@@ -74,7 +74,7 @@ export function stateJson(now = Date.now()) {
 // Everything the detail drawer shows. Answers marked private are masked here, before they leave the app.
 export function jobJson(id: string) {
   const j = readJob(id)
-  if (!j) return null
+  if (!j || j.deleted) return null
   const rv = readJson<any>(join(jobDir(id), 'review.json'), null)
   const receipt = readJson<any>(join(jobDir(id), 'receipt.json'), null)
   const answers = Array.isArray(rv?.answers) ? rv.answers.map((a: any) => ({ fid: String(a.fid ?? ''), label: String(a.label ?? ''), value: a.sensitive ? null : String(a.value ?? ''), source: String(a.source ?? ''), private: !!a.sensitive, required: !!a.required, editable: a.source !== 'document' })) : []

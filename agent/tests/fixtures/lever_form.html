@@ -61,6 +61,11 @@
 </form>
 <script>
   document.addEventListener('keydown', e => { if (e.key === 'Enter') { window.__enter = (window.__enter || 0) + 1; fetch('/__spy?k=enter') } })
+  // like the live form: "Current location" suggests places as you type and keeps only one that is picked
+  const place = document.querySelector('#location-input'), list = document.createElement('div'); place.after(list)
+  place.addEventListener('input', () => { list.innerHTML = ''; ['Austin, TX, USA', 'Boston, MA, USA'].filter(o => place.value && o.toLowerCase().startsWith(place.value.toLowerCase())).forEach(o => {
+    const d = document.createElement('div'); d.className = 'dropdown-location'; d.textContent = o
+    d.addEventListener('click', () => { place.value = o; document.querySelector('[name=selectedLocation]').value = JSON.stringify({name: o}); list.innerHTML = '' }); list.appendChild(d) }) })
   document.querySelector('#resume-upload-input').addEventListener('change', () => setTimeout(() => { document.querySelector('[name=name]').value = 'Parsed From Resume' }, 300))
 </script>
 </body></html>

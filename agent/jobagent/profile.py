@@ -5,6 +5,7 @@ from datetime import date
 from .paths import atomic_write_text
 
 SAVED = "Saved answers"
+KEPT = ("Confirmed skills", "Achievements", SAVED)  # told by the user, not read from the resume ("Achievements" is the fact bank)
 SAVED_NOTE = "<!-- Managed by JobAgent. Edit from Telegram (Profile & answers) or carefully by hand. -->\n"
 KEY_RE = re.compile(r"^[a-z0-9_]{1,40}$")
 JOB_RE = re.compile(r"^[a-z0-9-]{1,80}$")
@@ -182,6 +183,10 @@ def show(data_dir, section=None) -> dict:
     return {"ok": True, "section": section, "text": secs[section], "fields": _fields(secs[section].splitlines())}
 
 
+def _contact_fields(secs) -> dict:
+    return _fields(next((ls for h, ls in secs if h == "Contact"), []))
+
+
 def write_draft(data_dir, draft_file) -> dict:
     with open(draft_file, "rb") as f:
         draft = f.read().decode("utf-8-sig")
@@ -190,25 +195,30 @@ def write_draft(data_dir, draft_file) -> dict:
     if not draft.lstrip().startswith("# Profile") or "Contact" not in names:
         raise ProfileError("bad_draft", "draft must start with '# Profile' and contain '## Contact'")
     old = _read(data_dir)
-    if old is not None and SAVED not in names:  # keep what the user already told us
-        kept = next((ls for h, ls in split_sections(old) if h == SAVED), None)
-        if kept:
+    for h, ls in split_sections(old or ""):
+        if h in KEPT and h not in names:  # keep what the user already told us: a new resume never erases it
             if secs[-1][1] and not secs[-1][1][-1].endswith("\n"):
                 secs[-1][1][-1] += "\n"
-            secs.append((SAVED, kept))
-            names.append(SAVED)
+            secs.append((h, ls))
+            names.append(h)
+    links = _contact_fields(split_sections(old or ""))
     _save(data_dir, secs)
+    new = _contact_fields(secs)
+    for k in LINK_KEYS:  # a resume without a link never erases the one the user gave
+        if links.get(k, "").strip() and not new.get(k, "").strip():
+            set_field(data_dir, "Contact", k, links[k])
     return {"ok": True, "sections": names}
 
 
-CONTACT_KEYS = ("full_name", "email", "phone", "location", "linkedin", "portfolio")
+LINK_KEYS = ("linkedin", "github", "portfolio")
+CONTACT_KEYS = ("full_name", "email", "phone", "location", *LINK_KEYS)
 
 
 def set_field(data_dir, section, key, value) -> dict:
     """Set one `- key: value` line in a section (Contact fixes from Telegram). Other lines stay byte-identical."""
     if not re.match(r"^\w{1,40}$", key) or not re.match(r"^[A-Za-z][\w ]{0,40}$", section):
         raise ProfileError("bad_key", "bad section or key")
-    value = " ".join(str(value).split())[:300]
+    value = " ".join(str(value).split())[:600]
     text = _read(data_dir)
     if text is None:
         raise ProfileError("no_profile", "no profile yet (onboarding not done)")

@@ -9,6 +9,8 @@ from jobagent.ats.greenhouse import Greenhouse
 from test_jobs import FX, JID, URL, mkjob  # noqa: F401  (helpers shared with the other stage d tests)
 
 FORM = (FX / "gh_form.html").read_text("utf-8")
+APPLY = Greenhouse.apply_url({"board": "acme", "posting_id": "123"})
+FORM_URL = lambda u: u == APPLY  # noqa: E731 - the form opens at the embed URL, not the posting URL (a glob would treat "?" as a wildcard)
 
 
 @pytest.fixture(autouse=True)
@@ -18,7 +20,7 @@ def _dry(monkeypatch):
 
 def serve(ctx, html=FORM, seen=None, spy=None):
     """Route the Greenhouse URL to a saved page and record every request (spy hits and non-GET methods)."""
-    ctx.route(URL, lambda r: r.fulfill(status=200, content_type="text/html", body=html))
+    ctx.route(FORM_URL, lambda r: r.fulfill(status=200, content_type="text/html", body=html))
     ctx.route("**/__spy*", lambda r: (spy.append(r.request.url) if spy is not None else None, r.fulfill(status=204)))
     if seen is not None:
         ctx.on("request", lambda r: seen.append((r.method, r.url)))
@@ -78,7 +80,7 @@ def test_off_domain_redirect_is_blocked_and_needs_human(tmp_path):
     hit = []
     def prepare(ctx):
         ctx.route("https://evil.example/**", lambda r: (hit.append(r.request.url), r.fulfill(status=200, body="x")))
-        ctx.route(URL, lambda r: r.fulfill(status=302, headers={"location": "https://evil.example/phish"}))
+        ctx.route(FORM_URL, lambda r: r.fulfill(status=302, headers={"location": "https://evil.example/phish"}))
     res = fill.fill_job(tmp_path, jid, True, prepare=prepare)
     assert res["code"] == "needs_human" and store.status(tmp_path, jid)["status"] == "NEEDS_HUMAN"
     assert hit == []  # the guard aborted the navigation before the page loaded
@@ -93,13 +95,24 @@ def test_plan_page_mismatch_is_reported_not_guessed(tmp_path):
     res = fill.fill_job(tmp_path, jid, True, prepare=serve)
     assert res["code"] == "plan_mismatch" and res["unplanned_required"] == ["question_102"]
     assert store.status(tmp_path, jid)["status"] == "READY"  # back to classification
-    page = FORM.replace('<input id="question_100" type="text">', "")  # a planned field the page lacks
+    page = FORM.replace('<input id="last_name" type="text" aria-label="Last Name">', "")  # a required field the page lacks
     mkjob(tmp_path / "b")
     res = fill.fill_job(tmp_path / "b", JID, True, prepare=lambda c: serve(c, page))
-    assert res["code"] == "plan_mismatch" and res["missing_on_page"] == ["question_100"]
-    page = FORM.replace("</form>", '<input id="surprise" required type="text"></form>')  # a required control the API never listed
-    res = fill.fill_job(tmp_path / "b", JID, True, prepare=lambda c: serve(c, page))
-    assert "surprise" in res["unplanned_required"]
+    assert res["code"] == "plan_mismatch" and res["missing_on_page"] == ["last_name"]
+    page = FORM.replace('<input id="question_100" type="text">', "")  # an optional one (a follow-up that never showed): not a stop
+    mkjob(tmp_path / "c")
+    assert fill.fill_job(tmp_path / "c", JID, True, prepare=lambda c: serve(c, page))["ok"]
+
+
+def test_required_box_left_empty_is_named_on_the_card(tmp_path):
+    """The whole page is checked after filling, not just the plan: a required box nobody filled is named, in plain words."""
+    mkjob(tmp_path)
+    page = FORM.replace("</form>", '<label for="surprise">Years of SQL*</label><input id="surprise" type="text"></form>')  # the API never listed it
+    res = fill.fill_job(tmp_path, JID, True, prepare=lambda c: serve(c, page))
+    assert res["code"] == "needs_human" and res["empty_required"] == ["Years of SQL"]
+    st = store.status(tmp_path, JID)
+    assert st["status"] == "NEEDS_HUMAN" and "Years of SQL" in st["history"][-1]["detail"] and "Open filled form" in st["history"][-1]["detail"]
+    assert json.loads((store.jdir(tmp_path, JID) / "fill_report.json").read_text())["empty_required"] == ["surprise"]
 
 
 def test_fill_needs_ready_status_and_a_valid_plan(tmp_path):

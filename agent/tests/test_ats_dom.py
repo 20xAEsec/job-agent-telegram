@@ -9,6 +9,7 @@ from jobagent import browser, canary, cli, fetch, fill, store
 from jobagent.ats import detect
 from jobagent.ats.ashby import Ashby
 from jobagent.ats.base import Closed
+from jobagent.ats.formscan import as_fields
 from jobagent.ats.lever import Lever
 from test_jobs import FX
 
@@ -81,7 +82,7 @@ def test_lever_scan_shape(tmp_path):
         canary.serve(ctx, f"{LV_URL}/apply", LEVER, [])
         pg = ctx.new_page()
         pg.goto(f"{LV_URL}/apply")
-        f = {x["fid"]: x for x in Lever().scan(pg)}
+        f = {x["fid"]: x for x in as_fields(Lever().scan(pg))}  # the fields.json shape (scan adds filled and group)
     assert set(f) >= {"resume", "name", "email", "phone", "urls[LinkedIn]", f"{CARD}[field0]", f"{CARD}[field1]", "eeo[gender]", "comments"}
     assert not any("baseTemplate" in k or k in ("accountId", "selectedLocation") for k in f)  # hidden inputs are not questions
     assert f["resume"]["type"] == "file" and f["resume"]["required"] and f["resume"]["label"] == "Resume/CV"
@@ -98,7 +99,7 @@ def test_lever_dry_fill_puts_values_in_the_page_and_never_submits(tmp_path):
     j, m = store.jdir(tmp_path, jid), store.meta(tmp_path, jid)
     res = fill.fill_job(tmp_path, jid, True, prepare=hook)
     assert res["ok"], res
-    assert res["filled"] == 10 and ev == [] and store.status(tmp_path, jid)["status"] == "FILLED_DRY"
+    assert res["filled"] == 11 and ev == [] and store.status(tmp_path, jid)["status"] == "FILLED_DRY"
     assert "Jane" not in (j / "fill_report.json").read_text("utf-8")  # no values in reports
     fields = {f["fid"]: f for f in json.loads((j / "fields.json").read_text())}
     ad = Lever()
@@ -122,6 +123,7 @@ def test_ashby_dry_fill_buttons_hidden_radios_and_combobox(tmp_path):
     fields = {f["fid"]: f for f in json.loads((j / "fields.json").read_text())}
     assert fields["choice-4"]["options"] == ["Yes", "No"] and fields["choice-4"]["required"]  # a Yes/No question made of buttons
     assert fields[f"{canary.AB}4"]["section"] == "demographic"  # under the EEO heading
+    assert fields["_systemfield_location"]["required"] and fields["_systemfield_location"]["type"] == "select"  # a box with no name or id
     assert fill.fill_job(tmp_path, jid, True, prepare=hook)["ok"] and ev == []
     ad = Ashby()
     with browser.session(tmp_path, ad.allowed_hosts(m)) as ctx:
@@ -129,21 +131,34 @@ def test_ashby_dry_fill_buttons_hidden_radios_and_combobox(tmp_path):
         pg = ctx.new_page()
         pg.goto(ad.apply_url(m))
         pg.wait_for_selector(".ashby-application-form-container input")
+        assert {"_systemfield_location", "choice-4"} <= {x["fid"] for x in ad.empty_required(pg, fields)}  # unanswered ones are noticed
         assert ad.fill(pg, canary.CASES["ashby"]["plan"], fields, j)["errors"] == []
         assert pg.get_attribute("._yesno button:text-is('No')", "aria-pressed") == "true"
         assert pg.is_checked(f'[name="{canary.AB}2"][value=b]')  # hidden radio, picked through its label
-        assert pg.input_value("#_systemfield_location") == "Austin, Texas, United States"
+        assert pg.input_value("[role=combobox]") == "Austin, Texas, United States"  # "Austin, TX": not the Minnesota one above it
+        assert not {"_systemfield_location", "choice-4"} & {x["fid"] for x in ad.empty_required(pg, fields)}
         assert pg.evaluate("(window.__submitted || 0) + (window.__enter || 0)") == 0
         bad = [{"fid": "choice-4", "action": "select", "value": "Submit"}]  # never a button that is not one of the question's own
         assert ad.fill(pg, bad, fields, j)["errors"] == [{"fid": "choice-4", "error": "Unexpected"}]
         assert pg.evaluate("window.__submitted || 0") == 0
 
 
+def test_untyped_button_inside_a_form_is_never_a_choice(tmp_path):
+    box = '<div class="ashby-application-form-field-entry"><label>Ready?</label><button>Yes</button><button>No</button></div>'
+    with browser.session(tmp_path, ["ashbyhq.com"]) as ctx:
+        pg = ctx.new_page()
+        pg.set_content(f'<div class="ashby-application-form-container"><form>{box}</form></div>')
+        assert Ashby().scan(pg) == []  # it would submit the form
+        pg.set_content(f'<div class="ashby-application-form-container">{box}</div>')
+        assert [r["options"] for r in Ashby().scan(pg)] == [["Yes", "No"]]
+
+
 def test_follow_up_question_that_appears_is_reported(tmp_path):
     plan = [p if p["fid"] != "choice-4" else {**p, "value": "Yes"} for p in canary.CASES["ashby"]["plan"]]
     jid, hook = canary.prepared(tmp_path, "ashby", [], plan=plan)
     res = fill.fill_job(tmp_path, jid, True, prepare=hook)
-    assert res["code"] == "plan_mismatch" and res["unplanned_required"] == ["visa"]  # "Which visa?" appeared after "Yes"
+    assert res["code"] == "needs_human" and len(res["empty_required"]) == 1 and "visa" in res["empty_required"][0].lower()  # "Which visa?" appeared after "Yes"
+    assert "visa" in store.status(tmp_path, jid)["history"][-1]["detail"].lower()  # named on the card, not "the form didn't match"
 
 
 def test_value_the_page_did_not_keep_is_an_error(tmp_path):
@@ -175,7 +190,7 @@ def test_blockers_and_closed_pages(tmp_path, monkeypatch):
 def test_canary_passes_on_the_recorded_forms(tmp_path, capsys):
     assert cli.main(["--data-dir", str(tmp_path), "canary"]) == 0
     out = json.loads(capsys.readouterr().out)
-    assert out == {"ok": True, "checked": ["greenhouse", "lever", "ashby"], "failures": []}
+    assert out == {"ok": True, "checked": ["greenhouse", "lever", "ashby", "breezy", "recruitee", "rippling"], "failures": []}
     assert not (tmp_path / "jobs").exists()  # runs in a throwaway folder, never the user's data
 
 

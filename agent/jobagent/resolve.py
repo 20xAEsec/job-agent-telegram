@@ -8,7 +8,7 @@ import httpx
 
 from . import accounts, fetch, store
 from .ats import detect
-from .discover import ats_api, boards, prefilter
+from .discover import ats_api, boards, eligibility, prefilter
 
 PLACE_NOISE = {"united", "states", "usa", "us", "remote", "hybrid", "onsite", "on", "site", "the", "of", "and"}
 
@@ -42,7 +42,11 @@ def _near(a: str, b: str) -> bool:
 
 def match(cands: list[dict], title: str, location: str = "") -> dict | None:
     """The one posting with this title (exact words first, then a close match), narrowed by location; None when zero or ambiguous."""
-    same = [c for c in cands if prefilter.title_matches(c.get("title") or "", [title], "close")]
+    here = eligibility.places(location)
+    # a posting that names only other countries is never this job, even when both say "remote"
+    abroad = lambda there: bool(here and there) and eligibility.ALL not in here | there and not here & there  # noqa: E731
+    same = [c for c in cands if prefilter.title_matches(c.get("title") or "", [title], "close")
+            and not abroad(eligibility.places(c.get("location") or ""))]
     pool = [c for c in same if prefilter._words(c.get("title") or "") == prefilter._words(title)] or same
     if location and len(pool) > 1:
         pool = [c for c in pool if _near(c.get("location"), location)] or pool

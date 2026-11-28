@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 
 from . import feedback, profile, resume, safety, store, tailor
-from .ats.base import match_option
+from .ats.base import iso_date, match_option
 from .docs import ats
 from .docs.plan import LIMIT, DocError
 from .docs.plan import check_plan as check_edits
@@ -129,8 +129,11 @@ def _value(fid: str, f: dict, v, contact: dict) -> tuple[object, list[str]]:
         if not vs or None in got:
             return v, [f"{fid}: the value must be one of the field's options: {', '.join(f['options'][:12])}"]
         return (got if t == "multiselect" else got[0]), []
-    if not isinstance(v, (str, int, float)) or not str(v).strip() or len(str(v)) > 2000:
-        return v, [f"{fid}: the value must be text of 1 to 2000 characters"]
+    top = min(f.get("max_chars") or 2000, 2000)  # the box's own limit (maxlength) when it has one
+    if not isinstance(v, (str, int, float)) or not str(v).strip() or len(str(v)) > top:
+        return v, [f"{fid}: the value must be text of 1 to {top} characters"]
+    if t in ("date", "month"):
+        return (iso_date(v, t), []) if iso_date(v, t) else (v, [f"{fid}: the value must be a date written {'YYYY-MM' if t == 'month' else 'YYYY-MM-DD'}"])
     return str(v), _leaks(fid, f.get("label", ""), v, contact)
 
 
@@ -138,10 +141,36 @@ def _key_for(label: str) -> str:
     return re.sub(r"_+", "_", re.sub(r"[^a-z0-9]+", "_", label.lower())).strip("_")[:40] or "answer"
 
 
+# The user's own links go on every form that asks for them: decided here, not left to Claude.
+LINKS = {  # contact key -> (what a label calls it, saved-answer keys used when Contact has none)
+    "linkedin": (r"linked ?in", ("linkedin_url", "linkedin")),
+    "github": (r"git ?hub", ("github_url", "github")),
+    "portfolio": (r"(?:personal )?(?:web ?site|portfolio)|personal (?:web ?page|site|url)", ("website_url", "portfolio_url", "personal_website", "website", "portfolio")),
+}
+LINK_LABEL = (r"(?:please (?:provide|share|enter|add|include) )?(?:(?:a )?link to )?(?:your |my |other )?(?:%s)"
+              r"(?: (?:profile|url|link|page|address|website|site))*(?: optional| if applicable| if any)?")
+
+
+def _link(f: dict, contact: dict, saved: dict) -> str | None:
+    """The user's URL for a text box whose whole label asks for it ("GitHub URL", "Website / Portfolio"), else None."""
+    if f.get("type") in ("file", "select", "multiselect", "checkbox"):
+        return None
+    label = re.sub(r"\([^)]*\)", " ", str(f.get("label", "")).lower())
+    parts = [" ".join(re.sub(r"[^a-z]+", " ", p).split()) for p in re.split(r"/|&|,|\bor\b|\band\b", label)]
+    keys = [next((k for k, (name, _) in LINKS.items() if re.fullmatch(LINK_LABEL % name, p)), None) for p in parts if p]
+    if not keys or None in keys:
+        return None
+    for k in keys:
+        v = (contact.get(k) or "").strip() or next((str(saved[s]["answer"]).strip() for s in LINKS[k][1] if s in saved), "")
+        if v:
+            return v
+    return None
+
+
 def question_for(f: dict, q: dict | None, sens: bool, save_key: str | None) -> dict:
     """The question the user answers for one field. Options always come from the form itself, never from Claude."""
     t, q = f.get("type"), q or {}
-    kind = {"select": "choice", "multiselect": "multi", "checkbox": "yesno"}.get(t) or (q.get("kind") if q.get("kind") in ("text", "number", "date") else "text")
+    kind = {"select": "choice", "multiselect": "multi", "checkbox": "yesno", "date": "date", "month": "date"}.get(t) or (q.get("kind") if q.get("kind") in ("text", "number", "date") else "text")
     opts = f.get("options") or []
     if kind in ("choice", "multi") and len(opts) < 2:
         kind = "text"
@@ -166,7 +195,7 @@ def _in_analyze(d: Path, job: str, extra: dict) -> dict:
     keep = ("titles", "related_titles", "experience_level", "years_experience", "locations", "country", "remote", "min_salary", "currency",
             "allow_unknown_salary", "job_types", "exclude_keywords")
     return {"posting": posting, "supported": fields is not None,
-            "form_fields": _wrap("application form", [{k: x.get(k) for k in ("fid", "label", "type", "required", "options", "section")} for x in fields]) if fields is not None else None,
+            "form_fields": _wrap("application form", [{k: x.get(k) for k in ("fid", "label", "type", "required", "options", "section", "max_chars") if k in x} for x in fields]) if fields is not None else None,
             "profile": _facts(d), "saved_answers": _saved(d, job),
             "settings": {**{k: f.get(k) for k in keep}, "draft_free_text": a.get("draft_free_text", True)},
             "feedback": feedback.summary(d), "tier": extra.get("tier") or "exact"}
@@ -243,7 +272,8 @@ def _in_revise(d: Path, job: str, extra: dict) -> dict:
     mode = tailor._tailoring(d)
     return {"request": _wrap("the user's change request", str(extra.get("request") or "")[:2000]), "answers": rows, "tailoring": mode,
             "tailor_plan": _load(j / "tailor_plan.json"), "cover_letter_md": letter,
-            **({"bank": _load(d / "resume_bank.json"), **_bank_facts(d), "ats_keywords": ats.keywords(an)} if mode == "ats"
+            **_bank_facts(d),
+            **({"bank": _load(d / "resume_bank.json"), "ats_keywords": ats.keywords(an)} if mode == "ats"
                else {"units": tailor.outline(d).get("units", [])})}
 
 
@@ -374,6 +404,9 @@ def _acc_analyze(d: Path, job: str, ans: dict, extra: dict) -> dict:
         if fid not in seen:
             cls.append({"fid": fid, "class": "document" if f.get("type") == "file" else "must_ask", "value": None, "save_key": None,
                         "sensitive": is_sensitive(f), "unusual": bool(safety.UNUSUAL.search(f.get("label", ""))), "reason": "not classified"})
+    for c in cls:
+        if not c["unusual"] and (url := _link(fields[c["fid"]], contact, saved)):
+            c.update({"class": "profile", "value": url, "sensitive": False})
     # Questions: only for required fields nobody can fill. Optional ones are left blank: fewer interruptions, nothing guessed.
     questions = []
     for c in cls:
@@ -516,7 +549,7 @@ def _acc_resume_profile(d: Path, job, ans: dict, extra: dict) -> dict:
     c = ans.get("contact") if isinstance(ans.get("contact"), dict) else {}
     text = (d / "resume_text.txt").read_text("utf-8").lower()
     con = {k: _s(c.get(k), 200) for k in profile.CONTACT_KEYS}
-    for k in ("email", "phone", "linkedin", "portfolio"):  # contact details are copied, never made up
+    for k in ("email", "phone", "linkedin", "github", "portfolio"):  # contact details are copied, never made up
         if con[k] and re.sub(r"\W", "", con[k].lower()) not in re.sub(r"\W", "", text):
             con[k] = ""
     lines = lambda xs: "\n".join(f"- {_s(x, 400)}" for x in (xs if isinstance(xs, list) else []) if _s(x, 400))  # noqa: E731

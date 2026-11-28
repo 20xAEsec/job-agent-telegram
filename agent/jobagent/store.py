@@ -2,6 +2,7 @@
 import hashlib
 import json
 import re
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
@@ -134,6 +135,37 @@ def set_status(d: Path, job_id: str, new: str, detail: str = "") -> dict:
     return {"ok": True, "job_id": job_id, "status": new}
 
 
+# What is left of a deleted job that was really sent: enough to refuse applying twice and to keep the daily and company limits.
+KEEP_SENT = {"meta.json", "status.json", "analysis.json", "receipt.json"}
+
+
+def delete_job(d: Path, job_id: str) -> dict:
+    """Remove a job (a duplicate, a link sent by mistake): its folder and history row. Auto-search never offers it again.
+    A job that was really sent keeps a small hidden record (`deleted_at`); nothing can unsend it."""
+    status(d, job_id)  # unknown job: fail here, before the lock creates its folder
+    from . import log
+    from .discover import boards
+
+    j = jdir(d, job_id)
+    with locked(j / "status.json"):
+        s = status(d, job_id)
+        if s["status"] in ("APPROVED", "SUBMITTING"):
+            raise JobError("sending", "this job is being sent: stop or skip it first")
+        sent = any(h.get("status") == "SUBMITTED" for h in s["history"])
+        if sent:
+            update_meta(d, job_id, deleted_at=now())
+            for p in j.iterdir():
+                if p.is_dir():
+                    shutil.rmtree(p)
+                elif p.name not in KEEP_SENT and p.name != "status.json.lock":
+                    p.unlink()
+    if not sent:
+        shutil.rmtree(j)
+    log.remove(d, job_id)
+    boards.mark_seen(d, [job_id])
+    return {"ok": True, "job_id": job_id, "sent": sent}
+
+
 def summary(d: Path, job_id: str) -> dict:
     m, s = meta(d, job_id), status(d, job_id)
     a = _load(jdir(d, job_id) / "analysis.json") or {}
@@ -142,10 +174,13 @@ def summary(d: Path, job_id: str) -> dict:
             "score": (a.get("match") or {}).get("score") if isinstance(a.get("match"), dict) else None}
 
 
-def list_jobs(d: Path, only: str | None = None) -> list[dict]:
+def list_jobs(d: Path, only: str | None = None, deleted: bool = False) -> list[dict]:
+    """`deleted`: include the records kept for deleted jobs that were sent (the send limits count them)."""
     out = []
     for p in sorted((d / "jobs").glob("*/status.json")) if (d / "jobs").is_dir() else []:
         try:
+            if not deleted and meta(d, p.parent.name).get("deleted_at"):
+                continue
             x = summary(d, p.parent.name)
         except JobError:
             continue
