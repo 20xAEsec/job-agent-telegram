@@ -18,6 +18,7 @@ TABLE = [
     ("Cybersecurity Engineer", "Cyber Security Engineer", False, True, True),  # synonym table
     ("Information Security Engineer", "Cyber Security Engineer", False, True, True),  # synonym table
     ("Software Engineer", "Detection Engineer", False, False, True),  # ratio between 60 and 80
+    ("QA Engineer", "Detection Engineer", False, False, True),  # scores 84 on "engineer" alone: close needs a shared field word
     ("Senior Security Analyst", "Security Analyst", False, True, True),
     ("Marketing Manager", "Detection Engineer", False, False, False),
 ]
@@ -336,3 +337,35 @@ def test_country_setting_beats_the_currency_guess():
     c, q = sites.queries({**f, "country": "Germany"})
     assert c == "germany" and q == [("X remote", "Germany", True)]
     assert sites.queries({**f, "country": "nowhere-land", "currency": "CHF"})[0] == "switzerland"  # unknown name: fall back
+
+
+def test_catalog_polled_with_names_details_and_feeds(tmp_path, monkeypatch):
+    """Source "top": the shipped catalog (minus watched and removed boards), more_ats systems with a detail read for text-less listings,
+    Lever's slug replaced by the company name, feeds searched next to the boards; catalog boards are never "learned"."""
+    from jobagent.discover import feeds, more_ats
+    cat = tmp_path / "catalog.json"
+    cat.write_text(json.dumps({"lever": {"acme": "Acme Corp", "mine": "Mine", "gone": "Gone"}, "workday": {"wd|wd5|Site": "WD Inc"}}), "utf-8")
+    monkeypatch.setattr(boards, "CATALOG", cat)
+    (tmp_path / "settings.json").write_text(json.dumps({"filters": F, "discovery": {"sources": ["companies", "top", "dice"]}}), "utf-8")
+    boards.add(tmp_path, "lever", ["mine"])
+    boards.remove(tmp_path, "lever", ["gone"])
+    assert boards.catalog(tmp_path) == {"lever": {"acme": "Acme Corp"}, "workday": {"wd|wd5|Site": "WD Inc"}}
+    listed = []
+    monkeypatch.setattr(ats_api, "_lever", lambda slugs, cur, errors, content=True: listed.extend(slugs) or [
+        {"title": "Detection Engineer", "company": slugs[0], "location": "Remote", "url": f"https://jobs.lever.co/{slugs[0]}/1", "board": slugs[0],
+         "posted": "", "salary_max": None, "blurb": "Detection rules"}])
+    monkeypatch.setitem(ats_api.LISTERS, "lever", ats_api._lever)
+    wd = {"title": "Detection Engineer", "company": "WD Inc", "location": "", "url": "https://wd.wd5.myworkdayjobs.com/Site/job/x_R1",
+          "board": "wd|wd5|Site", "posted": "", "salary_max": None, "dept": "", "blurb": "", "kind": None, "detail": "workday"}
+    monkeypatch.setitem(more_ats.LISTERS, "workday", lambda b, cur, errors, terms: (listed.append((b, tuple(terms))), [dict(wd)])[1])
+    monkeypatch.setitem(more_ats.DETAILS, "workday", lambda c, cur: {"description": "Write detections. $230,000 - $250,000", "salary_max": 250_000, "location": "Remote, US"})
+    monkeypatch.setattr(feeds, "search", lambda d, f, chosen, hours: ([{"title": "Detection Engineer", "company": "Feedco", "location": "Remote",
+                                                                        "url": "https://dice.com/job/1", "site": "Dice", "posted": "", "salary_max": None,
+                                                                        "description": "Detection work"}], [], []) if chosen == ["dice"] else pytest.fail(chosen))
+    r = ats_api.poll(tmp_path)
+    assert sorted(map(str, listed)) == sorted(map(str, ["acme", "mine", ("wd|wd5|Site", tuple(F["titles"][:ats_api.SLOW_TERMS]))]))
+    by = {c["company"]: c for c in r["candidates"]}
+    assert set(by) == {"Acme Corp", "mine", "WD Inc", "Feedco"} and r["boards"] == 3 and "Dice" in r["sites"]
+    assert by["WD Inc"]["location"] == "Remote, US" and by["WD Inc"]["salary_max"] == 250_000 and "detail" not in by["WD Inc"]
+    assert "Write detections" in (tmp_path / "listings" / f"{by['WD Inc']['job_id']}.md").read_text("utf-8")  # `fetch` reads this copy
+    assert "acme" not in boards.learn(tmp_path, [("lever", "acme")])

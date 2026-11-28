@@ -401,7 +401,7 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
     searching = true
     refresh()
     let r: any
-    try { r = await run(['discover', 'poll'], { timeoutMs: 5 * 60_000 }) } catch (e) { r = { ok: false, code: 'internal', error: String(e) } } finally { searching = false }
+    try { r = await run(['discover', 'poll'], { timeoutMs: 8 * 60_000 }) } catch (e) { r = { ok: false, code: 'internal', error: String(e) } } finally { searching = false }
     const end = (final: Final) => { if (reason !== 'timer' || cards.get(key)) card(c => { c.state = 'ended'; c.ended = Date.now(); c.doing = null; c.final = final }) }
     if (!r.ok) {
       log(`discover poll failed: ${r.code}`)

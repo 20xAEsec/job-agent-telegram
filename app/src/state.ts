@@ -44,8 +44,10 @@ export function writeJson(file: string, obj: unknown): void {
   renameSync(tmp, file)
 }
 
-// Where auto-search looks: the watched Greenhouse boards, and job sites searched through python-jobspy.
-export const SOURCES = { companies: 'Companies I watch', linkedin: 'LinkedIn', indeed: 'Indeed', glassdoor: 'Glassdoor', zip_recruiter: 'ZipRecruiter' }
+// Where auto-search looks: the watched boards, the built-in list of top tech and security employers (agent/jobagent/discover/catalog.json),
+// job sites searched through python-jobspy, and job feeds (agent/jobagent/discover/feeds.py).
+export const SOURCES = { companies: 'Companies I watch', top: 'Top tech & security companies', linkedin: 'LinkedIn', indeed: 'Indeed', glassdoor: 'Glassdoor', zip_recruiter: 'ZipRecruiter',
+  dice: 'Dice', clearancejobs: 'ClearanceJobs', himalayas: 'Himalayas', jobicy: 'Jobicy', remoteok: 'Remote OK', wwr: 'We Work Remotely', workingnomads: 'Working Nomads', hn: 'Hacker News' }
 type Source = keyof typeof SOURCES
 
 export const DEFAULT_SETTINGS = {
@@ -69,7 +71,7 @@ export const DEFAULT_SETTINGS = {
     followup_days: 7, // ask about an application with no news after this many days (0 = never)
     daily_max: 10, // the most real applications auto-apply sends in a day (v4 rule 12)
   },
-  discovery: { enabled: false, interval_hours: 6, web_search: true, sources: ['companies', 'linkedin', 'indeed'] as Source[], reserve_pct: 20, // sources: keep in step with DEFAULT_SOURCES (agent/jobagent/discover/ats_api.py)
+  discovery: { enabled: false, interval_hours: 6, web_search: true, sources: ['companies', 'top', 'linkedin', 'indeed', 'dice', 'himalayas', 'jobicy'] as Source[], reserve_pct: 20, // sources: keep in step with DEFAULT_SOURCES (agent/jobagent/discover/ats_api.py)
     related_jobs: 'few' as 'off' | 'few' | 'more' }, // jobs with a title you did not list, per day: off, 4 or 12 (agent/jobagent/discover/tiers.py CAPS)
   quiet_hours: { enabled: true, from: '23:00', to: '07:00' },
   // Per kind of message: 'loud' rings, 'silent' arrives without a sound, 'off' is not sent (weekly only).
@@ -137,7 +139,7 @@ export const SettingsSchema = z.object({
   }).strict(),
   discovery: z.object({
     enabled: z.boolean(), interval_hours: z.number().int().min(1).max(168), web_search: z.boolean(),
-    sources: z.array(z.enum(Object.keys(SOURCES) as [Source, ...Source[]])).min(1).max(5),
+    sources: z.array(z.enum(Object.keys(SOURCES) as [Source, ...Source[]])).min(1).max(Object.keys(SOURCES).length),
     reserve_pct: z.number().int().min(0).max(80),
     related_jobs: z.enum(['off', 'few', 'more']),
   }).strict(),

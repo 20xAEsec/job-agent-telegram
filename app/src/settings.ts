@@ -88,7 +88,7 @@ export const CATS: Record<string, { emoji: string; title: string; blurb: string;
     emoji: '🔭', title: 'Auto-search', blurb: 'Let me look for new jobs on a schedule instead of waiting for your links.',
     items: [
       S('ae', '🔭', 'Auto-search', 'discovery.enabled', 'bool', 'ON: I check the companies you watch and the job sites you picked for new jobs that fit your settings, and prepare the good ones. Nothing is sent without you (unless you turn on auto-apply).'),
-      S('as', '🌍', 'Where I look', 'discovery.sources', 'multi', 'The places auto-search checks. Job sites are searched with your titles and locations only, for jobs posted within your "Posted within" window. Jobs I can fill for you are the ones that use Greenhouse, Lever or Ashby; for the rest I score them and you apply yourself.', {
+      S('as', '🌍', 'Where I look', 'discovery.sources', 'multi', 'The places auto-search checks. "Top tech & security companies" is my own list of a few hundred big tech, AI and security employers. Job sites and feeds are searched with your titles and locations only, for jobs posted within your "Posted within" window. Jobs I can fill for you are the ones that use Greenhouse, Lever, Ashby, Breezy, Recruitee or Rippling; for the rest I score them and you apply yourself.', {
         opts: Object.entries(SOURCES) as Opt[], show: v => v.map((x: keyof typeof SOURCES) => SOURCES[x]).join(', '),
       }),
       S('ai', '🔁', 'How often', 'discovery.interval_hours', 'int', 'Time between searches. Searches pause during quiet hours.', { presets: [1, 2, 4, 6, 12, 24], show: v => `every ${v} h`, unit: 'hours' }),

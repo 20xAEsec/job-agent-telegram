@@ -45,7 +45,7 @@ TABLE = [
     (SEC, "mid", "SIEM Engineer", None),  # no shared field word: needs a related title (or the board's department)
     (DATA, "mid", "Senior Data Analyst", "exact"),
     (DATA, "mid", "Business Intelligence Analyst", "exact"),
-    (DATA, "mid", "Marketing Analyst", "exact"),  # still an analyst job
+    (DATA, "mid", "Marketing Analyst", None),  # shares only "analyst" with your titles (it matched "BI Analyst" by being short)
     (DATA, "mid", "Data Scientist", "maybe"),
     (DATA, "mid", "Data Engineer", "maybe"),
     (DATA, "mid", "Sales Analyst", None),

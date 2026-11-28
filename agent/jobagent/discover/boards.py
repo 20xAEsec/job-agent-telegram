@@ -22,6 +22,15 @@ def load_boards(d: Path) -> dict:
     return {a: b.get(a, []) for a in ATS}
 
 
+CATALOG = Path(__file__).with_name("catalog.json")  # top tech and security employers, shipped with the app (source "top")
+
+
+def catalog(d: Path) -> dict[str, dict[str, str]]:
+    """{system: {board: company}} from catalog.json, minus boards the user watches already or removed."""
+    skip = {s for v in load_boards(d).values() for s in v} | set(_load(d / "boards_blocked.json", []))
+    return {a: {b: n for b, n in v.items() if b.lower() not in skip} for a, v in (store._load(CATALOG) or {}).items() if isinstance(v, dict)}
+
+
 def add(d: Path, ats: str, slugs: list[str]) -> dict:
     bad = [s for s in slugs if not SLUG.match(s.lower())]
     if bad:
@@ -51,7 +60,7 @@ def learn(d: Path, found: list[tuple[str, str]]) -> list[str]:
     """Watch employer boards that search results led to (a posting that fit, on the employer's own Greenhouse, Lever or Ashby board):
     at most LEARN_PER_POLL a poll and LEARN_MAX ever, never one the user removed. Returns the slugs added."""
     learned = _load(d / "boards_learned.json", {})
-    skip = {s for v in load_boards(d).values() for s in v} | set(_load(d / "boards_blocked.json", [])) | set(learned) | AGGREGATORS
+    skip = {s for v in load_boards(d).values() for s in v} | set(_load(d / "boards_blocked.json", [])) | set(learned) | AGGREGATORS         | {s for v in (store._load(CATALOG) or {}).values() if isinstance(v, dict) for s in v}  # polled already through the catalog
     new: dict[str, str] = {}
     for a, s in found:
         if a in ATS and SLUG.match(s := s.lower()) and s not in skip:

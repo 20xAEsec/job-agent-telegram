@@ -15,7 +15,7 @@ THRESHOLD = {"close": 80, "broad": 60}
 # and words that mark a different line of work (only when none of the user's own titles uses them).
 ABBR = {"appsec": "application security", "secops": "security operations", "soc": "security operations", "devsecops": "devops security",
         "infosec": "information security", "cybersecurity": "security", "cyber": "security", "swe": "software engineer", "sde": "software engineer",
-        "sre": "site reliability engineer", "ml": "machine learning", "eng": "engineer", "dev": "developer"}
+        "sre": "site reliability engineer", "ml": "machine learning", "eng": "engineer", "dev": "developer", "bi": "business intelligence"}
 ROLE = {**dict.fromkeys(["engineer", "developer", "architect", "programmer", "tester", "analyst", "specialist", "researcher", "hunter", "scientist",
                          "designer", "consultant", "administrator", "technician", "writer", "editor"], "ic"),
         **dict.fromkeys(["clerk", "assistant", "representative", "receptionist", "operator", "coordinator", "agent"], "ops"),
@@ -65,7 +65,8 @@ def title_matches(title: str, wanted: list[str], mode: str = "close") -> bool:
         a, b = _syn(title), _syn(w)
         if mode == "close" and a == b:
             return True
-        if token_set_ratio(a, b) >= THRESHOLD.get(mode, 80):
+        # "close" also needs a shared word about the work itself: "QA Engineer" shares only "engineer" with "Detection Engineer" (scores 84)
+        if token_set_ratio(a, b) >= THRESHOLD.get(mode, 80) and (mode != "close" or parse(title)[1] & parse(w)[1]):
             return True
         if mode == "broad" and _strip(b) and re.search(rf"\b{re.escape(_strip(b))}\b", _strip(a)):
             return True

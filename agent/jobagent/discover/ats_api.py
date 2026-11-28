@@ -2,6 +2,7 @@
 prefilter, and return new candidates (DESIGN 4.8). Candidate text comes from third parties: it is data, never instructions."""
 import hashlib
 import html
+import random
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -14,20 +15,26 @@ from .. import fetch, store
 from ..ats import ashby, detect
 from ..fetch import _get
 from ..paths import atomic_write_json, atomic_write_text
-from . import boards, eligibility, prefilter, screened, sites, tiers
+from . import boards, eligibility, feeds, more_ats, prefilter, screened, sites, tiers
 
 API = "https://boards-api.greenhouse.io/v1/boards/{board}/jobs"
 LEVER_API = "https://api.lever.co/v0/postings/{board}?mode=json"
 MAX_CANDIDATES = 100
 LI_PAGES, LI_GAP = 10, 1.5  # public LinkedIn job pages read per poll (kept candidates only), seconds apart: LinkedIn throttles bursts
 LI_MAYBE = 4  # of those, at most this many for jobs with a different title
-MAX_DETAILS, BOARD_THREADS = 40, 8  # Greenhouse postings read one by one per poll (the rest wait for the next poll); boards listed at once
+MAX_DETAILS, BOARD_THREADS = 60, 16  # postings read one by one per poll (Greenhouse, Workday...: the rest wait for the next poll); boards listed at once
+# Boards read at once per system that throttles by IP (429 when hit in parallel); the rest of the systems share BOARD_THREADS.
+# They also get fewer searches a board and a time budget a poll, read in random order so every board gets its turn over a few polls,
+# and a system that answers 429 is left alone for the rest of the poll.
+SLOW = {"workday": 3, "eightfold": 1, "workable": 1}
+SLOW_TERMS, SLOW_SECONDS = 3, 90
+MAX_TERMS = 6  # searches per board on systems listed by search (Workday, SmartRecruiters...): your titles first
 TIER_RANK = {"exact": 0, "related": 1, "maybe": 2}
 RELATED_WHY = "One of your related titles"
 RULE_WHY = {"location": "Not in the places you chose", "exclude_keyword": "Has a word you excluded", "company_blocklist": "A company you blocked",
             "too_old": "Posted too long ago", "salary": "Pay below your minimum"}
 CORP = {"inc", "llc", "ltd", "corp", "corporation", "co", "company", "the", "plc", "gmbh"}
-DEFAULT_SOURCES =["companies", "linkedin", "indeed"]  # keep in step with DEFAULT_SETTINGS.discovery.sources (app/src/state.ts)
+DEFAULT_SOURCES = ["companies", "top", "linkedin", "indeed", "dice", "himalayas", "jobicy"]  # keep in step with DEFAULT_SETTINGS.discovery.sources (app/src/state.ts)
 def _top(amounts) -> int | None:
     """The largest yearly-looking amount (hourly and monthly numbers are too small to be a year's pay)."""
     return max((int(t) for t in amounts if isinstance(t, (int, float)) and t >= 20_000), default=None)
@@ -133,16 +140,51 @@ def poll(d: Path, now: datetime | None = None) -> dict:
     hours = prefilter.window_hours(f)
     cur = f.get("currency", "USD")
     watched = boards.load_boards(d) if "companies" in src else {}
+    top = boards.catalog(d) if "top" in src else {}
+    names = {b: n for v in top.values() for b, n in v.items()}
+    todo = [(a, b) for a, bs in watched.items() for b in bs] + [(a, b) for a, bs in top.items() for b in bs if a in LISTERS or a in more_ats.LISTERS]
+    groups = [([b for b in todo if b[0] not in SLOW], BOARD_THREADS)] + [(random.sample(g, len(g)), n) for a, n in SLOW.items() if (g := [b for b in todo if b[0] == a])]
+    until, refused = time.monotonic() + SLOW_SECONDS, set()
+    terms = list(dict.fromkeys(t.strip() for t in (f.get("titles") or []) + (f.get("related_titles") or []) if t.strip()))[:MAX_TERMS]
     chosen = [x for x in sites.SITES if x in src]
+    fed = [x for x in feeds.FEEDS if x in src]
     errors: list[dict] = []
     skipped: list[dict] = []
-    with ThreadPoolExecutor(BOARD_THREADS) as ex:  # one request per board, different companies: no reason to wait on each other
-        raw = [x for batch in ex.map(lambda b: LISTERS[b[0]]([b[1]], cur, errors), [(a, s_) for a, ss in watched.items() for s_ in ss]) for x in batch]
-    if chosen:
-        found, errs, skipped = sites.search(d, f, chosen, hours)
-        raw += found
-        errors += errs
-    raw.sort(key=lambda x: prefilter.title_tier(_clean(x.get("title")), f) is None)  # your titles first: other titles never use up their budgets
+
+    def board(b: tuple[str, str]) -> list[dict]:
+        a, slug = b
+        if a in SLOW and (a in refused or time.monotonic() > until):
+            return []  # a later poll
+        got = more_ats.LISTERS[a](slug, cur, errors, terms[:SLOW_TERMS] if a in SLOW else terms) if a in more_ats.LISTERS else LISTERS[a]([slug], cur, errors)
+        if a in SLOW and any(e.get("board") == slug and "429" in str(e.get("error")) for e in errors):
+            refused.add(a)
+        for x in got:
+            if slug in names and (a in more_ats.LISTERS or x.get("company") == slug):  # Lever and Ashby give only the slug, Workday its tenant
+                x["company"] = names[slug]
+        return got
+
+    def listed(bs: list, n: int) -> list[dict]:
+        with ThreadPoolExecutor(n) as bx:
+            return [x for batch in bx.map(board, bs) for x in batch]
+
+    with ThreadPoolExecutor(len(groups) + 2) as ex:  # boards, job sites and feeds are different hosts: no reason to wait on each other
+        searches = [ex.submit(sites.search, d, f, chosen, hours)] if chosen else []
+        searches += [ex.submit(feeds.search, d, f, fed, hours)] if fed else []
+        raw = [x for fut in [ex.submit(listed, bs, n) for bs, n in groups if bs] for x in fut.result()]
+        for fut in searches:
+            found, errs, skip = fut.result()
+            raw += found
+            errors += errs
+            skipped += skip
+    turn: dict[str, int] = {}
+
+    def nth(x: dict) -> int:
+        """Each board's or site's 1st job, then each one's 2nd...: a few big boards cannot fill MAX_CANDIDATES alone (sort reads keys in order)."""
+        k = str(x.get("site") or x.get("board"))
+        turn[k] = turn.get(k, 0) + 1
+        return turn[k]
+
+    raw.sort(key=lambda x: (prefilter.title_tier(_clean(x.get("title")), f) is None, nth(x)))  # your titles first: other titles never use up their budgets
     ctx = tiers.context(d, s)
     sig = boards.title_sig(f, str((s.get("discovery") or {}).get("related_jobs", "few")))
     seen, old_drops, near, done, aliases = boards.seen(d), boards.title_drops(d, sig), tiers.today(d, now), set(), {}
@@ -201,6 +243,19 @@ def poll(d: Path, now: datetime | None = None) -> dict:
             if why := prefilter.drop_reason(c, f, now, title_ok=True):  # its pay is known now
                 drop(why, jid, c)
                 continue
+        elif (sys_ := c.pop("detail", None)) in more_ats.DETAILS and not blurb and not text.strip():  # listed without text (Workday...)
+            if details >= MAX_DETAILS:
+                continue  # the rest on the next poll
+            details += 1
+            got = more_ats.DETAILS[sys_](c, cur)
+            text = str(got.pop("description", "") or "")  # saved as the listing copy below: `fetch` reads it instead of a script-built page
+            c.update({k: v for k, v in got.items() if v})
+            if why := prefilter.drop_reason(c, f, now, title_ok=True):  # its pay and place are known now
+                drop(why, jid, c)
+                continue
+            if (w := eligibility.where(c.get("location") or "", "", users))[0] == "no":
+                drop("where", jid, c, w[1])
+                continue
         if not text.strip() and c.get("site") == "LinkedIn":  # search results carry no text: read the public page
             if looked >= LI_PAGES or maybe and li_maybe >= LI_MAYBE:
                 if maybe:
@@ -248,5 +303,5 @@ def poll(d: Path, now: datetime | None = None) -> dict:
     for c in kept:
         if isinstance(scored.get(c["job_id"]), dict):
             c["screen"] = {k: scored[c["job_id"]].get(k) for k in ("score", "reason")}
-    return {"ok": True, "boards": sum(map(len, watched.values())), "sites": [sites.SITES[x] for x in chosen], "hours": hours, "found": len(raw), "new": new,
+    return {"ok": True, "boards": sum(map(len, watched.values())) + sum(map(len, top.values())), "sites": [sites.SITES[x] for x in chosen] + [feeds.FEEDS[x] for x in fed], "hours": hours, "found": len(raw), "new": new,
             "kept": len(kept), "dropped": dropped, "errors": errors, "skipped": skipped, "learned": learned, "candidates": kept}
