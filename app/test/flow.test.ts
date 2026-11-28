@@ -90,6 +90,18 @@ describe('task runner', () => {
     expect(calls[0][calls[0].indexOf('--tools') + 1]).not.toContain('WebFetch')
   })
 
+  test('finding companies runs on Haiku; chat keeps the chosen model', async () => {
+    const { exec, calls } = fakeClaude([{ type: 'result', is_error: false, result: 'ok' }])
+    const finished: Outcome[] = []
+    const a = createAgent({ bridge: () => ({ url: '', secret: '' }), exec, onLive: () => {}, onFinish: (_t, o) => { finished.push(o) }, onUsage: () => {} })
+    a.enqueue({ kind: 'discover', title: 'companies', payload: {} })
+    a.enqueue({ kind: 'chat', title: 'chat', payload: { text: 'hi' } })
+    for (let i = 0; i < 100 && finished.length < 2; i++) await wait()
+    const model = (kind: string) => { const c = calls.find(c => c[1].startsWith(`JobAgent task: ${kind}`))!; return c[c.indexOf('--model') + 1] }
+    expect(model('discover')).toBe('haiku')
+    expect(model('chat')).toBe(DEFAULT_SETTINGS.agent_model)
+  })
+
   test('a usage limit puts the task back in line until the limit resets', async () => {
     const resets = Math.floor(Date.now() / 1000) + 3600
     const { exec } = fakeClaude([{ type: 'rate_limit_event', rate_limit_info: { status: 'rejected', resetsAt: resets } }, { type: 'result', is_error: true, result: 'usage limit reached' }], 1)

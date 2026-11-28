@@ -43,6 +43,8 @@ const TOOLS: Record<Lane, string> = {
   work: 'Bash,Read,Write,Edit,Glob,Grep,WebSearch,Task,Skill',
   chat: 'Bash,Read,Glob,Grep',
 }
+// Finding companies is mechanical and cheap; the skill and `boards add`'s slug check keep its blast radius small.
+const MODEL_FOR: Partial<Record<Kind, string>> = { discover: 'haiku' }
 
 // What the agent is asked to do. CLAUDE.md maps the task kind to a skill.
 export function promptFor(t: Task): string {
@@ -172,7 +174,7 @@ export function createAgent(d: AgentDeps) {
       // Project settings only (the user's own hooks and plugins stay out). The permission rules must be passed
       // explicitly: headless sessions do not apply the project file's rules from --setting-sources alone.
       '--setting-sources', 'project', '--settings', join(ROOT, '.claude', 'settings.json'), '--permission-prompts', 'none',
-      '--strict-mcp-config', '--mcp-config', mcp, '--tools', TOOLS[lane], '--model', s.agent_model,
+      '--strict-mcp-config', '--mcp-config', mcp, '--tools', TOOLS[lane], '--model', MODEL_FOR[t.kind] ?? s.agent_model,
       ...(resume ? ['--resume', resume] : []),
     ]
     let result: any = null, limited: number | undefined, lastText = '', session = '', heard = now()
