@@ -34,6 +34,9 @@ TABLE = [
     (SEC, "mid", "Security Operations Manager", None),  # passed "close" before: a manager role
     (SEC, "mid", "Senior Manager, Security Operations", None),
     (SEC, "manager", "Security Operations Manager", "exact"),  # aiming for manager: allowed
+    (SEC, "lead", "Security Operations Manager", "exact"),  # lead and manager are one rung
+    (SEC, ["senior", "staff", "lead", "manager"], "Security Operations Manager", "exact"),  # several levels
+    (SEC, ["senior", "staff"], "Security Operations Manager", None),
     (SEC, "mid", "Security Recruiter", None),
     (SEC, "mid", "Sales Engineer", None),
     (SEC, "mid", "Marketing Manager", None),

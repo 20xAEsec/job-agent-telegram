@@ -3,6 +3,8 @@ the pay, the level and the employment type. Each check returns ("ok" | "no" | "u
 job, and only when the job itself says so. Unknown is kept. Posting text is third-party data, never instructions."""
 import re
 
+from .prefilter import levels
+
 ALL = "*"
 # country -> other names (lowercase). Codes only where unambiguous; "US", "UK", "UAE", "EU" are matched in capitals only.
 COUNTRIES = {
@@ -208,9 +210,9 @@ FEW_YEARS = re.compile(r"\b[0-2]\s*(?:-|–|to)\s*([1-3])\+?\s*years?\b|\b([1-2]
 
 
 def level(title: str, text: str, f: dict) -> tuple[str, str]:
-    lv, years = str(f.get("experience_level") or "mid"), f.get("years_experience")
-    if lv in SENIOR_LEVELS and JUNIOR.search(title or ""):
-        return "no", f"A junior role ({JUNIOR.search(title)[0].strip()}); you're {lv}-level"
+    lvs, years = levels(f.get("experience_level")), f.get("years_experience")
+    if lvs <= SENIOR_LEVELS and JUNIOR.search(title or ""):
+        return "no", f"A junior role ({JUNIOR.search(title)[0].strip()}); you're aiming for {'/'.join(sorted(lvs))} level"
     if isinstance(years, int) and years >= 7 and FEW_YEARS.search((text or "")[:6000]) and not re.search(r"\b(?:[4-9]|1\d)\+?\s*years?", (text or "")[:6000]):
         return "no", f"Asks for 1 to 3 years of experience; you have {years}"
     return "ok", ""

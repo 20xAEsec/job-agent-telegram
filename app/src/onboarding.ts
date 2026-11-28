@@ -125,8 +125,8 @@ export function obPage(o: Ob, s: Settings, fields: Record<string, string> = {}):
       ])
     }
     case 'level':
-      return t([heading('📶', 'What level are you aiming for?'), '', `<b>${label(s.filters.experience_level)}</b> is selected. Tap it to keep it, or choose another.`, note('Jobs far above or below this get a lower match score.')], [
-        ...pairs(['intern', 'entry', 'mid', 'senior', 'staff', 'lead', 'manager', 'director'].map(v => ({ text: `${s.filters.experience_level === v ? '◉ ' : ''}${label(v)}`, data: `o:lv:${v}` }))),
+      return t([heading('📶', 'What level are you aiming for?'), '', `<b>${s.filters.experience_level.map(label).join(', ')}</b> is selected. Tap it to keep it, or choose another.`, note('Jobs far above or below this get a lower match score.')], [
+        ...pairs(['intern', 'entry', 'mid', 'senior', 'staff', 'lead', 'manager', 'director'].map(v => ({ text: `${s.filters.experience_level.includes(v) ? '◉ ' : ''}${label(v)}`, data: `o:lv:${v}` }))),
         [back('titles')],
       ])
     case 'locations': {

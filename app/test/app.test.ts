@@ -270,7 +270,7 @@ describe('setup wizard', () => {
     await wait(50)
     const s = loadSettings()
     expect(s.onboarded).toBe(true)
-    expect(s.filters).toMatchObject({ experience_level: 'senior', locations: ['Austin, TX'], remote: 'remote_only', min_salary: 100000 })
+    expect(s.filters).toMatchObject({ experience_level: ['senior'], locations: ['Austin, TX'], remote: 'remote_only', min_salary: 100000 })
     const saved = pyCalls.filter(a => a[1] === 'answer' && a[2] === 'set')
     const key = (k: string) => saved.find(a => a[3] === k)
     expect(key('work_auth_united_states')).toContain('--sensitive')

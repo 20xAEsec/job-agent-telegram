@@ -21,7 +21,7 @@ SEEN_TITLES, MAX_SEEN_TITLES = "seen_titles.json", 300
 @dataclass
 class Ctx:
     wanted: list[str]  # filters.titles + filters.related_titles
-    level: str
+    level: str | list[str]
     field: set[str]  # field words of the wanted titles
     roles: set[str]  # their role kinds
     skills: list[str]

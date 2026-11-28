@@ -66,6 +66,8 @@ def test_level_and_kind():
     assert e.level("Data Analyst", "Requires 1-3 years of experience", sen)[0] == "no"
     assert e.level("Data Analyst", "1-3 years with SQL; 8+ years overall", sen)[0] == "ok"
     assert e.level("Junior Data Analyst", "", {"experience_level": "mid"})[0] == "ok"
+    assert e.level("Junior Data Analyst", "", {"experience_level": ["senior", "manager"]})[0] == "no"
+    assert e.level("Junior Data Analyst", "", {"experience_level": ["mid", "senior"]})[0] == "ok"
     assert e.kind("FullTime", "Contract Manager", ["full_time"])[0] == "ok"
     assert e.kind(None, "Data Analyst (Contract)", ["full_time"]) == ("no", "A contract role; you asked for full time")
     assert e.kind("Part-time", "Analyst", ["full_time", "contract"])[0] == "no"

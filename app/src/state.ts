@@ -58,7 +58,7 @@ export const DEFAULT_SETTINGS = {
   dry_run: true, // "Practice mode" in the UI
   agent_model: 'sonnet',
   filters: {
-    titles: [] as string[], title_match: 'close', experience_level: 'mid', years_experience: null as number | null,
+    titles: [] as string[], title_match: 'close', experience_level: ['mid'] as string[], years_experience: null as number | null,
     related_titles: [] as string[], // other names for the same work: searched too, held to a higher match score
     country: '', // where job sites search; '' = guess from the locations, then the currency
     locations: [] as string[], remote: 'remote_or_hybrid',
@@ -96,6 +96,7 @@ export function loadSettings(): Settings {
   const raw = readJson<Record<string, unknown>>(SETTINGS_FILE, {})
   const f = raw.filters as Record<string, unknown> | undefined
   if (isObj(f) && typeof f.posted_within_days === 'number') { f.posted_within_hours ??= f.posted_within_days * 24; delete f.posted_within_days } // older files counted days
+  if (isObj(f) && typeof f.experience_level === 'string') f.experience_level = [f.experience_level] // older files held one level
   return deepMerge(DEFAULT_SETTINGS, { ...raw, version: DEFAULT_SETTINGS.version }) // a 2.x file only lacks keys the defaults fill
 }
 
@@ -112,7 +113,7 @@ export const SettingsSchema = z.object({
     titles: z.array(str()).max(30),
     related_titles: z.array(str()).max(15),
     title_match: z.enum(['exact', 'close', 'broad']),
-    experience_level: z.enum(['intern', 'entry', 'mid', 'senior', 'staff', 'lead', 'manager', 'director']),
+    experience_level: z.array(z.enum(['intern', 'entry', 'mid', 'senior', 'staff', 'lead', 'manager', 'director'])).min(1).max(8),
     years_experience: z.number().int().min(0).max(60).nullable(),
     locations: z.array(str()).max(30),
     country: z.string().trim().max(60),

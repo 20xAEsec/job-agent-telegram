@@ -668,7 +668,7 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
     ob.country = ob.country || sum.country || ''
     OB.saveOb(ob)
     const s = loadSettings()
-    if (!s.onboarded) trySettingsUpdate({ filters: { experience_level: sum.level, ...(sum.years != null ? { years_experience: sum.years } : {}), ...(!s.filters.country && ob.country ? { country: short(ob.country, 60) } : {}) } })
+    if (!s.onboarded) trySettingsUpdate({ filters: { experience_level: [sum.level], ...(sum.years != null ? { years_experience: sum.years } : {}), ...(!s.filters.country && ob.country ? { country: short(ob.country, 60) } : {}) } })
     return null
   }
 
@@ -850,7 +850,7 @@ export function createApp(o: { token: string; run?: Run; exec?: Parameters<typeo
         }
         if (arg === 'locations') { const r = trySettingsUpdate({ filters: { locations: ob.locs } }); return r.ok ? nextAfterSave('remote') : r.error }
         return undefined
-      case 'lv': { const r = trySettingsUpdate({ filters: { experience_level: arg } }); return r.ok ? nextAfterSave('locations') : r.error }
+      case 'lv': { const r = trySettingsUpdate({ filters: { experience_level: [arg] } }); return r.ok ? nextAfterSave('locations') : r.error } // setup picks one; Settings adds more
       case 'rm': { const r = trySettingsUpdate({ filters: { remote: arg } }); return r.ok ? nextAfterSave('salary') : r.error }
       case 'cur': {
         const all = Object.keys(CURRENCIES), i = all.indexOf(s.filters.currency)

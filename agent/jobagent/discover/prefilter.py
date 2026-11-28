@@ -84,11 +84,16 @@ def parse(title: str) -> tuple[set[str], set[str], set[str]]:
     return {ROLE[w] for w in words if w in ROLE}, {_stem(w) for w in words if w not in ROLE}, {w for w in words if w in NEG}
 
 
-def wants_manager(wanted: list[str], level: str) -> bool:
-    return level in ("manager", "director") or any("mgr" in parse(w)[0] for w in wanted)
+def levels(v: str | list[str] | None) -> set[str]:
+    """settings.filters.experience_level: a list of levels (older settings files hold one string)."""
+    return {v} if isinstance(v, str) else set(v or ["mid"])
 
 
-def role_ok(title: str, wanted: list[str], level: str = "mid") -> bool:
+def wants_manager(wanted: list[str], level: str | list[str]) -> bool:
+    return bool(levels(level) & {"lead", "manager", "director"}) or any("mgr" in parse(w)[0] for w in wanted)  # lead and manager are one rung
+
+
+def role_ok(title: str, wanted: list[str], level: str | list[str] = "mid") -> bool:
     """False for a manager title when you aim below manager level, or a title from another line of work ("Security Sales Engineer")."""
     roles, _, neg = parse(title)
     mine = {w for t in wanted for w in _words(t)}

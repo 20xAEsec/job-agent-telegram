@@ -22,7 +22,7 @@ export const CATS: Record<string, { emoji: string; title: string; blurb: string;
     items: [
       S('ti', '🎯', 'Job titles', 'filters.titles', 'list', 'The titles I search for. I also match close variations (see "Title matching").', { example: 'Data Analyst, BI Analyst' }),
       S('rt', '🧩', 'Related titles', 'filters.related_titles', 'list', 'Other names for the same work. I search for these too, after your job titles, and only prepare them when the match score is 10 points above your minimum.', { example: 'SOC Analyst, Security Architect' }),
-      S('lv', '📶', 'Seniority', 'filters.experience_level', 'enum', 'The level you are aiming for. Jobs far above or below it get a lower match score.', { opts: LEVELS }),
+      S('lv', '📶', 'Seniority', 'filters.experience_level', 'multi', 'The levels you are aiming for. Jobs far above or below all of them get a lower match score.', { opts: LEVELS }),
       S('yr', '⏳', 'Years of experience', 'filters.years_experience', 'int', 'Used to judge whether you meet a job\'s experience requirement.', { presets: [1, 2, 3, 5, 8, 10, 15], nullable: 'Not set', unit: 'years' }),
       S('lo', '📍', 'Locations', 'filters.locations', 'list', 'Cities, regions or countries where you would work on-site or hybrid. Remote jobs are judged separately.', { example: 'Austin, TX, Remote US' }),
       S('rm', '🏡', 'Remote or on-site', 'filters.remote', 'enum', 'Which kinds of workplace I look for.', {

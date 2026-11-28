@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 
 from .. import store
+from . import prefilter
 from ..paths import atomic_write_json
 
 ATS = ("greenhouse", "lever", "ashby")
@@ -122,7 +123,7 @@ def mark_seen(d: Path, ids: list[str], aliases: dict | None = None) -> None:
 
 def title_sig(f: dict, related_jobs: str) -> str:
     """Changes when anything that decides a title drop changes, so jobs dropped under the old titles get another look."""
-    key = [sorted(f.get("titles") or []), sorted(f.get("related_titles") or []), f.get("title_match", "close"), f.get("experience_level", "mid"), related_jobs]
+    key = [sorted(f.get("titles") or []), sorted(f.get("related_titles") or []), f.get("title_match", "close"), sorted(prefilter.levels(f.get("experience_level"))), related_jobs]
     return hashlib.sha1(json.dumps(key).encode()).hexdigest()[:12]
 
 
