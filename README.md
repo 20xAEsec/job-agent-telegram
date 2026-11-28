@@ -24,6 +24,18 @@ You don't need to install anything else first. The setup offers to install the o
 
 ## Set it up
 
+### Using Claude Code? Say "set this up"
+
+If you already have [Claude Code](https://claude.com/claude-code), it can walk you through the whole setup:
+
+1. [Download JobAgent](#1-download-jobagent).
+2. Open a terminal in the JobAgent folder (see [step 2](#2-run-the-setup)) and run `claude`.
+3. Say **"set this up"**.
+
+Claude uses the built-in `setup-jobagent` skill. It checks what's already done, installs what's missing, opens the setup window and tells you what to do one step at a time. You still make the Telegram bot, tap **Start** and answer its questions. If you stop partway, say it again to pick up where you left off.
+
+Otherwise, follow the steps below.
+
 ### 1. Download JobAgent
 
 Pick one:
@@ -58,8 +70,6 @@ Scan the QR code with your phone's camera (or open the link), then tap **Start**
 ### 5. Answer a few questions in Telegram
 
 Send your resume, then choose job titles, location and pay, and answer some eligibility questions. It takes about 3 minutes, and you can change any answer later.
-
-> **Already use Claude Code?** Open a terminal in the folder, run `claude`, and say **"set this up"**. Claude does the installing and tells you when your phone is connected.
 
 ## Start and stop
 

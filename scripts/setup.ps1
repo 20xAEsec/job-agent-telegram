@@ -119,7 +119,7 @@ Write-Host '  Setup is done. In Telegram I ask for your resume first: have it re
 Write-Host '  Want the dashboard on your phone too? While JobAgent runs, run:  scripts\phone.ps1'
 Write-Host ''
 # JobAgent only works while it runs; most "it stopped answering" is a closed window.
-if (Ask-YesNo 'Once your phone is connected: keep JobAgent running in the background (no window, starts when you log in)?') {
+if (Ask-YesNo 'Keep JobAgent running in the background (no window, starts when you log in)? The bot replies once you answer.') {
     & (Join-Path $PSScriptRoot 'background.ps1')
     Read-Host '  Press Enter to close this window' | Out-Null
     exit 0

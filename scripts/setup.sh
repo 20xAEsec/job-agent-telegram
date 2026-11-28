@@ -92,5 +92,5 @@ elif echo "$pair" | grep -q already_paired; then ok 'Already connected to your T
 else fail "Could not make a pairing link: $pair"; fi
 
 printf '\n  \033[32mSetup is done. In Telegram I ask for your resume first: have it ready as a PDF or Word file.\033[0m\n'
-printf '  JobAgent starts now; keep its window open while you use it.\n  Next time, start it with:  scripts/start.sh\n\n'
-exec "$(dirname "$0")/start.sh"
+printf '  JobAgent starts now; keep its window open while you use it.\n  Next time, start it with:  bash scripts/start.sh\n\n'
+exec bash scripts/start.sh
