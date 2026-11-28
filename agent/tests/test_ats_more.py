@@ -138,4 +138,68 @@ def test_scan_rows_keep_the_fields_json_shape(tmp_path):
         pg = ctx.new_page()
         pg.set_content('<form name="form"><h3>Age</h3><input name="age" maxlength="3"></form>')
         assert as_fields(Breezy().scan(pg)) == [{"fid": "age", "label": "Age", "type": "text", "required": False, "options": [],
-                                                  "selector": '[name="age"]', "section": "main", "max_chars": 3}]
+                                                  "selector": '[name="age"]:not([type="hidden"])', "section": "main", "max_chars": 3}]
+
+
+# ---- what live pages showed (4.1 live dry fills) --------------------------------------------------------
+
+def test_live_page_patterns(tmp_path):
+    (tmp_path / "resume.pdf").write_bytes(b"%PDF-1.4 x")
+    ad = Breezy()
+    with browser.session(tmp_path, ["breezy.hr"]) as ctx:
+        pg = ctx.new_page()
+        # Lever (Spotify): a hidden "0" of the same name before the real checkbox
+        pg.set_content('<form name="form"><label><span>I agree</span><input type="hidden" name="c" value="0"><input type="checkbox" name="c" value="1"></label></form>')
+        f = ad.scan(pg)[0]
+        ad._one(pg, pg.locator(f["selector"]), f, "check", True, tmp_path)
+        assert f["label"] == "I agree" and pg.is_checked("input[type=checkbox]")
+        # Recruitee: a drawn box on top of the checkbox takes the click; its label still works
+        pg.set_content('<form name="form"><fieldset><legend>Where?</legend><div style="position:relative"><input type="checkbox" name="w" id="w1" value="1">'
+                       '<span style="position:absolute;left:0;top:0;width:80px;height:30px;background:#fff"></span><label for="w1">Amsterdam</label></div>'
+                       '<div><input type="checkbox" name="w" id="w2" value="2"><label for="w2">Cologne</label></div></fieldset></form>')
+        f = ad.scan(pg)[0]
+        ad._one(pg, pg.locator(f["selector"]), f, "select", ["Amsterdam"], tmp_path)
+        assert pg.is_checked("#w1") and not pg.is_checked("#w2")
+        # Rippling: the site reads the file, clears the box and shows the file's name
+        pg.set_content('<form name="form"><h3>Resume</h3><input type="file" name="r"><span id="shown"></span></form>'
+                       '<script>document.querySelector("[name=r]").onchange = e => { shown.textContent = e.target.files[0].name; e.target.value = "" }</script>')
+        f = ad.scan(pg)[0]
+        ad._one(pg, pg.locator(f["selector"]), f, "upload", "resume.pdf", tmp_path)
+        assert pg.inner_text("#shown") == "resume.pdf"
+        # a phone box that drops the country code its own picker holds still kept the number
+        pg.set_content('<form name="form"><h3>Phone</h3><input name="p" oninput="this.value = this.value.replace(/^[+]1 */, \'\')"></form>')
+        f = ad.scan(pg)[0]
+        rep = {"filled": ["p"], "errors": []}
+        pg.fill(f["selector"], "+1 512 555 0100")
+        from jobagent.ats.base import read_back
+        assert read_back(pg, [{"fid": "p", "action": "fill", "value": "+1 512 555 0100"}], {"p": f}, rep)["errors"] == []
+        rep = {"filled": ["p"], "errors": []}
+        assert read_back(pg, [{"fid": "p", "action": "fill", "value": "99 512 555 0100"}], {"p": f}, rep)["errors"]  # no "+": not a phone number
+
+
+def test_questions_that_render_after_the_first_box_are_read(tmp_path):
+    from jobagent.ats.ashby import Ashby
+    url = "https://jobs.ashbyhq.com/acme/7d1e2f3a-4b5c-4d6e-9f70-8a9b0c1d2e3f"
+    page = ('<div class="ashby-application-form-container"><input type="file"><div id="later"></div></div><script>setTimeout(() => later.innerHTML ='
+            ' \'<div class="ashby-application-form-field-entry"><label for="n">Name</label><input id="n" name="_systemfield_name" required></div>\', 1500)</script>')
+    m = detect.from_url(url)
+    fields = Ashby().inspect(m, tmp_path, lambda ctx: canary.serve(ctx, Ashby.apply_url(m), page, []))
+    assert [f["fid"] for f in fields] == ["_systemfield_name"]  # Ashby's autofill pane comes first; the questions a moment later
+
+
+def test_search_box_finds_the_one_option_worded_differently(tmp_path):
+    from jobagent.ats.base import Unexpected, pick
+    page = ('<div class="control"><input role="combobox" id="s" aria-controls="lb"><div id="lb" role="listbox"></div></div>'
+            '<div role="listbox"><div role="option">Austin Peay State University</div></div>'  # another list on the page: never looked at
+            '<script>s.oninput = () => { lb.innerHTML = ""; ["University of Texas - Arlington", "University of Texas - Austin", "Texas A&M University"]'
+            '.filter(o => s.value && o.toLowerCase().includes(s.value.toLowerCase().split(" ")[0])).forEach(o => { const d = document.createElement("div");'
+            ' d.setAttribute("role", "option"); d.textContent = o; d.onclick = () => { s.value = ""; s.parentNode.dataset.v = o;'
+            ' s.insertAdjacentHTML("beforebegin", `<span>${o}</span>`); lb.innerHTML = "" }; lb.appendChild(d) }) }</script>')
+    with browser.session(tmp_path, ["breezy.hr"]) as ctx:
+        pg = ctx.new_page()
+        pg.set_content(page)
+        pick(pg, pg.locator("#s"), "University of Texas at Austin", exact=False)
+        assert pg.get_attribute(".control", "data-v") == "University of Texas - Austin"
+        pg.set_content(page)
+        with pytest.raises(Unexpected):
+            pick(pg, pg.locator("#s"), "Texas University", exact=False)  # three options hold both words: not a guess

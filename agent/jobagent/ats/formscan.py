@@ -113,6 +113,7 @@ def scan_form(page, roots: list[str], box: str, labels: list[str], skip: str, te
         k = _q(r["key"])
         sel = (f'{box} >> nth={r["index"]}' if r["by"] == "box" else f'[data-field-path="{k}"] input[role="combobox"]' if r["by"] == "path"
                else f'[{testid}="{k}"]:is(input, select, textarea, [role="combobox"]), [{testid}="{k}"] :is({CONTROL})' if r["by"] == "testid"
+               else f'[name="{k}"]:not([type="hidden"])' if r["by"] == "name"  # a hidden "0" of the same name often comes before a checkbox
                else f'[{r["by"]}="{k}"]')
         label = re.sub(r"\s*[*✱]\s*$", "", r["label"]).strip()[:300]
         sec = "demographic" if r["key"].startswith("eeo") or EEO.search(f'{r["section"]} {label}') else "compliance" if r["key"].startswith("consent") else "main"
@@ -209,8 +210,12 @@ class DomAdapter(Adapter):
                 raise Closed("posting gone")
             if b and not (b == "captcha" and self._root(page)):  # a human-check box under the form: read it, the user finishes it
                 raise Unexpected(b)
-            fields = self.scan(page)
+            end = time.time() + self.WAIT / 1000
+            while not (fields := self.scan(page)) and time.time() < end:  # the first box can come before the questions (Ashby's autofill pane)
+                page.wait_for_timeout(500)
             if fields:
+                page.wait_for_timeout(1000)  # a single-page app may still be adding sections
+                fields = self.scan(page) or fields
                 harvest(page, fields)
         if not fields:
             raise Unexpected("form not found on the page")
@@ -232,9 +237,14 @@ class DomAdapter(Adapter):
     def _one(self, page, loc, f, act, value, jdir):
         el = loc.first
         if act == "upload":
-            el.set_input_files(str(safety.upload_path(jdir, value)))
-            if not el.evaluate("e => e.files && e.files.length"):
-                raise Unexpected("file not attached")
+            path = safety.upload_path(jdir, value)
+            el.set_input_files(str(path))
+            if el.evaluate("e => e.files && e.files.length"):
+                return
+            try:  # some sites (Rippling) read the file, clear the box and show the file's name instead
+                page.get_by_text(path.name).first.wait_for(timeout=20000)
+            except Exception:  # noqa: BLE001
+                raise Unexpected("file not attached") from None
             return
         if act == "fill":
             el.fill(str(value))
@@ -274,8 +284,11 @@ class DomAdapter(Adapter):
         (role="radio"/"checkbox"), instead. Neither is ever a submit."""
         state = "e => e.checked || e.closest('[role=radio], [role=checkbox]')?.getAttribute('aria-checked') === 'true'"
         if loc.is_visible():
-            loc.set_checked(on, timeout=5000)
-        elif loc.evaluate(state) != on:
+            try:
+                loc.set_checked(on, timeout=5000)
+            except Exception:  # noqa: BLE001 - its own drawn box sits on top and takes the click: the label below does it
+                pass
+        if loc.evaluate(state) != on:
             loc.evaluate("e => { const l = e.closest('label') || (e.id && document.querySelector(`label[for=\"${CSS.escape(e.id)}\"]`))"
                          " || e.closest('[role=radio], [role=checkbox]'); if (l) l.click() }")
         if loc.evaluate(state) != on:

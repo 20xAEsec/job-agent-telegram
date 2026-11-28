@@ -24,8 +24,11 @@ def read_back(page, rows: list[dict], fields: dict, rep: dict) -> dict:
         if p.get("action") == "fill" and p["fid"] in rep["filled"]:
             got = page.locator(fields[p["fid"]]["selector"]).first.input_value()
             want = norm(p.get("value"))
-            # still counts as kept: a phone box reformats; a place box completes what was typed ("Austin" -> "Austin, TX, USA")
-            if norm(got) != want and not (digits(want) and digits(got) == digits(want)) and not (want and norm(got).casefold().startswith(want.casefold())):
+            # still counts as kept: a phone box reformats, or drops the country code its own picker holds ("+1 512..." -> "(512) ...");
+            # a place box completes what was typed ("Austin" -> "Austin, TX, USA")
+            dw, dg = digits(want), digits(got)
+            phone = want.startswith("+") and len(dg) >= 7 and dw.endswith(dg) and len(dw) - len(dg) <= 3
+            if norm(got) != want and not (dw and dg == dw) and not phone and not (want and norm(got).casefold().startswith(want.casefold())):
                 rep["filled"].remove(p["fid"])
                 rep["errors"].append({"fid": p["fid"], "error": "value_not_kept"})
     return rep
@@ -81,6 +84,25 @@ def _option_name(label: str, exact: bool):
     return label
 
 
+STOP = {"the", "of", "at", "in", "and", "for", "a", "an"}
+
+
+def _words(s: str) -> set[str]:
+    return {w for w in re.findall(r"[a-z0-9]+", s.casefold()) if w not in STOP}
+
+
+def _by_words(page, loc, label: str):
+    """The single option, in this box's own list, holding every word of `label` ("University of Texas at Austin" ->
+    "University of Texas - Austin"). Unexpected when none or several do: never a guess."""
+    lb = loc.get_attribute("aria-controls") or loc.get_attribute("aria-owns")
+    opts = (page.locator(f'[id="{lb}"]') if lb else page).get_by_role("option")
+    want = _words(label)
+    hits = [i for i, t in enumerate(opts.all_inner_texts()) if want and want <= _words(t)]
+    if len(hits) != 1:
+        raise Unexpected("no single option matches")
+    return opts.nth(hits[0])
+
+
 def pick(page, loc, label: str, exact: bool = True) -> None:
     """A searchable dropdown (react-select and kin): focus, type to filter, click the option, then check it took.
     No Enter key anywhere. Some boxes show less than the option said (the country box shows only "+1")."""
@@ -90,10 +112,19 @@ def pick(page, loc, label: str, exact: bool = True) -> None:
     if submits:  # a button with no type inside a form sends it
         raise Unexpected("dropdown button would submit the form")
     loc.click()  # a button or box opens a fixed list: click, no typing
-    if typing:
-        loc.fill(label)
+    if typing and exact:
+        loc.fill(label)  # a fixed list narrows as soon as the text is in
+    elif typing:  # a search box asks its server as keys are pressed, and finds by the first words: "Austin" finds "Austin, Texas, ...",
+        loc.fill("")  # "University of Texas" finds "University of Texas - Austin"
+        loc.press_sequentially(" ".join((label.split(",")[0].strip() or label).split()[:3]), delay=40)
     opt = page.get_by_role("option", name=_option_name(label, exact), exact=exact).first
-    picked = opt.inner_text(timeout=5000).strip()
+    try:
+        picked = opt.inner_text(timeout=5000).strip()
+    except Exception:  # noqa: BLE001 - a search box may word it differently: the one option with all the words
+        if exact:
+            raise
+        opt = _by_words(page, loc, label)
+        picked = opt.inner_text().strip()
     opt.click(timeout=5000)
     box = loc.locator("xpath=ancestor::*[contains(translate(@class, 'CONTROL', 'control'), 'control')][1]")
     shown = loc.inner_text().strip() if not typing else box.inner_text().strip() if box.count() else picked  # no control wrapper: nothing more to check
